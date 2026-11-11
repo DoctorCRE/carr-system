@@ -38,11 +38,12 @@ const recordSchema = {
   properties: {
     idempotency_key: uuid,
     deal: uuid,
+    client: uuid,
     need: uuid,
     base_version: { type: "integer", minimum: 1 },
     fields: fieldsSchema,
   },
-  required: ["idempotency_key", "deal", "fields"],
+  required: ["idempotency_key", "deal", "client", "fields"],
 };
 const approveSchema = {
   type: "object",
@@ -50,10 +51,11 @@ const approveSchema = {
   properties: {
     idempotency_key: uuid,
     deal: uuid,
+    client: uuid,
     need: uuid,
     base_version: { type: "integer", minimum: 1 },
   },
-  required: ["idempotency_key", "deal", "need", "base_version"],
+  required: ["idempotency_key", "deal", "client", "need", "base_version"],
 };
 function readSchema(subject: "deal" | "vendor") {
   return {
@@ -78,8 +80,15 @@ type Fields = {
   restriction: "allowed" | "restricted";
   withdrawn: boolean;
 };
-type RecordArgs = { idempotency_key: string; deal: string; need?: string; base_version?: number; fields: Fields };
-type ApproveArgs = { idempotency_key: string; deal: string; need: string; base_version: number };
+type RecordArgs = {
+  idempotency_key: string;
+  deal: string;
+  client: string;
+  need?: string;
+  base_version?: number;
+  fields: Fields;
+};
+type ApproveArgs = { idempotency_key: string; deal: string; client: string; need: string; base_version: number };
 type ReadArgs = { deal?: string; vendor?: string; limit?: number; offset?: number };
 function parse<T>(schema: object, args: unknown): T {
   if (!new Validator(structuredClone(schema)).validate(args).valid)
@@ -113,7 +122,7 @@ async function readNeed(c: Db, id: string) {
   if (!row) throw new ToolError({ error: "not_found" });
   return row.need;
 }
-async function lockContext(c: Db, deal: string, vendor?: string) {
+async function lockContext(c: Db, { deal, client, vendor }: { deal: string; client: string; vendor?: string }) {
   const d = (
     await c.query(
       `select d.client_id from public.deal d
@@ -124,6 +133,7 @@ async function lockContext(c: Db, deal: string, vendor?: string) {
     )
   ).rows[0];
   if (!d) throw new ToolError({ error: "not_found" });
+  if (d.client_id !== client.toLowerCase()) throw new ToolError({ error: "need_client_changed" });
   if (
     vendor &&
     !(
@@ -219,7 +229,7 @@ export function clientNeedTools({
         )
           throw new ToolError({ error: "invalid_need_input" });
         return withEnvelope(c, actor, "record-deal-client-need-v1", a, async () => {
-          await lockContext(c, a.deal, a.fields.vendor);
+          await lockContext(c, { deal: a.deal, client: a.client, vendor: a.fields.vendor });
           const f = a.fields,
             params = [
               a.deal,
@@ -281,7 +291,7 @@ export function clientNeedTools({
         authorize(actor, partnerAuthoritySlugForActor, true);
         const a = parse<ApproveArgs>(approveSchema, args);
         return withEnvelope(c, actor, "approve-deal-client-need-v1", a, async () => {
-          const deal = await lockContext(c, a.deal);
+          const deal = await lockContext(c, { deal: a.deal, client: a.client });
           const row = (
             await c.query(
               `select version,not withdrawn and restriction='allowed' and observed_at<=statement_timestamp()

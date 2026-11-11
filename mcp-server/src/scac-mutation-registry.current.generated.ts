@@ -380,7 +380,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "approve-deal-client-need-v1": {
     ingress_key: "mcp-tool:approve-deal-client-need-v1",
     source_locator: "mcp-server/src/client-needs.ts",
-    schema_digest: "3b7d04c4fd933c178b09654baa51a22438639fd579c9fa0c717b8d0cd651b2b8",
+    schema_digest: "27a024dc4285f20ee3bfe59c561496847e670902f389097409e8e849c2c296dd",
     write: true,
     human_only: false,
     human_caller_only: false,
@@ -2990,7 +2990,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "record-deal-client-need-v1": {
     ingress_key: "mcp-tool:record-deal-client-need-v1",
     source_locator: "mcp-server/src/client-needs.ts",
-    schema_digest: "ea382296aec4e713f2bbb8df6ae3a8c83e589e557f78919b79529417969c83f1",
+    schema_digest: "4aea449c30ba765a9ac99a147d2746a2c1072b190fb1ec43da589d0c29ae8c74",
     write: true,
     human_only: false,
     human_caller_only: false,

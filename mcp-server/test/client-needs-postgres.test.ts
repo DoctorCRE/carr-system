@@ -67,7 +67,8 @@ test("deal need lifecycle, exact vendor matching, audit and recorded contract", 
     const call = async (name: string, args: Record<string, unknown>, who: Record<string, unknown> = actor) => {
       await db.query("savepoint call");
       try {
-        const result = await tool(name).handler(db, who, args);
+        const input = name === names[0] || name === names[1] ? { client: clientId, ...args } : args;
+        const result = await tool(name).handler(db, who, input);
         await db.query("release savepoint call");
         return result;
       } catch (e) {
@@ -245,7 +246,15 @@ test("deal need lifecycle, exact vendor matching, audit and recorded contract", 
     assert.deepEqual((await read()).rows, []);
     await assert.rejects(
       call(names[1], { deal, need: need.id, base_version: version, idempotency_key: randomUUID() }),
-      /need_client_changed|invalid_need_input/,
+      /need_client_changed/,
+    );
+    await assert.rejects(
+      call(names[0], { deal, need: need.id, base_version: version, fields, idempotency_key: randomUUID() }),
+      /need_client_changed/,
+    );
+    await assert.rejects(
+      tool(names[1]).handler(db, actor, { deal, need: need.id, base_version: version, idempotency_key: randomUUID() }),
+      /invalid_need_input/,
     );
     await db.query("update deal set client_id=$2 where id=$1", [deal, clientId]);
     await db.query("update deal_client_need set description='Edited outside verb' where id=$1", [need.id]);
