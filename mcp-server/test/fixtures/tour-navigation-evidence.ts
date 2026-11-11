@@ -1,0 +1,121 @@
+import { TOUR_NAVIGATION_CONTRACT, type TourNavigationEvidence } from "../../src/tour-navigation-contract.ts";
+
+// Recorded from read-tour-internal-detail via tour-delivery-data-plane-postgres.sql.
+export const navigationFixture = {
+  reason: null,
+  status: "ready",
+  evidence: {
+    as_of: "2026-11-10T23:59:05.000511-06:00",
+    stops: [
+      {
+        source: {
+          observed_at: "2026-11-08T23:59:05.000511-06:00",
+          verified_at: "2026-11-09T17:59:05-06:00",
+          retrieved_at: "2026-10-10T23:59:05.000511-05:00",
+          review_state: "reviewed",
+          content_digest: "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          receipt_digest: "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+          stable_locator: "proof:search",
+          coordinate_role: "entrance",
+          precision_class: "entrance",
+          retrieval_status: "read",
+          rights_receipt_id: "a5000000-0000-4000-8000-000000000001",
+          verifier_actor_id: "b6c38b27-d006-4fad-9c38-49edf3130a07",
+          evidence_reference: "proof:native-navigation:one",
+          source_evidence_id: "a6000000-0000-4000-8000-000000000001",
+          coordinate_candidate_id: "aa000000-0000-4000-8000-000000000001",
+          native_navigation_proof: {
+            status: "passed",
+          },
+          entrance_verification_receipt_id: "810f3de1-6940-4163-8bc1-144d508f6707",
+        },
+        position: {
+          latitude: 30.421,
+          longitude: -87.216,
+        },
+        property_id: "a1000000-0000-4000-8000-000000000001",
+        route_label: "A",
+        route_stop_id: "a4000000-0000-4000-8000-000000000001",
+        route_sequence: 1,
+      },
+      {
+        source: {
+          observed_at: "2026-11-08T23:59:05.000511-06:00",
+          verified_at: "2026-11-09T17:59:05-06:00",
+          retrieved_at: "2026-10-10T23:59:05.000511-05:00",
+          review_state: "reviewed",
+          content_digest: "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          receipt_digest: "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+          stable_locator: "proof:search",
+          coordinate_role: "parking_access",
+          precision_class: "entrance",
+          retrieval_status: "read",
+          rights_receipt_id: "a5000000-0000-4000-8000-000000000001",
+          verifier_actor_id: "b6c38b27-d006-4fad-9c38-49edf3130a07",
+          evidence_reference: "proof:native-navigation:two",
+          source_evidence_id: "a6000000-0000-4000-8000-000000000001",
+          coordinate_candidate_id: "aa000000-0000-4000-8000-000000000002",
+          native_navigation_proof: {
+            status: "passed",
+          },
+          entrance_verification_receipt_id: "e0ed9bac-d807-4dbb-9a32-9f96b3f87988",
+        },
+        position: {
+          latitude: 30.422,
+          longitude: -87.217,
+        },
+        property_id: "a1000000-0000-4000-8000-000000000002",
+        route_label: "B",
+        route_stop_id: "a4000000-0000-4000-8000-000000000002",
+        route_sequence: 2,
+      },
+    ],
+    promotion: {
+      receipt_id: "42d85c47-fdb5-4112-92a6-a4234ce09adb",
+      reviewed_at: "2026-11-10T17:59:05-06:00",
+      brief_version: "tour-map-brief.v1",
+      route_version: 1,
+      receipt_digest: "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+      required_checks: {
+        exact_native_navigation_handoff: true,
+        phone_and_ipad_interaction_test: true,
+        ordered_offline_itinerary_verified: true,
+        map_list_route_offline_order_parity: true,
+        canonical_address_and_coordinate_review: true,
+        deterministic_rebuild_from_canonical_record: true,
+        locked_appointments_dwell_and_buffers_preserved: true,
+        optional_context_layers_progressively_disclosed: true,
+        no_unresolved_route_critical_unknown_or_conflict: true,
+        provider_terms_attribution_expiry_and_cost_gate_passed: true,
+        claims_and_layers_have_source_as_of_rights_and_review_state: true,
+      },
+      reviewer_actor_id: "b6c38b27-d006-4fad-9c38-49edf3130a07",
+      mobile_test_evidence: {
+        status: "passed",
+      },
+      offline_test_evidence: {
+        status: "passed",
+      },
+      selected_prototype_id: "carr-map-tour-v1",
+      canonical_dataset_version: "proof-v1",
+      component_registry_version: "maplibre-6.4.1",
+      provider_rights_receipt_ids: ["a5000000-0000-4000-8000-000000000001"],
+      native_navigation_test_evidence: {
+        status: "passed",
+      },
+    },
+    projection_id: "ac000000-0000-4000-8000-000000000001",
+    route_version: 1,
+    route_version_id: "a3000000-0000-4000-8000-000000000001",
+    projection_digest: "sha256:7f64570e32f19ceb80ee02955aef3c8bd23dd8025eab402d784ea7e4a1c4bfef",
+    projection_version: 1,
+  },
+  contract_version: "tour-navigation-evidence.v1",
+} satisfies TourNavigationEvidence;
+
+export const unavailableFixture = {
+  contract_version: TOUR_NAVIGATION_CONTRACT,
+  status: "unavailable",
+  reason: "promotion_missing",
+  evidence: null,
+} satisfies TourNavigationEvidence;

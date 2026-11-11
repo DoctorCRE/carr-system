@@ -1,0 +1,789 @@
+{
+  "one": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "ok": {
+        "const": true
+      },
+      "replayed": {
+        "type": "boolean"
+      },
+      "schema_version": {
+        "const": "deal-space-searches.v1"
+      },
+      "search": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "saved",
+              "archived"
+            ]
+          },
+          "state": {
+            "enum": [
+              "draft",
+              "saved",
+              "stale",
+              "archived"
+            ]
+          },
+          "criteria": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "query": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 200
+              },
+              "counties": {
+                "type": "array",
+                "uniqueItems": true,
+                "maxItems": 5,
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "Escambia",
+                    "Santa Rosa",
+                    "Okaloosa",
+                    "Walton",
+                    "Bay"
+                  ]
+                }
+              },
+              "property_types": {
+                "type": "array",
+                "uniqueItems": true,
+                "maxItems": 12,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+                }
+              },
+              "min_square_feet": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 100000000
+              },
+              "max_square_feet": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 100000000
+              },
+              "availability": {
+                "type": "array",
+                "uniqueItems": true,
+                "maxItems": 4,
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "available",
+                    "coming_soon",
+                    "under_contract",
+                    "unknown"
+                  ]
+                }
+              },
+              "entrance_verified": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "public_projection_ready": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "photos_available": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "sort": {
+                "type": "string",
+                "enum": [
+                  "updated_desc",
+                  "address_asc",
+                  "size_asc",
+                  "size_desc"
+                ]
+              },
+              "cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[0-9]{1,9}$"
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100
+              }
+            },
+            "required": [
+              "query",
+              "counties",
+              "property_types",
+              "min_square_feet",
+              "max_square_feet",
+              "availability",
+              "entrance_verified",
+              "public_projection_ready",
+              "photos_available",
+              "sort",
+              "cursor",
+              "limit"
+            ]
+          },
+          "requirements": {
+            "type": "string"
+          },
+          "client_prefill_source": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "client_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "source_ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "observed_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "client_id",
+                  "source_ref",
+                  "observed_at"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run_criteria": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "query": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 200
+                  },
+                  "counties": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "maxItems": 5,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "Escambia",
+                        "Santa Rosa",
+                        "Okaloosa",
+                        "Walton",
+                        "Bay"
+                      ]
+                    }
+                  },
+                  "property_types": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "maxItems": 12,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+                    }
+                  },
+                  "min_square_feet": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0,
+                    "maximum": 100000000
+                  },
+                  "max_square_feet": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0,
+                    "maximum": 100000000
+                  },
+                  "availability": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "maxItems": 4,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "available",
+                        "coming_soon",
+                        "under_contract",
+                        "unknown"
+                      ]
+                    }
+                  },
+                  "entrance_verified": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "public_projection_ready": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "photos_available": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "sort": {
+                    "type": "string",
+                    "enum": [
+                      "updated_desc",
+                      "address_asc",
+                      "size_asc",
+                      "size_desc"
+                    ]
+                  },
+                  "cursor": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^[0-9]{1,9}$"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100
+                  }
+                },
+                "required": [
+                  "query",
+                  "counties",
+                  "property_types",
+                  "min_square_feet",
+                  "max_square_feet",
+                  "availability",
+                  "entrance_verified",
+                  "public_projection_ready",
+                  "photos_available",
+                  "sort",
+                  "cursor",
+                  "limit"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result_property_ids": {
+            "type": "array",
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "deal_id",
+          "version",
+          "name",
+          "status",
+          "state",
+          "criteria",
+          "requirements",
+          "client_prefill_source",
+          "last_run_at",
+          "run_criteria",
+          "result_property_ids",
+          "has_more",
+          "next_cursor",
+          "updated_at"
+        ]
+      }
+    },
+    "required": [
+      "ok",
+      "schema_version",
+      "search"
+    ]
+  },
+  "list": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "ok": {
+        "const": true
+      },
+      "schema_version": {
+        "const": "deal-space-searches.v1"
+      },
+      "searches": {
+        "type": "array",
+        "maxItems": 100,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "deal_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "name": {
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "draft",
+                "saved",
+                "archived"
+              ]
+            },
+            "state": {
+              "enum": [
+                "draft",
+                "saved",
+                "stale",
+                "archived"
+              ]
+            },
+            "criteria": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "query": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 200
+                },
+                "counties": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "maxItems": 5,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "Escambia",
+                      "Santa Rosa",
+                      "Okaloosa",
+                      "Walton",
+                      "Bay"
+                    ]
+                  }
+                },
+                "property_types": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "maxItems": 12,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+                  }
+                },
+                "min_square_feet": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 100000000
+                },
+                "max_square_feet": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 100000000
+                },
+                "availability": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "maxItems": 4,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "available",
+                      "coming_soon",
+                      "under_contract",
+                      "unknown"
+                    ]
+                  }
+                },
+                "entrance_verified": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "public_projection_ready": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "photos_available": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "sort": {
+                  "type": "string",
+                  "enum": [
+                    "updated_desc",
+                    "address_asc",
+                    "size_asc",
+                    "size_desc"
+                  ]
+                },
+                "cursor": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[0-9]{1,9}$"
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                }
+              },
+              "required": [
+                "query",
+                "counties",
+                "property_types",
+                "min_square_feet",
+                "max_square_feet",
+                "availability",
+                "entrance_verified",
+                "public_projection_ready",
+                "photos_available",
+                "sort",
+                "cursor",
+                "limit"
+              ]
+            },
+            "requirements": {
+              "type": "string"
+            },
+            "client_prefill_source": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "client_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "source_ref": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "observed_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "client_id",
+                    "source_ref",
+                    "observed_at"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "last_run_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "run_criteria": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "query": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 200
+                    },
+                    "counties": {
+                      "type": "array",
+                      "uniqueItems": true,
+                      "maxItems": 5,
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "Escambia",
+                          "Santa Rosa",
+                          "Okaloosa",
+                          "Walton",
+                          "Bay"
+                        ]
+                      }
+                    },
+                    "property_types": {
+                      "type": "array",
+                      "uniqueItems": true,
+                      "maxItems": 12,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+                      }
+                    },
+                    "min_square_feet": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 0,
+                      "maximum": 100000000
+                    },
+                    "max_square_feet": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 0,
+                      "maximum": 100000000
+                    },
+                    "availability": {
+                      "type": "array",
+                      "uniqueItems": true,
+                      "maxItems": 4,
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "available",
+                          "coming_soon",
+                          "under_contract",
+                          "unknown"
+                        ]
+                      }
+                    },
+                    "entrance_verified": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "public_projection_ready": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "photos_available": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "sort": {
+                      "type": "string",
+                      "enum": [
+                        "updated_desc",
+                        "address_asc",
+                        "size_asc",
+                        "size_desc"
+                      ]
+                    },
+                    "cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^[0-9]{1,9}$"
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100
+                    }
+                  },
+                  "required": [
+                    "query",
+                    "counties",
+                    "property_types",
+                    "min_square_feet",
+                    "max_square_feet",
+                    "availability",
+                    "entrance_verified",
+                    "public_projection_ready",
+                    "photos_available",
+                    "sort",
+                    "cursor",
+                    "limit"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "result_property_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "has_more": {
+              "type": "boolean"
+            },
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "updated_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "required": [
+            "id",
+            "deal_id",
+            "version",
+            "name",
+            "status",
+            "state",
+            "criteria",
+            "requirements",
+            "client_prefill_source",
+            "last_run_at",
+            "run_criteria",
+            "result_property_ids",
+            "has_more",
+            "next_cursor",
+            "updated_at"
+          ]
+        }
+      },
+      "truncated": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "ok",
+      "schema_version",
+      "searches",
+      "truncated"
+    ]
+  }
+}

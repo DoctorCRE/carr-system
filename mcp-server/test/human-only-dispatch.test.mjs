@@ -122,6 +122,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "link-lead-client",
     "propose-doc-correction",
     "read-deal-document-text",
+    "read-deal-space-searches-v1",
     "read-home-review",
     "read-web-push-config-v1", "read-web-push-delivery-status-v1", "read-web-push-subscriptions-v1",
     // V5-F01: installing the field-authority/retention policy and appending a
@@ -159,6 +160,8 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     // V5-RW02: only a verified partner revokes Dell's Salesforce read consent.
     "revoke-salesforce-read-consent",
     "revoke-web-push-subscription-v1",
+    "run-deal-space-search-v1",
+    "save-deal-space-search-v1",
     "set-deal-deliverable-visibility",
     "set-prospect-engagement-status",
     "snooze-email-proposal",

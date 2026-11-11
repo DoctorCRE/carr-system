@@ -141,12 +141,7 @@ function projectCart(value) {
 }
 const schema = (properties, required) => ({ type: "object", additionalProperties: false, properties, required });
 
-export function tourPropertySearchTools({ withEnvelope, writeEvent, ToolError }) {
-  return {
-    "search-tour-properties": {
-      writerConnection: true,
-      description: "Search facts-only property candidates in the initial five Florida counties. Results contain no broker conclusion and do not mutate a Tour.",
-      inputSchema: schema({
+export const tourPropertySearchInputSchema = schema({
         query: { type: ["string", "null"], maxLength: 200 },
         counties: { type: "array", uniqueItems: true, maxItems: 5, items: { type: "string", enum: TOUR_SEARCH_COUNTIES } },
         property_types: { type: "array", uniqueItems: true, maxItems: 12, items: { type: "string", pattern: "^[a-z0-9][a-z0-9_-]{0,63}$" } },
@@ -159,26 +154,38 @@ export function tourPropertySearchTools({ withEnvelope, writeEvent, ToolError })
         sort: { type: "string", enum: [...SORT] },
         cursor: { type: ["string", "null"], pattern: "^[0-9]{1,9}$" },
         limit: { type: "integer", minimum: 1, maximum: 100 },
-      }, [...SEARCH_FIELDS]),
+      }, [...SEARCH_FIELDS]);
+
+export function normalizeTourPropertySearch(args, ToolError) {
+  exact(args, SEARCH_FIELDS, ToolError);
+  const minimum = integerOrNull(args.min_square_feet, "min_square_feet", ToolError);
+  const maximum = integerOrNull(args.max_square_feet, "max_square_feet", ToolError);
+  if (minimum !== null && maximum !== null && minimum > maximum) fail(ToolError, { error: "tour_search_range_invalid" });
+  const counties = stringList(args.counties, "counties", ToolError, { allowed: COUNTY, maximum: COUNTY.size });
+  return {
+    query: args.query === null ? null : text(args.query, "query", ToolError, 200),
+    counties: counties.length ? counties : [...TOUR_SEARCH_COUNTIES],
+    property_types: stringList(args.property_types, "property_types", ToolError, { maximum: 12, slug: true }),
+    min_square_feet: minimum,
+    max_square_feet: maximum,
+    availability: stringList(args.availability, "availability", ToolError, { allowed: AVAILABILITY, maximum: AVAILABILITY.size }),
+    entrance_verified: booleanOrNull(args.entrance_verified, "entrance_verified", ToolError),
+    public_projection_ready: booleanOrNull(args.public_projection_ready, "public_projection_ready", ToolError),
+    photos_available: booleanOrNull(args.photos_available, "photos_available", ToolError),
+    sort: SORT.has(args.sort) ? args.sort : fail(ToolError, { error: "tour_input_invalid", field: "sort" }),
+    cursor: cursor(args.cursor, ToolError),
+    limit: Number.isInteger(args.limit) && args.limit >= 1 && args.limit <= 100 ? args.limit : fail(ToolError, { error: "tour_input_invalid", field: "limit" }),
+  };
+}
+
+export function tourPropertySearchTools({ withEnvelope, writeEvent, ToolError }) {
+  return {
+    "search-tour-properties": {
+      writerConnection: true,
+      description: "Search facts-only property candidates in the initial five Florida counties. Results contain no broker conclusion and do not mutate a Tour.",
+      inputSchema: tourPropertySearchInputSchema,
       handler: async (client, actor, args) => {
-        exact(args, SEARCH_FIELDS, ToolError);
-        const minimum = integerOrNull(args.min_square_feet, "min_square_feet", ToolError);
-        const maximum = integerOrNull(args.max_square_feet, "max_square_feet", ToolError);
-        if (minimum !== null && maximum !== null && minimum > maximum) fail(ToolError, { error: "tour_search_range_invalid" });
-        const filters = {
-          query: args.query === null ? null : text(args.query, "query", ToolError, 200),
-          counties: stringList(args.counties, "counties", ToolError, { allowed: COUNTY, maximum: COUNTY.size }),
-          property_types: stringList(args.property_types, "property_types", ToolError, { maximum: 12, slug: true }),
-          min_square_feet: minimum,
-          max_square_feet: maximum,
-          availability: stringList(args.availability, "availability", ToolError, { allowed: AVAILABILITY, maximum: AVAILABILITY.size }),
-          entrance_verified: booleanOrNull(args.entrance_verified, "entrance_verified", ToolError),
-          public_projection_ready: booleanOrNull(args.public_projection_ready, "public_projection_ready", ToolError),
-          photos_available: booleanOrNull(args.photos_available, "photos_available", ToolError),
-          sort: SORT.has(args.sort) ? args.sort : fail(ToolError, { error: "tour_input_invalid", field: "sort" }),
-          cursor: cursor(args.cursor, ToolError),
-          limit: Number.isInteger(args.limit) && args.limit >= 1 && args.limit <= 100 ? args.limit : fail(ToolError, { error: "tour_input_invalid", field: "limit" }),
-        };
+        const filters = normalizeTourPropertySearch(args, ToolError);
         const result = await client.query(
           "select ops.search_tour_properties($1::text,$2::text,$3::jsonb) as search /* tour-property-search:search */",
           [tenant(actor, ToolError), actor.id, JSON.stringify(filters)],

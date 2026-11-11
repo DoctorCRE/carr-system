@@ -156,7 +156,7 @@ export function tourArtifactTools({ withEnvelope, writeEvent, ToolError }) {
       write: true,
       authorityOnly: true,
       description: "Authority-bound server renderer receipt after exact R2 readback and deterministic QC. This cannot approve, publish, or grant client download authority.",
-      inputSchema: schema({ ...idempotency, render_job_id: { type: "string" }, status: { type: "string", enum: ["review_ready", "qc_blocked", "failed"] }, artifact_ref: { type: ["string", "null"] }, artifact_digest: { type: ["string", "null"] }, storage_ref: { type: ["string", "null"] }, content_length: { type: ["integer", "null"], minimum: 1 }, page_count: { type: ["integer", "null"], minimum: 1, maximum: 50 }, blocking_finding_count: { type: "integer", minimum: 0 }, qc_run_digest: { type: "string" } }, [...RESULT_FIELDS]),
+      inputSchema: schema({ ...idempotency, render_job_id: { type: "string" }, status: { type: "string", enum: ["review_ready", "qc_blocked", "failed"] }, artifact_ref: { type: ["string", "null"] }, artifact_digest: { type: ["string", "null"] }, storage_ref: { type: ["string", "null"] }, content_length: { type: ["integer", "null"], minimum: 1 }, page_count: { type: ["integer", "null"], minimum: 1, maximum: 51 }, blocking_finding_count: { type: "integer", minimum: 0 }, qc_run_digest: { type: "string" } }, [...RESULT_FIELDS]),
       handler: async (client, actor, args) => {
         requireTrustedRendererResult(args, ToolError);
         exact(args, RESULT_FIELDS, ToolError);
@@ -169,7 +169,7 @@ export function tourArtifactTools({ withEnvelope, writeEvent, ToolError }) {
               args.content_length !== null || args.page_count !== null || args.blocking_finding_count !== 0)) ||
             (!failed && (!ARTIFACT_REF.test(args.artifact_ref || "") || !STORAGE_REF.test(args.storage_ref || "") ||
               !Number.isInteger(args.content_length) || args.content_length < 1 || !Number.isInteger(args.page_count) ||
-              args.page_count < 1 || args.page_count > 50 ||
+              args.page_count < 1 || args.page_count > 51 ||
               (args.status === "review_ready" && args.blocking_finding_count !== 0))))
           fail(ToolError, { error: "tour_input_invalid", field: "render_result" });
         const artifactDigest = failed ? null : digest(args.artifact_digest, "artifact_digest", ToolError);
