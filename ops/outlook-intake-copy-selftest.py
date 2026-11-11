@@ -139,6 +139,40 @@ struct dirent *readdir(DIR *directory) {
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.work / 'Files/S0/845/EFMData/7.dat').read_bytes(), b'synthetic-body')
 
+    def test_interrupted_writer_close_handles_open_and_released_descriptors(self):
+        for released in (False, True):
+            with self.subTest(released=released):
+                fault = self.root / 'interrupt-close.c'
+                fault.write_text("""
+#define _DARWIN_C_SOURCE
+#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
+#ifdef __APPLE__
+#include <sys/clonefile.h>
+int fclonefileat(int source, int target, const char *name, unsigned int flags) {
+    (void)source; (void)target; (void)name; (void)flags;
+    errno = ENOTSUP; return -1;
+}
+#endif
+int close(int fd) {
+    int (*real_close)(int) = dlsym(RTLD_NEXT, "close");
+    static int interrupted = 0;
+    if ((fcntl(fd, F_GETFL) & O_ACCMODE) == O_WRONLY && !interrupted++) {
+        RELEASE_DESCRIPTOR;
+        errno = EINTR; return -1;
+    }
+    return real_close(fd);
+}
+""".replace('RELEASE_DESCRIPTOR', 'real_close(fd)' if released else '(void)fd'))
+                self.build(str(fault))
+                work = Path(tempfile.mkdtemp(prefix='work-', dir=self.out))
+                result = self.copy(cwd=work)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual((work / 'Files/S0/845/EFMData/7.dat').read_bytes(), b'synthetic-body')
+
     def test_sidecar_disappearing_at_open_does_not_fail_snapshot(self):
         self.sidecar_open_fault('unlinkat(fd, name, 0)')
         result = self.copy()
