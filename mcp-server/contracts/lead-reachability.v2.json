@@ -1,0 +1,313 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "lead-reachability.v2"
+    },
+    "classification": {
+      "enum": [
+        "research",
+        "reachable"
+      ]
+    },
+    "basis": {
+      "const": "successful_contact_and_current_route"
+    },
+    "evidence_state": {
+      "enum": [
+        "unknown",
+        "current",
+        "expired",
+        "conflicting"
+      ]
+    },
+    "contact_eligible": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "research_state": {
+      "enum": [
+        "needs_research",
+        "verified",
+        "needs_review"
+      ]
+    },
+    "missing_reasons": {
+      "type": "array",
+      "minItems": 0,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "contact_restricted",
+          "conflicting_evidence",
+          "expired_evidence",
+          "verified_usable_route_not_established",
+          "recent_successful_contact_not_established"
+        ]
+      }
+    },
+    "source_revision": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "evaluated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "evidence": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "required": [
+          "flag_id",
+          "kind",
+          "found",
+          "expired",
+          "proposes_correction",
+          "source",
+          "observed_at",
+          "expires_on",
+          "value"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "found": {
+            "type": "boolean"
+          },
+          "expired": {
+            "type": "boolean"
+          },
+          "proposes_correction": {
+            "type": "boolean"
+          },
+          "flag_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_on": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "value": {}
+        }
+      }
+    },
+    "successful_contact": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "activity_id",
+        "occurred_at",
+        "source",
+        "kind"
+      ],
+      "properties": {
+        "activity_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string"
+        }
+      }
+    },
+    "usable_route": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "flag_id",
+        "kind"
+      ],
+      "properties": {
+        "flag_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "kind": {
+          "enum": [
+            "email",
+            "cell",
+            "office_phone"
+          ]
+        }
+      }
+    },
+    "contact_freshness_days": {
+      "const": 90
+    },
+    "source_inputs": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "party_id",
+        "created_at",
+        "email",
+        "cell",
+        "phone",
+        "activities"
+      ],
+      "properties": {
+        "party_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "email": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cell": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "activities": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "lead_id",
+              "kind",
+              "connected",
+              "occurred_at",
+              "source",
+              "detail"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "lead_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "connected": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "occurred_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "source": {
+                "type": "string"
+              },
+              "detail": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "classification",
+    "basis",
+    "evidence_state",
+    "contact_eligible",
+    "research_state",
+    "missing_reasons",
+    "source_revision",
+    "evaluated_at",
+    "evidence",
+    "successful_contact",
+    "usable_route",
+    "contact_freshness_days",
+    "source_inputs"
+  ],
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Lead reachability v2",
+  "description": "Authenticated lead-board reachability from dated successful exact-lead contact and sourced current matching party route. Restrictions and conflicts remain independent.",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "classification": {
+            "const": "reachable"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "successful_contact": {
+            "type": "object"
+          },
+          "usable_route": {
+            "type": "object"
+          },
+          "contact_eligible": {
+            "const": true
+          },
+          "evidence_state": {
+            "not": {
+              "const": "conflicting"
+            }
+          },
+          "missing_reasons": {
+            "maxItems": 0
+          }
+        }
+      }
+    }
+  ]
+}
