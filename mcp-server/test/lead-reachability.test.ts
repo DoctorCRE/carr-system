@@ -4,11 +4,16 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { Validator } from "@cfworker/json-schema";
+import { parseLeadOpportunityTiming } from "../src/lead-opportunity-timing.ts";
 import { array, handler, object } from "./helpers/legacy-test-registry.ts";
 
 const contract = new Validator(
   JSON.parse(readFileSync(new URL("../contracts/lead-reachability.v2.json", import.meta.url), "utf8")),
 );
+const recording = object(
+  JSON.parse(readFileSync(new URL("./fixtures/lead-reachability.v2.json", import.meta.url), "utf8")),
+);
+const unknownTiming = parseLeadOpportunityTiming(object(object(recording.cases).unknown).opportunity_timing);
 const id = "30000000-0000-0000-0000-000000000001";
 const evidence = {
   flag_id: id,
@@ -32,6 +37,7 @@ async function board(findings: object[] = [], fields: object = {}) {
     contact_state: "active",
     contact_eligible: true,
     research_evidence: findings,
+    opportunity_timing: unknownTiming,
     ...fields,
   };
   const result = await handler(
@@ -100,9 +106,6 @@ test("source revision changes with source facts and preserves future evidence as
 });
 
 test("producer recordings pass the consumer contract and reproduce through the registered read", async () => {
-  const recording = object(
-    JSON.parse(readFileSync(new URL("./fixtures/lead-reachability.v2.json", import.meta.url), "utf8")),
-  );
   for (const detail of Object.values(object(recording.cases)).map(object)) {
     const expected = object(detail.reachability);
     assert.equal(contract.validate(expected).valid, true);
