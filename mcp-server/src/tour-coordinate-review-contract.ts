@@ -1,3 +1,4 @@
+// Define the observed coordinate review response contract for Tour stops.
 export type CoordinateReview = {
   schema: "tour-coordinate-review.v1";
   property_id: string;

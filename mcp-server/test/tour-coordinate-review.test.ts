@@ -1,3 +1,4 @@
+// Verify coordinate review evidence and authorization on Tour stops.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
