@@ -1,0 +1,90 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "lead-reachability.v1"
+    },
+    "classification": {
+      "const": "research"
+    },
+    "basis": {
+      "const": "recorded_findings_without_route_binding"
+    },
+    "evidence_state": {
+      "enum": [
+        "unknown",
+        "current",
+        "expired",
+        "conflicting"
+      ]
+    },
+    "contact_eligible": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "research_state": {
+      "enum": [
+        "needs_research",
+        "verified",
+        "needs_review"
+      ]
+    },
+    "missing_reasons": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "contact_restricted",
+          "conflicting_evidence",
+          "expired_evidence",
+          "verified_usable_route_not_established"
+        ]
+      }
+    },
+    "source_revision": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "evaluated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "evidence": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "required": [
+          "flag_id",
+          "kind",
+          "found",
+          "expired",
+          "proposes_correction",
+          "source",
+          "observed_at",
+          "expires_on",
+          "value"
+        ]
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "classification",
+    "basis",
+    "evidence_state",
+    "contact_eligible",
+    "research_state",
+    "missing_reasons",
+    "source_revision",
+    "evaluated_at",
+    "evidence"
+  ],
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Lead reachability v1",
+  "description": "Authenticated lead-board workspace=leads, per-lead reachability. Conservative research-only contract. Generic verified findings prove identity, not a usable contact route. Evidence follows existing research expiry/conflict semantics. Never infers a bad lead."
+}

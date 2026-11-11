@@ -3,10 +3,11 @@ import type { Db, VerbInputs } from "./verb-contract.ts";
 
 // The validator checks each field before returning a normalized review.
 type StageReview = NonNullable<VerbInputs["update-lead"]["stage_review"]>;
-// The existing default is Error; production injects the structured ToolError.
-type ErrorConstructor = new (payload: any) => Error;
+type ErrorConstructor = new (payload: { error: string }) => Error;
 
-import { leadAdvice, researchSummary, researchEvidenceSql } from "./lead-follow-up.ts";
+import { leadAdvice, researchSummary, researchEvidenceSql, leadReachability } from "./lead-follow-up.ts";
+
+import { ToolError as DefaultToolError } from "./tool-error.ts";
 
 import { isCalendarDate } from "./calendar-date.ts";
 
@@ -24,7 +25,7 @@ export const LEAD_WORKSPACE_SCHEMA = {
   },
 };
 
-export async function readLeadWorkspace(c: Db, args: VerbInputs["lead-board"] = {}, ToolError: ErrorConstructor = Error) {
+export async function readLeadWorkspace(c: Db, args: VerbInputs["lead-board"] = {}, ToolError: ErrorConstructor = DefaultToolError) {
   const cursor = args.correspondence_cursor;
   if ((cursor !== undefined && (!cursor || typeof cursor !== "object" || Array.isArray(cursor) ||
       Object.keys(cursor).length !== 2 ||
@@ -39,7 +40,7 @@ export async function readLeadWorkspace(c: Db, args: VerbInputs["lead-board"] = 
   // One statement is one PostgreSQL snapshot, also on the stateless HTTP
   // reader. UUID equality stays in PostgreSQL, including mixed-case input.
   const row = (await c.query(`with board as materialized (
-      select w.*, p.prospect_client_id,p.prospect_client_version,p.prospect_engagement_status
+      select w.*, ${researchEvidenceSql('w.party_id')} research_evidence, p.prospect_client_id,p.prospect_client_version,p.prospect_engagement_status
         from v_lead_workspace w left join v_lead_prospect_engagement p on p.lead_id=w.id
     ), correspondence as materialized (
       select * from v_lead_workspace_correspondence where lead_id=$1::uuid
@@ -58,7 +59,7 @@ export async function readLeadWorkspace(c: Db, args: VerbInputs["lead-board"] = 
     ) select coalesce((select jsonb_agg(to_jsonb(b) order by b.stage_sort,b.score desc nulls last,b.name,b.id)
         from board b),'[]'::jsonb) as leads,
       (select to_jsonb(b)||d.detail||jsonb_build_object(
-        'research_evidence',${researchEvidenceSql('b.party_id')},
+        'research_evidence',b.research_evidence,
         'correspondence',coalesce((select jsonb_agg(to_jsonb(a)-'lead_id' order by a.occurred_at desc,a.id desc) from correspondence_page a),'[]'::jsonb),
         'stage_history',coalesce((select jsonb_agg(to_jsonb(e)-'lead_id'||jsonb_build_object('mutation_order',e.mutation_order::text) order by e.mutation_order desc) from stage_page e),'[]'::jsonb),
         'correspondence_page',jsonb_build_object('total',(select count(*) from correspondence),'has_more',(select count(*)>100 from correspondence_tail),
@@ -69,10 +70,14 @@ export async function readLeadWorkspace(c: Db, args: VerbInputs["lead-board"] = 
             (select e.mutation_order::text from stage_page e order by e.mutation_order limit 1) end))
         from board b join v_lead_workspace_detail d on d.id=b.id
         where b.id=$1::uuid) as detail`, [args.lead_id || null, cursor?.occurred_at || null, cursor?.id || null, args.stage_history_cursor || null])).rows[0];
-  const { research_evidence, ...detail } = row.detail || {};
+  const now = Date.now();
+  const project = async ({ research_evidence = [], ...lead }: typeof row.leads[number]) => ({
+    ...leadAdvice(lead), reachability: await leadReachability(lead, research_evidence, now),
+  });
+  const { research_evidence } = row.detail || {};
   return { schema_version: LEAD_WORKSPACE_VERSION, generated_at: new Date().toISOString(),
-    leads: row.leads.map(leadAdvice), last_search_at: null, search_run_coverage: "unavailable",
-    ...(args.lead_id ? { detail: row.detail ? { ...leadAdvice(detail), research: researchSummary(research_evidence) } : null } : {}) };
+    leads: await Promise.all(row.leads.map(project)), last_search_at: null, search_run_coverage: "unavailable",
+    ...(args.lead_id ? { detail: row.detail ? { ...await project(row.detail), research: researchSummary(research_evidence, now) } : null } : {}) };
 }
 
 export function validateStageReview(review: StageReview, fields: object, ToolError: ErrorConstructor) {

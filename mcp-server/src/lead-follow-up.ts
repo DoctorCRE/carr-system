@@ -48,13 +48,7 @@ type Finding = { flag_id: string; kind: string; found: boolean; expired: boolean
   source: string; observed_at: string; expires_on: string | null; value: unknown };
 export function researchSummary(evidence: Finding[] = [], now = Date.now()) {
   if (evidence.length > 500) throw new ToolError({ error: 'research_evidence_limit_exceeded' });
-  const current = evidence.filter(e => {
-    const timestamp = /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.(\d+))?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.exec(e.observed_at);
-    if (e.expired || !timestamp || !isCalendarDate(e.observed_at.slice(0, 10))) return false;
-    const submillisecond = /[1-9]/.test((timestamp[1] ?? '').slice(3));
-    const firstEligibleClock = Date.parse(e.observed_at) + (submillisecond ? 1 : 0);
-    return firstEligibleClock <= now;
-  });
+  const current = currentResearchEvidence(evidence, now);
   const conflict = current.some(e => e.found && (e.kind === 'discrepancy' || e.proposes_correction));
   const verified = current.some(e => e.kind === 'verified' && e.found && e.source.trim());
   return { state: conflict ? 'needs_review' : verified ? 'verified' : 'needs_research', evidence,
@@ -62,6 +56,35 @@ export function researchSummary(evidence: Finding[] = [], now = Date.now()) {
     next_step: conflict ? 'Review discrepancies against original sources before working this record.' : verified ?
       'Read the cited sources and confirm the practice decision before drafting outreach.' :
       'Check practice website, professional registry and public filings; record sourced findings with record-finding, including nothing found.' };
+}
+function currentResearchEvidence(evidence: Finding[], now: number) {
+  return evidence.filter(e => {
+    const timestamp = /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.(\d+))?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.exec(e.observed_at);
+    if (e.expired || !timestamp || !isCalendarDate(e.observed_at.slice(0, 10))) return false;
+    const submillisecond = /[1-9]/.test((timestamp[1] ?? '').slice(3));
+    const firstEligibleClock = Date.parse(e.observed_at) + (submillisecond ? 1 : 0);
+    return firstEligibleClock <= now;
+  });
+}
+
+export async function leadReachability(lead: Lead & { base_version?: number }, evidence: Finding[] = [], now = Date.now()) {
+  const research = researchSummary(evidence, now);
+  const current = currentResearchEvidence(evidence, now);
+  const advised = leadAdvice(lead);
+  const evidence_state = research.state === 'needs_review' ? 'conflicting' : current.length ? 'current' :
+    evidence.some(e => e.expired) ? 'expired' : 'unknown';
+  // record-finding's verified kind is an identity pass. Its free-form values
+  // do not bind a verified usable route to the current party contact value.
+  const revision = JSON.stringify([lead.base_version ?? null, advised.contact_eligible ?? null, evidence]);
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(revision));
+  return { schema_version: 'lead-reachability.v1', classification: 'research',
+    basis: 'recorded_findings_without_route_binding', evidence_state,
+    contact_eligible: advised.contact_eligible ?? null, research_state: research.state,
+    missing_reasons: [...(advised.contact_eligible === false ? ['contact_restricted'] : []),
+      ...(evidence_state === 'conflicting' ? ['conflicting_evidence'] : []),
+      ...(evidence_state === 'expired' ? ['expired_evidence'] : []), 'verified_usable_route_not_established'],
+    source_revision: 'sha256:' + Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join(''),
+    evaluated_at: new Date(now).toISOString(), evidence };
 }
 export function researchEvidenceSql(partyId: string) {
   return `coalesce((select jsonb_agg(to_jsonb(f) order by f.observed_at desc,f.flag_id) from (
