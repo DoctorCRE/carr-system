@@ -57,6 +57,18 @@ GRANT_FULL = re.compile(
 # An entry here is a claim that a table is only ever read on the writer or
 # authority connection — write it with the verb that does it, or fix the grant.
 READER_EXEMPT: dict[str, str] = {
+    "ops.requirement_request":
+        "read on the writer connection by request-checklist-document and issue-requirement-upload; "
+        "readers use public.v_requirement_request",
+    "ops.requirement_reply_proposal":
+        "read on the writer connection by confirm-requirement-reply and reject-requirement-reply; "
+        "readers use public.v_requirement_reply_proposal",
+    "ops.requirement_upload_grant":
+        "read by the dedicated requirement-upload-worker transaction using its writer pool",
+    "ops.requirement_upload_receipt":
+        "read by the dedicated requirement-upload-worker transaction using its writer pool",
+    "ops.requirement_upload_visitor":
+        "read by the dedicated requirement-upload-worker transaction using its writer pool",
     "ops.tour_cheat_sheet_revision":
         "read on the writer connection by GET /api/tours/cheat-sheet/history/v1 "
         "through tour-runtime internalRead and its canonical Tour deal-access check",
