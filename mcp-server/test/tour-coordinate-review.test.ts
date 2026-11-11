@@ -12,27 +12,56 @@ test("coordinate review extends authorized detail without granting a new callabl
   await client.connect();
   try {
     await client.query("begin");
-    const installed = (await client.query("select pg_get_functiondef('ops.read_tour_internal_detail(text,uuid,text)'::regprocedure) definition")).rows[0].definition;
-    const old = installed.replace("'coordinate_review',ops.tour_property_coordinate_review(s.organization_tenant_id,s.property_id,now()),", "");
+    const installed = (
+      await client.query(
+        "select pg_get_functiondef('ops.read_tour_internal_detail(text,uuid,text)'::regprocedure) definition",
+      )
+    ).rows[0].definition;
+    const old = installed.replace(
+      "'coordinate_review',ops.tour_property_coordinate_review(s.organization_tenant_id,s.property_id,now()),",
+      "",
+    );
     assert.notEqual(old, installed);
     await client.query(old);
     await client.query("drop function ops.tour_property_coordinate_review(text,uuid,timestamptz)");
     await client.query("savepoint before_feature");
-    await assert.rejects(client.query("select ops.tour_property_coordinate_review('carr-internal','10000000-0000-4000-8000-000000000001',now())"), /does not exist/);
+    await assert.rejects(
+      client.query(
+        "select ops.tour_property_coordinate_review('carr-internal','10000000-0000-4000-8000-000000000001',now())",
+      ),
+      /does not exist/,
+    );
     await client.query("rollback to before_feature");
-    await client.query(readFileSync(new URL("../../migrations/1180_tour_coordinate_review.sql", import.meta.url), "utf8"));
-    assert.equal((await client.query("select pg_get_functiondef('ops.read_tour_internal_detail(text,uuid,text)'::regprocedure) definition")).rows[0].definition, installed);
+    await client.query(
+      readFileSync(new URL("../../migrations/1180_tour_coordinate_review.sql", import.meta.url), "utf8"),
+    );
+    assert.equal(
+      (
+        await client.query(
+          "select pg_get_functiondef('ops.read_tour_internal_detail(text,uuid,text)'::regprocedure) definition",
+        )
+      ).rows[0].definition,
+      installed,
+    );
     await client.query("commit");
-    const result = await client.query("select ops.tour_property_coordinate_review('carr-internal','10000000-0000-4000-8000-000000000001',now()) data");
+    const result = await client.query(
+      "select ops.tour_property_coordinate_review('carr-internal','10000000-0000-4000-8000-000000000001',now()) data",
+    );
     assert.equal(result.rows[0].data.schema, "tour-coordinate-review.v1");
     assert.equal(result.rows[0].data.status, "unknown");
     assert.deepEqual(result.rows[0].data.candidates, []);
-    const sql = readFileSync(new URL("./tour-delivery-data-plane-postgres.sql", import.meta.url), "utf8").replace(/^\\set ON_ERROR_STOP on\n/, "");
+    const sql = readFileSync(new URL("./tour-delivery-data-plane-postgres.sql", import.meta.url), "utf8").replace(
+      /^\\set ON_ERROR_STOP on\n/,
+      "",
+    );
     const setup = sql.split("do $map_promotion$")[0];
     assert.ok(setup);
     await client.query(setup);
     const read = async (tenant = "tour-delivery-proof", at = "now()") => {
-      const response = await client.query(`select ops.tour_property_coordinate_review($1,'a1000000-0000-4000-8000-000000000001',${at}) data`, [tenant]);
+      const response = await client.query(
+        `select ops.tour_property_coordinate_review($1,'a1000000-0000-4000-8000-000000000001',${at}) data`,
+        [tenant],
+      );
       const value: CoordinateReview = response.rows[0].data;
       return value;
     };
@@ -50,7 +79,10 @@ test("coordinate review extends authorized detail without granting a new callabl
       'a6000000-0000-4000-8000-000000000001','a5000000-0000-4000-8000-000000000001',now(),'reviewed')`);
     review = await read();
     assert.equal(review.candidates.length, 2);
-    assert.equal(review.candidates.find(row => row.coordinate_role === "parcel_centroid")?.approval.status, "ineligible_role");
+    assert.equal(
+      review.candidates.find((row) => row.coordinate_role === "parcel_centroid")?.approval.status,
+      "ineligible_role",
+    );
     await client.query(`select ops.append_tour_entrance_verification_receipt(jsonb_build_object(
       'organization_tenant_id','tour-delivery-proof','property_id','a1000000-0000-4000-8000-000000000001',
       'coordinate_candidate_id','aa000000-0000-4000-8000-000000000001',
@@ -58,24 +90,40 @@ test("coordinate review extends authorized detail without granting a new callabl
       'verified_at',now(),'evidence_reference','proof:entrance','native_navigation_proof','{"status":"passed"}'::jsonb,
       'receipt_digest','sha256:'||repeat('4',64)))`);
     review = await read();
-    const entrance = review.candidates.find(row => row.coordinate_role === "entrance");
+    const entrance = review.candidates.find((row) => row.coordinate_role === "entrance");
     assert.equal(entrance?.approval.status, "verified_entrance");
     assert.equal(entrance?.approval.receipt?.evidence_reference, "proof:entrance");
-    const actor = (await client.query("select id::text from public.actor where slug='joe' and active and kind='human'")).rows[0].id;
-    const detail = (await client.query("select ops.read_tour_internal_detail('tour-delivery-proof','a2000000-0000-4000-8000-000000000001',$1) data", [actor])).rows[0].data;
+    const actor = (await client.query("select id::text from public.actor where slug='joe' and active and kind='human'"))
+      .rows[0].id;
+    const detail = (
+      await client.query(
+        "select ops.read_tour_internal_detail('tour-delivery-proof','a2000000-0000-4000-8000-000000000001',$1) data",
+        [actor],
+      )
+    ).rows[0].data;
     assert.deepEqual(detail.routes[0].stops[0].coordinate_review, review);
     assert.equal(detail.routes[0].navigation.status, "unavailable");
     await client.query(`insert into ops.tour_rights_receipt
       (organization_tenant_id,provider,policy_key,receipt_version,receipt_digest,terms_url,reviewed_at,reviewer,intended_use,allowed_field_classes,allowed_use_classes,effective_at,status,supersedes_receipt_id)
       values ('tour-delivery-proof','search-proof','search-policy',2,'sha256:'||repeat('8',64),'https://example.invalid/terms',now(),'proof','replacement','["*"]','["canonical_fact"]',now(),'active','a5000000-0000-4000-8000-000000000001')`);
     review = await read();
-    assert.ok(review.candidates.every(row => row.position === null && row.approval.status === "rights_unavailable" && row.approval.receipt === null));
+    assert.ok(
+      review.candidates.every(
+        (row) => row.position === null && row.approval.status === "rights_unavailable" && row.approval.receipt === null,
+      ),
+    );
     await client.query("rollback");
     let recorded = "";
-    client.on("notice", notice => {
-      if (notice.message?.startsWith("COORDINATE_REVIEW_RECORD:")) recorded = notice.message.slice("COORDINATE_REVIEW_RECORD:".length);
+    client.on("notice", (notice) => {
+      if (notice.message?.startsWith("COORDINATE_REVIEW_RECORD:"))
+        recorded = notice.message.slice("COORDINATE_REVIEW_RECORD:".length);
     });
-    await client.query(sql.replace("raise notice 'TOUR_NAVIGATION_RECORD:%',nav;", "raise notice 'COORDINATE_REVIEW_RECORD:%',ops.read_tour_internal_detail('tour-delivery-proof','a2000000-0000-4000-8000-000000000001',v_actor_id);"));
+    await client.query(
+      sql.replace(
+        "raise notice 'TOUR_NAVIGATION_RECORD:%',nav;",
+        "raise notice 'COORDINATE_REVIEW_RECORD:%',ops.read_tour_internal_detail('tour-delivery-proof','a2000000-0000-4000-8000-000000000001',v_actor_id);",
+      ),
+    );
     assert.ok(recorded);
     const proof = `import importlib.util,json,sys
 spec=importlib.util.spec_from_file_location('proof','tools/prove-tour-navigation.py')
@@ -91,9 +139,16 @@ except AssertionError:
  sys.exit(0)
 sys.exit(1)
 `;
-    execFileSync("python3", ["-c", proof], { input: recorded, cwd: new URL("../../", import.meta.url), timeout: 30000 });
+    execFileSync("python3", ["-c", proof], {
+      input: recorded,
+      cwd: new URL("../../", import.meta.url),
+      timeout: 30000,
+    });
     for (const role of ["carr_reader", "carr_writer", "carr_jobs", "carr_authority"]) {
-      const privilege = await client.query("select has_function_privilege($1,'ops.tour_property_coordinate_review(text,uuid,timestamptz)','execute') allowed", [role]);
+      const privilege = await client.query(
+        "select has_function_privilege($1,'ops.tour_property_coordinate_review(text,uuid,timestamptz)','execute') allowed",
+        [role],
+      );
       assert.equal(privilege.rows[0].allowed, false);
     }
   } finally {

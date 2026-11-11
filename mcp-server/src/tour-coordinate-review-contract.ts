@@ -30,13 +30,27 @@ export type EntranceReceipt = {
 export type CoordinateCandidate = {
   coordinate_candidate_id: string;
   property_id: string;
-  coordinate_role: "parcel_centroid" | "building_centroid" | "address_point" | "geocoder_candidate" | "entrance" | "driveway" | "parking_access" | "other";
+  coordinate_role:
+    | "parcel_centroid"
+    | "building_centroid"
+    | "address_point"
+    | "geocoder_candidate"
+    | "entrance"
+    | "driveway"
+    | "parking_access"
+    | "other";
   precision_class: "unknown" | "approximate" | "parcel" | "building" | "address" | "entrance" | "surveyed";
   observed_at: string;
   review_state: "unreviewed" | "reviewed" | "rejected" | "superseded";
   position: { latitude: number; longitude: number } | null;
   access_notes: string | null;
-  source: { source_evidence_id: string; provider: string | null; stable_locator: string | null; retrieved_at: string | null; retrieval_status: string | null };
+  source: {
+    source_evidence_id: string;
+    provider: string | null;
+    stable_locator: string | null;
+    retrieved_at: string | null;
+    retrieval_status: string | null;
+  };
   rights: {
     rights_receipt_id: string;
     status: "usable" | "unavailable";
@@ -51,8 +65,10 @@ export type CoordinateCandidate = {
     revoked_at: string | null;
     receipt_status: string | null;
   };
-  approval: { status: "verified_entrance"; receipt: EntranceReceipt } | {
-    status: "rights_unavailable" | "ineligible_role" | "candidate_not_reviewed" | "unverified";
-    receipt: null;
-  };
+  approval:
+    | { status: "verified_entrance"; receipt: EntranceReceipt }
+    | {
+        status: "rights_unavailable" | "ineligible_role" | "candidate_not_reviewed" | "unverified";
+        receipt: null;
+      };
 };
