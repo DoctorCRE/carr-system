@@ -217,7 +217,8 @@ test("deal need lifecycle, exact vendor matching, audit and recorded contract", 
       ])
     ).rows[0].id;
     await db.query("update deal set client_id=$2 where id=$1", [deal, otherClient]);
-    assert.equal((await read()).state, "empty");
+    assert.equal((await read()).state, "missing_approval");
+    assert.deepEqual((await read()).rows, []);
     await db.query("update deal set client_id=$2 where id=$1", [deal, clientId]);
     await db.query("update deal_client_need set description='Edited outside verb' where id=$1", [need.id]);
     response = await call(names[2], { deal });
