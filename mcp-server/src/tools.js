@@ -99,6 +99,7 @@ import { tourRightsProjectionTools } from "./tour-rights-projection.js";
 import { tourPropertyJurisdictionTools } from "./tour-property-jurisdiction.js";
 import { tourDomainTools } from "./tour-domain.js";
 import { tourPropertySearchTools } from "./tour-property-search.js";
+import { dealSpaceSearchTools } from "./deal-space-searches.ts";
 import { tourSharingTools } from "./tour-sharing.js";
 import { tourMapPromotionTools } from "./tour-map-promotion.js";
 import { tourArtifactTools } from "./tour-artifacts.js";
@@ -9024,6 +9025,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "tour-property-jurisdiction": "mcp-server/src/tour-property-jurisdiction.js",
   "tour-domain": "mcp-server/src/tour-domain.js",
   "tour-property-search": "mcp-server/src/tour-property-search.js",
+  "deal-space-searches": "mcp-server/src/deal-space-searches.ts",
   "tour-map-promotion": "mcp-server/src/tour-map-promotion.js",
   "tour-sharing": "mcp-server/src/tour-sharing.js",
   "tour-artifacts": "mcp-server/src/tour-artifacts.js",
@@ -10785,6 +10787,7 @@ registerTools(tourDomainTools({ withEnvelope, writeEvent, ToolError }), "tour-do
 // Tour Operations delivery surfaces: governed property search and cart,
 // confidential sharing, and deterministic PDF request/review records.
 registerTools(tourPropertySearchTools({ withEnvelope, writeEvent, ToolError }), "tour-property-search");
+registerTools(dealSpaceSearchTools({ withEnvelope, writeEvent }), "deal-space-searches");
 registerTools(tourMapPromotionTools({ withEnvelope, writeEvent, ToolError }), "tour-map-promotion");
 registerTools(tourSharingTools({ withEnvelope, writeEvent, ToolError }), "tour-sharing");
 registerTools(tourArtifactTools({ withEnvelope, writeEvent, ToolError }), "tour-artifacts");

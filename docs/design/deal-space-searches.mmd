@@ -1,0 +1,19 @@
+stateDiagram-v2
+  [*] --> Draft: CreateDraft
+  Draft --> Saved: Save
+  Saved --> Rerun: Run
+  Stale --> Rerun: Run
+  Rerun --> Saved: RunSucceeds
+  Rerun --> Stale: RunFailsWithOldSnapshot
+  Saved --> Stale: EditCriteria
+  Saved --> Stale: Age24Hours
+  Draft --> Archived: Archive
+  Saved --> Archived: Archive
+  Stale --> Archived: Archive
+  Archived --> Saved: Restore
+  Saved --> Saved: Reopen
+  Stale --> Stale: Reopen
+  %% never: A stale revision overwrites a newer search.
+  %% never: A failed run destroys the prior result snapshot.
+  %% never: An unavailable deal exposes a saved search.
+  %% never: An archived search runs without restoration.
