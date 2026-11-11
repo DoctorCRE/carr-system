@@ -140,7 +140,7 @@ begin
     returning id into render_id;
     result_id:=ops.record_tour_pdf_render_result('tour-delivery-proof',render_id,'review_ready',
       'artifact:tour-pdf:abcdefghijklmnop','sha256:'||repeat('5',64),
-      'tour-pdf/tour-delivery-proof/'||render_id||'/'||repeat('5',64)||'.pdf',100,2,0,'sha256:'||repeat('6',64),v_actor_id);
+      'tour-pdf/tour-delivery-proof/'||render_id||'/'||repeat('5',64)||'.pdf',100,3,0,'sha256:'||repeat('6',64),v_actor_id);
     perform ops.record_tour_pdf_human_review('tour-delivery-proof',render_id,'sha256:'||repeat('6',64),
       'accept',now(),'sha256:'||repeat('7',64),'Reviewed synthetic packet',v_actor_id);
     projection_ref:='projection:public:'||substr(encode(public.digest('tour-delivery-proof:ac000000-0000-4000-8000-000000000001:'||v_digest,'sha256'),'hex'),1,32);
