@@ -85,6 +85,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
   assert.deepEqual(humanOnlyVerbs, [
     "abandon-deal-deliverable",
     "accept-outcome-feedback",
+    "accept-portal-proposal-v1",
 
     "accept-ready-plan",
     "accept-ready-plan-amendment",
@@ -124,6 +125,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "read-deal-document-text",
     "read-deal-space-searches-v1",
     "read-home-review",
+    "read-portal-proposal-review-v1",
     "read-web-push-config-v1", "read-web-push-delivery-status-v1", "read-web-push-subscriptions-v1",
     // V5-F01: installing the field-authority/retention policy and appending a
     // preservation hold are partner acts on the authority connection.

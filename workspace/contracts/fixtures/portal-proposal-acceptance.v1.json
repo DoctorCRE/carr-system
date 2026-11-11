@@ -1,0 +1,41 @@
+{
+  "ok": true,
+  "review": {
+    "mine": [],
+    "added": [
+      "00000000-0000-4000-8000-000000000022"
+    ],
+    "notes": {
+      "00000000-0000-4000-8000-000000000022": "changed during partner transaction"
+    },
+    "state": "reviewed",
+    "deal_id": "00000000-0000-4000-8000-000000000041",
+    "removed": [],
+    "retired": [],
+    "tour_id": "00000000-0000-4000-8000-000000000031",
+    "retained": [],
+    "selected": [
+      "00000000-0000-4000-8000-000000000022"
+    ],
+    "cart_version": 0,
+    "publication_id": "00000000-0000-4000-8000-000000000011",
+    "schema_version": "portal-proposal-acceptance.v1",
+    "source_version": 5,
+    "cart_version_id": null,
+    "publication_version": 2
+  },
+  "decision": null,
+  "pending": {
+    "key": "00000000-0000-4000-8000-000000000011:5",
+    "class": "review_needed",
+    "topic": "action_confirmation",
+    "owner_module": "tours",
+    "source_version": 5,
+    "publication_id": "00000000-0000-4000-8000-000000000011",
+    "deal_id": "00000000-0000-4000-8000-000000000041",
+    "tour_id": "00000000-0000-4000-8000-000000000031",
+    "deep_link": "/deals/00000000-0000-4000-8000-000000000041?proposal=00000000-0000-4000-8000-000000000011&version=5",
+    "line": "Client Tour List choices await your review.",
+    "requires_acceptance": true
+  }
+}

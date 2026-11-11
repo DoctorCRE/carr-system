@@ -1041,6 +1041,36 @@
       "sha256": "990d9324e7263b479524b2549d8833a403f0ae44b8e1e990ea29a827ac53e12d",
       "rule": "pii-phone",
       "reason": "WR591.S18.J30 historical source contains public PostgreSQL integer boundary constants, not contact data. Exact path and blob identity only. Current source groups those constants with numeric separators."
+    },
+    {
+      "path": "mcp-server/src/portal-proposal-acceptance.ts",
+      "sha256": "3d4a2711deed1c273d10556fcdb0f9af6aa832ccf6a1feb6efb933462962df06",
+      "rule": "pii-phone",
+      "reason": "WR586.S5.J17 reviewed PostgreSQL int4 upper bound minus one in JSON Schema version limits. Every phone-shaped match in these exact bytes is that numeric bound, not contact data. Changed blobs require fresh scanning."
+    },
+    {
+      "path": "workspace/contracts/portal-proposal-acceptance.v1.json",
+      "sha256": "597e275a8f830963e1c7433166d33c1486e0c8c39b55829838c29ef945ded1b8",
+      "rule": "pii-phone",
+      "reason": "WR586.S5.J17 reviewed PostgreSQL int4 upper bound minus one in JSON Schema version limits. Every phone-shaped match in these exact bytes is that numeric bound, not contact data. Changed blobs require fresh scanning."
+    },
+    {
+      "path": "mcp-server/src/portal-proposal-acceptance.ts",
+      "sha256": "36cb4b5824bc32ad25de6f9180245cfc7a37c3a67c98b45a5bfbac32b1bffd49",
+      "rule": "pii-phone",
+      "reason": "WR586.S5.J17 reviewed PostgreSQL int4 upper bound minus one in JSON Schema version limits. Every phone-shaped match in these exact bytes is that numeric bound, not contact data. Changed blobs require fresh scanning."
+    },
+    {
+      "path": "mcp-server/src/portal-proposal-acceptance.ts",
+      "sha256": "99ab077bfad045b2d980b8c11aac5f446f82ba99807cb756270e91bf2eac7ade",
+      "rule": "pii-phone",
+      "reason": "WR586.S5.J17 reviewed PostgreSQL int4 upper bound minus one in JSON Schema version limits. Every phone-shaped match in these exact bytes is that numeric bound, not contact data. Changed blobs require fresh scanning."
+    },
+    {
+      "path": "workspace/contracts/portal-proposal-acceptance.v1.json",
+      "sha256": "dfbd2554dcc4738e1271cb798f06a8cd4b61b1e8c01539b92249cc5fae7cc845",
+      "rule": "pii-phone",
+      "reason": "WR586.S5.J17 reviewed PostgreSQL int4 upper bound minus one in JSON Schema version limits. Every phone-shaped match in these exact bytes is that numeric bound, not contact data. Changed blobs require fresh scanning."
     }
   ]
 }

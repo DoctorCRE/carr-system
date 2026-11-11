@@ -1,0 +1,16 @@
+{
+  "status": "success",
+  "retired": [],
+  "selection": {
+    "notes": {
+      "00000000-0000-4000-8000-000000000021": "Client note"
+    },
+    "version": 1,
+    "selected": [
+      "00000000-0000-4000-8000-000000000021"
+    ]
+  },
+  "publication_id": "00000000-0000-4000-8000-000000000011",
+  "schema_version": "portal-proposals.v1",
+  "publication_version": 1
+}

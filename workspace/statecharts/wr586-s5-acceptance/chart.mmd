@@ -1,0 +1,14 @@
+stateDiagram-v2
+  [*] --> pending
+  pending --> reviewed: Open difference
+  reviewed --> accepting: Accept exact choices
+  accepting --> unknown: Response lost
+  accepting --> accepted: Commit guarded append
+  unknown --> accepted: Retry original request
+  accepting --> source_changed: Client saved newer version
+  unknown --> source_changed: Reload after conflict
+  source_changed --> reviewed: Review again
+  reviewed --> kept: Keep mine
+  accepted --> accepted: Retry original receipt
+  pending --> pending: Deduplicate proposal version signal
+  reviewed --> retired: Access or publication retired

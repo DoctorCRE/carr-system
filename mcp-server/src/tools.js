@@ -100,6 +100,7 @@ import { engineeringRuntimeTools } from "./engineering-runtime.js";
 import { tourRightsProjectionTools } from "./tour-rights-projection.js";
 import { tourPropertyJurisdictionTools } from "./tour-property-jurisdiction.js";
 import { tourDomainTools } from "./tour-domain.js";
+import { portalProposalAcceptanceTools, portalProposalReplayQuery } from "./portal-proposal-acceptance.ts";
 import { tourPropertySearchTools, tourPropertySearchInputSchema, normalizeTourPropertySearch } from "./tour-property-search.js";
 import { installTourDealAccess } from "./tour-deal-access.js";
 import { dealSpaceSearchTools } from "./deal-space-searches.ts";
@@ -283,7 +284,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   if (verb === "record-finding" && args.kind === "email_delivery_failure")
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))",
       [JSON.stringify([verb, args.kind, actor.id, String(args.source || "").trim()])]);
-  const prior = await client.query(verb === 'log-activity' ? `select request_hash, response, false as permanent from tool_call where idempotency_key=$1
+  const prior = await client.query(verb === 'accept-portal-proposal-v1' ? portalProposalReplayQuery : verb === 'log-activity' ? `select request_hash, response, false as permanent from tool_call where idempotency_key=$1
     and ($2 or created_at > now() - interval '${REPLAY_WINDOW}')
     union all select new_value#>>'{email_application,request_hash}' as request_hash,
       new_value#>'{email_application,response}' as response, true as permanent from event
@@ -9027,6 +9028,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "tour-rights-projection": "mcp-server/src/tour-rights-projection.js",
   "tour-property-jurisdiction": "mcp-server/src/tour-property-jurisdiction.js",
   "tour-domain": "mcp-server/src/tour-domain.js",
+  "portal-proposal-acceptance": "mcp-server/src/portal-proposal-acceptance.ts",
   "tour-property-search": "mcp-server/src/tour-property-search.js",
   "deal-space-searches": "mcp-server/src/deal-space-searches.ts",
   "tour-map-promotion": "mcp-server/src/tour-map-promotion.js",
@@ -10796,6 +10798,7 @@ registerTools(tourDomainTools({ withEnvelope, writeEvent, ToolError }), "tour-do
 
 // Tour Operations delivery surfaces: governed property search and cart,
 // confidential sharing, and deterministic PDF request/review records.
+registerTools(portalProposalAcceptanceTools({ withEnvelope, writeEvent, partnerAuthoritySlugForActor }), "portal-proposal-acceptance");
 registerTools(tourPropertySearchTools({ withEnvelope, writeEvent, ToolError }), "tour-property-search");
 registerTools(dealSpaceSearchTools({ withEnvelope, writeEvent, criteria: tourPropertySearchInputSchema,
   organizationTenantForActor, partnerAuthoritySlugForActor,
