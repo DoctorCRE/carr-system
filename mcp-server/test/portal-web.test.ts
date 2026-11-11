@@ -192,39 +192,67 @@ test("bounded request admission and streamed body deadline", async () => {
   assert.equal((await g.host.fetch(request)).status, 408);
 });
 test("projection retains published items and escapes content with secure cookie bounds", async () => {
-  const f = fixture({
-    read: async () => ({
-      status: "success",
-      schema_version: "client-portal.v1",
-      portal: {
-        slug: "alpha",
-        roadmap: { phases: [] },
-        materials: [],
-        publications: [
-          {
-            id: "published",
-            kind: "tour",
-            title: "<script>bad</script>",
-            content: "shared",
-            internal_notes: "private",
-          },
-        ],
-        internal_notes: "private",
-      },
-    }),
-  });
-  const a = await f.login();
-  const page = await f.send("/alpha/", "GET", a.cookie);
-  assert.equal(page.status, 200);
-  const html = await page.text();
-  assert.match(html, /published/);
-  assert.doesNotMatch(html, /<script>|private/);
-  assert.match(String(page.headers.get("content-security-policy")), /frame-ancestors 'none'/);
-  const form = await f.form();
-  const login = await f.send("/alpha/login", "POST", form.cookie, `password=existing&csrf=${form.csrf}`);
-  const cookie = String(login.headers.get("set-cookie"));
-  assert.match(cookie, /Secure; HttpOnly; SameSite=Lax; Path=\//);
-  assert.doesNotMatch(cookie, /Domain=/);
-  for (const invalid of [`${a.cookie}; ${a.cookie}`, "__Host-portal-alpha=bad"])
-    assert.equal((await fixture().send("/alpha/status", "GET", invalid)).status, 401);
+  const titles = [
+    ["<script>bad</script>", "&lt;script&gt;bad&lt;/script&gt;"],
+    ["<SCRIPT>bad</SCRIPT>", "&lt;SCRIPT&gt;bad&lt;/SCRIPT&gt;"],
+    ['<script src="x">bad</script>', "&lt;script src=\\&quot;x\\&quot;&gt;bad&lt;/script&gt;"],
+    ['" onmouseover="bad\'&', "\\&quot; onmouseover=\\&quot;bad&#39;&amp;"],
+    ["a & b &amp; c", "a &amp; b &amp;amp; c"],
+  ] as const;
+  for (const [title, escapedTitle] of titles) {
+    const f = fixture({
+      read: async () => ({
+        status: "success",
+        schema_version: "client-portal.v1",
+        portal: {
+          slug: "alpha",
+          roadmap: { phases: [] },
+          materials: [],
+          publications: [
+            {
+              id: "published",
+              kind: "tour",
+              title,
+              content: "shared",
+              internal_notes: "private",
+            },
+          ],
+          internal_notes: "private",
+        },
+      }),
+    });
+    const a = await f.login();
+    const page = await f.send("/alpha/", "GET", a.cookie);
+    assert.equal(page.status, 200);
+    const html = await page.text();
+    assert.equal(
+      html.split("<pre>")[1]?.split("</pre>")[0],
+      `{
+  &quot;slug&quot;: &quot;alpha&quot;,
+  &quot;roadmap&quot;: {
+    &quot;current_phase&quot;: null,
+    &quot;phases&quot;: []
+  },
+  &quot;materials&quot;: [],
+  &quot;publications&quot;: [
+    {
+      &quot;id&quot;: &quot;published&quot;,
+      &quot;kind&quot;: &quot;tour&quot;,
+      &quot;title&quot;: &quot;${escapedTitle}&quot;,
+      &quot;content&quot;: &quot;shared&quot;
+    }
+  ]
+}`,
+      title,
+    );
+    assert.doesNotMatch(html, /private/);
+    assert.match(String(page.headers.get("content-security-policy")), /frame-ancestors 'none'/);
+    const form = await f.form();
+    const login = await f.send("/alpha/login", "POST", form.cookie, `password=existing&csrf=${form.csrf}`);
+    const cookie = String(login.headers.get("set-cookie"));
+    assert.match(cookie, /Secure; HttpOnly; SameSite=Lax; Path=\//);
+    assert.doesNotMatch(cookie, /Domain=/);
+    for (const invalid of [`${a.cookie}; ${a.cookie}`, "__Host-portal-alpha=bad"])
+      assert.equal((await fixture().send("/alpha/status", "GET", invalid)).status, 401);
+  }
 });
