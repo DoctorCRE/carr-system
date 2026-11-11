@@ -122,6 +122,7 @@ test("saved search lifecycle, canonical run, reopen, conflict, archive and autho
           requirements: "Shared deal",
           client_prefill_source: null,
         };
+        await invoke("save-deal-space-search-v1", args);
         for (const slug of ["joe", "dell", "joe-local", "dell-local", "codex", "claude"]) {
           const human = slug === "joe" || slug === "dell";
           const row = (
