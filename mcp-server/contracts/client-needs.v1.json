@@ -57,24 +57,32 @@
           "approved_revision",
           "approved_by",
           "approved_at",
-          "state"
+          "state",
+          "description",
+          "client_name",
+          "deal_name",
+          "vendor_ref"
         ],
         "properties": {
           "id": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "format": "uuid"
           },
           "deal_id": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "format": "uuid"
           },
           "vendor_id": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "format": "uuid"
           },
           "client_id": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "format": "uuid"
           },
           "source_ref": {
             "type": "string",
@@ -90,11 +98,13 @@
           },
           "observed_at": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "format": "date-time"
           },
           "fresh_until": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "format": "date-time"
           },
           "version": {
             "type": "integer",
@@ -147,6 +157,22 @@
                 "type": "null"
               }
             ]
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "client_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "deal_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "vendor_ref": {
+            "type": "string",
+            "minLength": 1
           }
         }
       }
@@ -163,5 +189,44 @@
         }
       ]
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "subject": {
+            "const": "vendor"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "rows": {
+            "items": {
+              "properties": {
+                "state": {
+                  "const": "approved"
+                },
+                "restriction": {
+                  "const": "allowed"
+                },
+                "approved_revision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "approved_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "approved_by": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

@@ -26,7 +26,7 @@ stateDiagram-v2
  Approved --> Withdrawn: Withdraw
  EditedLapsed --> Withdrawn: Withdraw
  Stale --> Withdrawn: Withdraw
- Withdrawn --> Draft: Record a new active revision
+ Withdrawn --> EditedLapsed: Record a new active revision
 ```
 
 Only Approved with allowed restrictions and live identities matches. Withdrawal invalidates approval. Refreshing evidence requires a new approval. Restrictions changing invalidate approval. The database clock decides freshness.
@@ -38,3 +38,5 @@ The version is `client-needs.v1`. The registered MCP verbs are the authenticated
 ## PRODUCTION PROOF
 
 After a containing release, read an existing deal need and its vendor page through the registered verbs. Compare need/client/deal/vendor UUIDs, source revision, approval revision, applicability, and freshness exactly. An approved, current, unrestricted need must appear. A lapsed or withdrawn need must not appear. No recorded qualifying need leaves positive proof unobserved. This build does not call or mutate production.
+
+The [executable lifecycle chart](client-needs.v1.mmd) models need eligibility and whether a match is visible. TLC checks draft, edited, withdrawn, and stale exclusion. Restriction changes, identity retirement, CAS and idempotency are covered by registered-handler database tests outside this finite chart. Regenerate in a scratch directory with the statechart skill's `from-chart` command.

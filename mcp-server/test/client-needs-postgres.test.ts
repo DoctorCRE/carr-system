@@ -203,7 +203,7 @@ test("deal need lifecycle, exact vendor matching, audit and recorded contract", 
       assert.equal((await read()).state, "ready");
       await db.query("select pg_sleep(2.1)");
       assert.equal((await read()).state, "empty");
-      const stale = record(records((await call(names[2], { deal })).rows)[0]);
+      const stale = record(records((await call(names[2], { deal })).rows).find((r) => r.id === need.id));
       assert.equal(stale.state, "stale");
       await edit({});
       await approve();
@@ -221,15 +221,48 @@ test("deal need lifecycle, exact vendor matching, audit and recorded contract", 
     await db.query("update deal set client_id=$2 where id=$1", [deal, clientId]);
     await db.query("update deal_client_need set description='Edited outside verb' where id=$1", [need.id]);
     response = await call(names[2], { deal });
-    row = record(records(response.rows)[0]);
+    row = record(records(response.rows).find((r) => r.id === need.id));
     assert.equal(row.state, "edited_lapsed");
     assert.equal(row.approved_revision, null);
+    await t.test("draft, edited and stale needs can be withdrawn", async () => {
+      for (const state of ["draft", "edited_lapsed", "stale"]) {
+        const f = { ...fields, ...(state === "stale" ? { fresh_until: "2026-01-02T00:00:00Z" } : {}) };
+        const created = record((await call(names[0], { deal, fields: f, idempotency_key: randomUUID() })).need);
+        let revision = 1;
+        if (state === "edited_lapsed") {
+          await call(names[0], {
+            deal,
+            need: created.id,
+            base_version: 1,
+            fields: { ...f, description: "Changed need" },
+            idempotency_key: randomUUID(),
+          });
+          revision++;
+        }
+        const withdrawn = record(
+          (
+            await call(names[0], {
+              deal,
+              need: created.id,
+              base_version: revision,
+              fields: { ...f, withdrawn: true },
+              idempotency_key: randomUUID(),
+            })
+          ).need,
+        );
+        assert.equal(withdrawn.state, "withdrawn");
+        assert.equal(withdrawn.approved_revision, null);
+      }
+    });
     const audit = await db.query("select id from event where subject_id=$1 and field='client_need'", [deal]);
     assert.ok(audit.rows.length >= 10);
     await assert.rejects(call(names[3], { vendor: randomUUID() }), /not_found/);
     await assert.rejects(call(names[3], { vendor, limit: 51 }), /invalid_need_input/);
     const recorded = JSON.parse(readFileSync(new URL("./fixtures/client-needs.v1.json", import.meta.url), "utf8"));
     assert.equal(validator.validate(recorded).valid, true);
+    const invalid = structuredClone(recorded);
+    invalid.rows[0].state = "stale";
+    assert.equal(validator.validate(invalid).valid, false, "contract refuses a stale vendor match");
   } finally {
     await db.query("rollback").catch(() => {});
     await db.end();
