@@ -24,7 +24,7 @@ ROUTE_ID = detail()['routes'][0]['id']
 
 class ProofTests(unittest.TestCase):
     def test_ready_route(self):
-        self.assertEqual(proof.check_route(detail(), ROUTE_ID)['stops'], 1)
+        self.assertEqual(proof.check_route(detail(), ROUTE_ID)['stops'], 2)
 
     def test_near_miss_route_version(self):
         row = detail()
