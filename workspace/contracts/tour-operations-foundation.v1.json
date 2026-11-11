@@ -2,8 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://contracts.doctorcre.com/workspace/tour-operations-foundation.v1.json",
   "contract": "carr-tour-operations-foundation",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "status": "foundation_contract_not_a_client_surface",
+  "client_packet": {
+    "contract_version": "2.1.0",
+    "renderer_version": "2.0.0",
+    "appointments": "Each stop carries appointment_start and appointment_end from its sealed projection route version; unknown values are null. No inferred scheduling.",
+    "public_packet_note": "Optional reviewed public_packet_note field assertion selected at sealing. Uses append-tour-field-assertion source, rights, classification and review metadata. Internal notes are never a source.",
+    "presentation": "Share presentation, HTML and PDF use tour-packet-template.ts. Unrecorded appointments and unset public notes have no display row."
+  },
   "canonical_record_policy": {
     "source_of_truth": "versioned CARR records; projections, providers, routes, exports, and models are never canonical facts",
     "required_fact_metadata": ["organization_tenant_id", "property_id", "field_key", "value", "source_evidence_id", "observed_at", "effective_from", "effective_to", "rights_receipt_id", "confidence", "data_classification", "review_state"],

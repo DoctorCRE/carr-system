@@ -1,4 +1,5 @@
 // Define the versioned client packet sections, facts and display values.
+export const TOUR_PACKET_CONTRACT_VERSION = "2.1.0";
 export const TOUR_PACKET_TEMPLATE_VERSION = "2.0.0";
 export const TOUR_PACKET_TEMPLATE = Object.freeze({
   version: TOUR_PACKET_TEMPLATE_VERSION,
@@ -32,6 +33,9 @@ export type PacketProperty = {
   route_label: string;
   name: string;
   address: string;
+  appointment_start?: string | null;
+  appointment_end?: string | null;
+  public_packet_note?: string | null;
   suite?: string;
   property_type?: string;
   size?: Metric;
@@ -55,6 +59,11 @@ export function tourPacketPresentation(properties: readonly PacketProperty[]) {
       route_label: property.route_label,
       name: property.name,
       address: property.address,
+      appointment:
+        property.appointment_start && property.appointment_end
+          ? `${property.appointment_start} to ${property.appointment_end}`
+          : null,
+      public_packet_note: property.public_packet_note ?? null,
       facts: TOUR_PACKET_TEMPLATE.fields.map(([key, label]) => {
         const value = property[key];
         return {
@@ -70,6 +79,7 @@ export function tourPacketPresentation(properties: readonly PacketProperty[]) {
     }));
   return {
     ...TOUR_PACKET_TEMPLATE,
+    contractVersion: TOUR_PACKET_CONTRACT_VERSION,
     summary: `${stops.length} ${stops.length === 1 ? "property" : "properties"} in tour order.`,
     stops,
   };

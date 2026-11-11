@@ -19,7 +19,7 @@ const migration = readMigration("migrations/0318_tour_operations_foundation.sql"
 const rightsHardeningMigration = readMigration("migrations/0427_tour_rights_projection_hardening.sql");
 
 test("foundation contract preserves provenance, conflicts, audit, rights versions and tenant integrity", () => {
-  assert.equal(contract.version, "1.9.0");
+  assert.equal(contract.version, "1.10.0");
   for (const field of [
     "organization_tenant_id",
     "property_id",

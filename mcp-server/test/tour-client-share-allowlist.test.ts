@@ -110,7 +110,16 @@ const SENTINEL = {
   appointment: "2026-08-28T14:00:00Z",
 };
 const SENTINEL_PATTERN = new RegExp(
-  [...Object.values(SENTINEL), ids.property, ids.tour, ids.projection, ids.rights, ids.evidence]
+  [
+    ...Object.entries(SENTINEL)
+      .filter(([key]) => key !== "appointment")
+      .map(([, value]) => value),
+    ids.property,
+    ids.tour,
+    ids.projection,
+    ids.rights,
+    ids.evidence,
+  ]
     .map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
     .join("|"),
 );
@@ -137,7 +146,7 @@ const INTERNAL_FIELD_KEYS = [
   "brand_new_field",
 ];
 
-test("the client allowlist is exactly the eight fields on today's Tour PDF and cannot be widened at runtime", () => {
+test("the client allowlist is the packet facts and explicit public note and cannot be widened at runtime", () => {
   assert.deepEqual(
     [...CLIENT_TOUR_FIELD_KEYS],
     [
@@ -149,6 +158,7 @@ test("the client allowlist is exactly the eight fields on today's Tour PDF and c
       "asking_economics",
       "availability",
       "parking",
+      "public_packet_note",
     ],
   );
   assert.ok(Object.isFrozen(CLIENT_TOUR_FIELD_KEYS));
@@ -165,7 +175,8 @@ test("the client allowlist is exactly the eight fields on today's Tour PDF and c
 
 test("the JavaScript allowlist and the database allowlist are the same list", () => {
   const migration = readMigration(path.join(root, "migrations/0608_tour_client_field_allowlist.sql"));
-  const body = migration.split(/create or replace function ops\.tour_client_field_keys\(\)/i, 2)[1];
+  const current = readMigration(path.join(root, "migrations/1175_tour_packet_appointments_public_note.sql"));
+  const body = current.split(/create or replace function ops\.tour_client_field_keys\(\)/i, 2)[1];
   assert.ok(body, "migration defines ops.tour_client_field_keys()");
   const array = body.match(/array\[([^\]]*)\]::text\[\]/i);
   assert.ok(array, "ops.tour_client_field_keys() returns one literal text[]");
@@ -184,7 +195,11 @@ test("the JavaScript allowlist and the database allowlist are the same list", ()
     // The packet-level 'caveat' key stays an explicit null (0586); what must
     // be gone is any per-property column read from a non-allowlisted fact.
     const columns = [...text.matchAll(/display_field_key='([^']*)'/g)].map((match) => match[1]);
-    assert.deepEqual(columns, [...CLIENT_TOUR_FIELD_KEYS], `${fn} selects exactly the allowlisted columns`);
+    assert.deepEqual(
+      [...columns, "public_packet_note"],
+      [...CLIENT_TOUR_FIELD_KEYS],
+      `${fn} selects exactly the allowlisted columns`,
+    );
     for (const forbidden of ["appointment_start", "tour_name", "access_coordinate_status", "notes"])
       assert.equal(text.includes(forbidden), false, `${fn} names ${forbidden}`);
   }
@@ -364,7 +379,13 @@ const hostilePacket = {
 
 test("a share packet carries only envelope keys and allowlisted columns, never internal material", () => {
   const packet = projectTourClientPacket(hostilePacket);
-  assert.deepEqual(Object.keys(packet).sort(), ["as_of", "presentation", "stops"]);
+  assert.deepEqual(Object.keys(packet).sort(), [
+    "as_of",
+    "contract_version",
+    "presentation",
+    "renderer_version",
+    "stops",
+  ]);
   assert.equal(packet.stops.length, 1);
   const allowedStopKeys = new Set([...CLIENT_TOUR_STOP_ENVELOPE_KEYS, ...Object.values(CLIENT_TOUR_PACKET_COLUMNS)]);
   for (const key of Object.keys(packet.stops[0])) assert.ok(allowedStopKeys.has(key), `stop leaked key ${key}`);
@@ -380,6 +401,8 @@ test("a share packet carries only envelope keys and allowlisted columns, never i
     asking_economics: { value: 24, currency: "USD", period: "NNN" },
     availability: "available",
     parking: "4/1000",
+    appointment_start: SENTINEL.appointment,
+    appointment_end: SENTINEL.appointment,
   });
   assert.doesNotMatch(JSON.stringify(packet), SENTINEL_PATTERN);
 });
@@ -489,7 +512,13 @@ test("the client's browser exchange and packet read return no internal material"
   assert.deepEqual(exchange, { ok: true, expires_at: "2026-08-28T00:00:00Z", permission_scopes: ["view_packet"] });
   const packet = await h.browser.readPacket(h.client, { session_digest: digest("b") });
   assert.doesNotMatch(JSON.stringify([exchange, packet]), SENTINEL_PATTERN);
-  assert.deepEqual(Object.keys(packet.packet).sort(), ["as_of", "presentation", "stops"]);
+  assert.deepEqual(Object.keys(packet.packet).sort(), [
+    "as_of",
+    "contract_version",
+    "presentation",
+    "renderer_version",
+    "stops",
+  ]);
 });
 
 // ---------------------------------------------------------------------------
@@ -989,6 +1018,9 @@ test("the JavaScript value rule and the database value rule are the same text", 
 });
 
 const cleanStop = {
+  appointment_start: null,
+  appointment_end: null,
+  public_packet_note: "Please meet in the lobby",
   property_ref: "property:public:abcdefghijklmnop",
   route_sequence: 1,
   route_label: "A",
@@ -1007,7 +1039,7 @@ const secondStop: typeof cleanStop & Record<string, unknown> = {
   route_sequence: 2,
   route_label: "B",
 };
-const TEXT_COLUMNS = ["name", "address", "suite", "property_type", "availability", "parking"];
+const TEXT_COLUMNS = ["name", "address", "suite", "property_type", "availability", "parking", "public_packet_note"];
 
 test("one unsafe value anywhere refuses the whole browser packet, never a trimmed copy", () => {
   const baseline = projectTourClientPacket({ as_of: "2026-08-27T12:15:00Z", stops: [cleanStop, secondStop] });
@@ -1099,7 +1131,7 @@ test("the PDF renderer admits exactly the client allowlist and refuses the same 
     renderTourPacket({ ...packet, properties: [{ ...cleanStop, parking: ordinary }] });
   const refused = (code: string) => (error: unknown) =>
     error instanceof Error && "code" in error && error.code === code;
-  for (const key of ["caveat", "notes", "owner_contact", "access", "photos", "appointment_start", "brand_new_field"])
+  for (const key of ["caveat", "notes", "owner_contact", "access", "photos", "brand_new_field"])
     assert.throws(
       () => renderTourPacket({ ...packet, properties: [{ ...cleanStop, [key]: "x" }] }),
       (error) =>
