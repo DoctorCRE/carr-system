@@ -65,7 +65,7 @@ export async function readLeadWorkspace(
   const row = (
     await c.query(
       `with board as materialized (
-      select w.*, ${reachabilityInputSql("w.id", "w.party_id")} reachability_input, ${researchEvidenceSql("w.party_id")} research_evidence, p.prospect_client_id,p.prospect_client_version,p.prospect_engagement_status
+      select w.*, ${reachabilityInputSql("w.id", "w.party_id", "w.created_at")} reachability_input, ${researchEvidenceSql("w.party_id")} research_evidence, p.prospect_client_id,p.prospect_client_version,p.prospect_engagement_status
         from v_lead_workspace w left join v_lead_prospect_engagement p on p.lead_id=w.id
     ), correspondence as materialized (
       select * from v_lead_workspace_correspondence where lead_id=$1::uuid

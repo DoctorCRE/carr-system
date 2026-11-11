@@ -6,14 +6,14 @@ Reachable requires all of the following in one snapshot.
 
 - A successful contact on this exact lead, dated after lead creation, no later than the read clock, within 90 days. Manual call, text, inbound email, meeting or tour requires `connected=true`. The activity's lead relationship binds it to the current party. Any explicit conflicting party binding refuses it.
 - For `mail_ingest` or `local_mail`, only inbound mail with `match=exact`, the same party ID, a nonempty `evidence_ref` and `automated=false` qualifies. Connected alone cannot bypass these machine-ingest checks. Outbound email never proves successful contact.
-- A found, sourced, nonfuture email, cell or office_phone finding with an explicit unexpired expiry and exact equality to the current party email, cell or phone. Email must have an email shape, phones at least seven digits. Bare contact values and identity verification are insufficient.
+- A found, sourced, nonfuture email or office_phone finding with an explicit unexpired expiry and exact equality to the current party email or office phone. Email must have an email shape, phones at least seven digits. Bare contact values and identity verification are insufficient.
 - Contact eligibility is true and no current discrepancy or proposed correction exists. Restrictions, research completeness and evidence conflicts remain separately visible. An expired or missing route or unsuccessful contact yields Research, never a bad-lead judgment.
 
 `successful_contact` exposes activity ID, date, kind and source. `usable_route` identifies the finding and route kind. `source_inputs` contains the current party routes, lead creation date and at most 500 recent bound activities. Existing `evidence` retains finding provenance. The SHA-256 revision covers `[base_version, contact_eligible, evidence, source_inputs]`. Refresh can change classification through expiry without changing that revision.
 
 ## System design
 
-The existing read module queries evidence and classifies it. No new endpoint or migration. One PostgreSQL statement preserves board membership, ordering and board/detail equality. A correlated lookup reads up to 501 recent activities per lead and refuses above 500, matching the findings bound. At 10x volume the activity lookup and JSON payload grow first. No application N+1, external call, cache, queue, write, idempotency key or retry is introduced. Database failure refuses the snapshot. This uses the existing registered authentication and reader grants.
+The existing read module queries evidence and classifies it. It uses the existing reader-granted workspace detail and correspondence views. The detail view exposes email and office phone. Cell-only routes remain Research because no current cell value is exposed by that view; no base-table grants are widened. No new endpoint or migration. One PostgreSQL statement preserves board membership, ordering and board/detail equality. A correlated lookup reads up to 501 recent activities per lead and refuses above 500, matching the findings bound. At 10x volume the activity lookup and JSON payload grow first. No application N+1, external call, cache, queue, write, idempotency key or retry is introduced. Database failure refuses the snapshot. This uses the existing registered authentication and reader grants.
 
 ## Model and tests
 

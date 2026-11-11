@@ -245,13 +245,13 @@ export async function leadReachability(
     source_inputs: input ?? null,
   };
 }
-export function reachabilityInputSql(leadId: string, partyId: string) {
-  return `(select jsonb_build_object('party_id',p.id,'created_at',l.created_at,
-    'email',p.email,'cell',p.cell,'phone',p.phone,'activities',coalesce((select jsonb_agg(to_jsonb(a) order by a.occurred_at desc,a.id) from (
-      select id,lead_id,kind,connected,occurred_at,source,detail from public.activity
-      where lead_id=l.id and occurred_at>=l.created_at and occurred_at>=now()-interval '90 days'
+export function reachabilityInputSql(leadId: string, partyId: string, createdAt: string) {
+  return `(select jsonb_build_object('party_id',${partyId},'created_at',${createdAt},
+    'email',d.detail->>'email','cell',null,'phone',d.detail->>'phone','activities',coalesce((select jsonb_agg(to_jsonb(a) order by a.occurred_at desc,a.id) from (
+      select id,lead_id,kind,connected,occurred_at,source,detail from v_lead_workspace_correspondence
+      where lead_id=${leadId} and occurred_at>=${createdAt} and occurred_at>=now()-interval '90 days'
         and occurred_at<=now() order by occurred_at desc,id limit 501) a),'[]'::jsonb))
-    from public.lead l join public.party p on p.id=l.party_id where l.id=${leadId} and p.id=${partyId})`;
+    from v_lead_workspace_detail d where d.id=${leadId})`;
 }
 export function researchEvidenceSql(partyId: string) {
   return `coalesce((select jsonb_agg(to_jsonb(f) order by f.observed_at desc,f.flag_id) from (

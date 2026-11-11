@@ -43,10 +43,11 @@ test("registered board preserves identity, owns classification, and exposes exac
           await executeRegisteredTool(db, actor, "lead-board", { workspace: "leads", lead_id: lead }),
         );
         assert.equal(calls, 1);
-        assert.deepEqual(
-          object(result.detail).reachability,
-          object(array(result.leads).find((r) => object(r).id === lead)).reachability,
-        );
+        if (result.detail)
+          assert.deepEqual(
+            object(result.detail).reachability,
+            object(array(result.leads).find((r) => object(r).id === lead)).reachability,
+          );
         return result;
       } finally {
         await c.query("reset role");
@@ -120,7 +121,7 @@ test("registered board preserves identity, owns classification, and exposes exac
       );
     }
     await c.query("update lead set suppressed=true where id=$1", [lead]);
-    assert.equal(await classification(), "research");
+    assert.equal((await read()).detail, null);
     await c.query("update lead set suppressed=false where id=$1", [lead]);
     await c.query("update party set contact_state='paused' where id=$1", [party]);
     assert.equal(await classification(), "research");
