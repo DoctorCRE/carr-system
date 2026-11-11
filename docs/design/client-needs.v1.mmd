@@ -1,0 +1,34 @@
+stateDiagram-v2
+ state ClientNeeds {
+ state Need {
+  [*] --> Draft
+  Draft --> Approved: Approve draft
+  Approved --> EditedLapsed: Edit need
+  EditedLapsed --> Approved: Approve edited need
+  Approved --> Stale: Freshness expires
+  Stale --> EditedLapsed: Refresh evidence
+  Draft --> Withdrawn: Withdraw need
+  Approved --> Withdrawn: Withdraw need
+  EditedLapsed --> Withdrawn: Withdraw need
+  Stale --> Withdrawn: Withdraw need
+  Withdrawn --> EditedLapsed: Restore need
+ }
+ --
+ state Result {
+  [*] --> Hidden
+  Hidden --> Matched: Approve draft [when Draft]
+  %% when Draft
+  Hidden --> Matched: Approve edited need [when EditedLapsed]
+  %% when EditedLapsed
+  Matched --> Hidden: Edit need [when Approved]
+  %% when Approved
+  Matched --> Hidden: Freshness expires [when Approved]
+  %% when Approved
+  Matched --> Hidden: Withdraw need [when Approved]
+  %% when Approved
+ }
+ }
+ %% never DraftNeverMatches: Draft & Matched -- Draft needs never match
+ %% never EditedNeverMatches: EditedLapsed & Matched -- Edited needs never match
+ %% never WithdrawnNeverMatches: Withdrawn & Matched -- Withdrawn needs never match
+ %% never StaleNeverMatches: Stale & Matched -- Stale needs never match

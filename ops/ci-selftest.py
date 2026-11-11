@@ -1706,8 +1706,8 @@ def test_hosted_queue_demand_contract():
     broken = copy.deepcopy(wf)
     broken['concurrency']['cancel-in-progress'] = True
     check('queue contract detects cancellable merge groups', not full_contract(broken))
-    check('superseded runs group by workflow and ref', wf['concurrency']['group'] ==
-          '${{ github.workflow }}-${{ github.head_ref || github.ref }}')
+    check('runs group by workflow, event, PR or ref, and tested SHA', wf['concurrency']['group'] ==
+          '${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event.pull_request.head.sha || github.sha }}')
     with tempfile.TemporaryDirectory() as directory:
         output = pathlib.Path(directory) / 'outputs'
         result = subprocess.run([sys.executable, str(REPO / 'ops/ci_scope.py'), '--hosted'],
