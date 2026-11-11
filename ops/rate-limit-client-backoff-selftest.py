@@ -21,6 +21,8 @@ REPO = Path(__file__).resolve().parents[1]
 
 class BackoffTest(unittest.TestCase):
     def setUp(self):
+        self.expected_method = 'GET'
+        self.expected_path = '/mcp'
         self.responses = []
         self.requests = []
         self.received_429 = threading.Event()
@@ -28,8 +30,11 @@ class BackoffTest(unittest.TestCase):
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
-                if self.path != '/mcp':
+                if self.path != owner.expected_path:
                     self.send_error(404)
+                    return
+                if self.command != owner.expected_method:
+                    self.send_error(405)
                     return
                 owner.requests.append(self.rfile.read(int(self.headers.get('Content-Length', 0))))
                 status, headers, body = owner.responses.pop(0)
@@ -114,6 +119,7 @@ class BackoffTest(unittest.TestCase):
                     with self.subTest(status=status, body=body, client=client):
                         self.requests = []
                         self.responses = [(status, {'Retry-After': '0'}, body), (200, {}, b'recovered')]
+                        self.expected_method = 'GET' if client == 'reader' else 'POST'
                         result = reader.read(self.url) if client == 'reader' else self.cli({})
                         self.assertEqual(len(self.requests), 1)
                         if client == 'reader':
@@ -144,6 +150,7 @@ class BackoffTest(unittest.TestCase):
         self.assertIsNone(reader.retry_delay(200, {}, 1, 0))
 
     def cli(self, args, **extra):
+        self.expected_method = 'POST'
         env = {**os.environ, 'CARR_MCP_LOCAL_TOKEN': 'synthetic-bearer',
                'CARR_MCP_ENV': '/nonexistent/J281-tokens', 'CARR_MCP_URL': self.url}
         env.pop('DATABASE_URL', None)
