@@ -63,6 +63,24 @@ class BackoffTest(unittest.TestCase):
             self.assertEqual(reader.read(self.url).body, b'recovered')
         self.assertEqual([c.args[0] for c in sleep.call_args_list], [7, 0])
 
+    def test_reader_tagged_cloudflare_1015(self):
+        body = (REPO / 'ops/fixtures/cloudflare-1015.html').read_bytes()
+        self.responses = [(403, {'Retry-After': '0'}, body), (200, {}, b'recovered')]
+        reply = reader.read(self.url)
+        self.assertEqual(reply.status, 200)
+        self.assertEqual(reply.body, b'recovered')
+        self.assertEqual(len(self.requests), 2)
+
+    def test_reader_auth_html_never_retries(self):
+        for status in (401, 403, 500, 503):
+            with self.subTest(status=status):
+                body = b'<html><h1>Access denied</h1><p>Cloudflare</p></html>'
+                self.responses = [(status, {'Retry-After': '0'}, body)]
+                reply = reader.read(self.url)
+                self.assertEqual(reply.status, status)
+                self.assertEqual(reply.body, body)
+        self.assertEqual(len(self.requests), 4)
+
     def test_reader_exhaustion(self):
         self.responses = [(429, {'Retry-After': '0'}, b'limited')] * 6
         with patch.object(reader.time, 'sleep'), patch('sys.stderr') as stderr:
@@ -106,6 +124,15 @@ class BackoffTest(unittest.TestCase):
         self.assertEqual(len(self.requests), 2)
         self.assertEqual(self.requests[0], self.requests[1])
         self.assertEqual(json.loads(self.requests[1])['params']['arguments']['idempotency_key'], 'same-key')
+
+    def test_cli_tagged_cloudflare_1015(self):
+        body = (REPO / 'ops/fixtures/cloudflare-1015.html').read_bytes()
+        self.responses = [(403, {'Retry-After': '0'}, body),
+                          (200, {}, b'{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"null"}]}}')]
+        result = self.cli({'idempotency_key': 'tagged-heading'})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.requests), 2)
+        self.assertEqual(self.requests[0], self.requests[1])
 
     def test_cli_exhaustion_preserves_error(self):
         self.responses = [(429, {'Retry-After': '0'}, b'limited')] * 6
