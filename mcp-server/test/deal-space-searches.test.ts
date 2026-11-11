@@ -6,7 +6,7 @@ import test from "node:test";
 import { Validator } from "@cfworker/json-schema";
 import pg from "pg";
 import { dealSpaceSearchContracts } from "../src/deal-space-searches.ts";
-import { publicError } from "../src/public-errors.ts";
+import { agentActorForToken } from "../src/identity.js";
 import { acquireDisposablePostgres } from "./helpers/disposable-postgres.ts";
 
 const { executeRegisteredTool, TOOLS } = await import(new URL("../src/tools.js", import.meta.url).href);
@@ -100,24 +100,47 @@ test("saved search lifecycle, canonical run, reopen, conflict, archive and autho
         throw e;
       }
     };
-    for (const owner of [null, "dell"]) {
-      await t.test(`${owner ?? "ownerless"} deal returns a typed unavailable refusal`, async () => {
-        const unavailable = (
-          await c.query(
-            `insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by)
-             values($1,'Synthetic unavailable search','other','pending',$2,$3,$3) returning id`,
-            [client, owner, actor.id],
-          )
-        ).rows[0].id;
-        await assert.rejects(
-          invoke("read-deal-space-searches-v1", { deal_id: unavailable, search_id: null }),
-          (error: unknown) => {
-            assert.ok(error instanceof Error);
-            assert.equal(error.message, "space_search_unavailable");
-            assert.equal(publicError(error).error, "space_search_unavailable");
-            return true;
-          },
-        );
+    for (const owner of ["joe", "dell", null]) {
+      await t.test(`${owner ?? "ownerless"} deal supports partner saved-search read, save and run`, async () => {
+        const target = (await c.query(
+          `insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by)
+           values($1,'Synthetic shared search','other','pending',$2,$3,$3) returning id`,
+          [client, owner, actor.id],
+        )).rows[0].id;
+        const args = {
+          deal_id: target, search_id: randomUUID(), expected_version: 0,
+          idempotency_key: randomUUID(), name: "Shared partner search", status: "saved",
+          criteria: filters, requirements: "Shared deal", client_prefill_source: null,
+        };
+        for (const slug of ["joe", "dell", "joe-local", "dell-local", "codex", "claude"]) {
+          const human = slug === "joe" || slug === "dell";
+          const row = (await c.query(
+            `insert into actor(slug,kind,display_name) values($1,$2,'Synthetic partner access')
+             on conflict(slug) do update set active=true returning id`, [slug, human ? "human" : "automation"],
+          )).rows[0];
+          const who = human ? { ...row, slug, human } : agentActorForToken(
+            "Bearer synthetic-search", JSON.stringify({ [slug]: "synthetic-search" }), "local-token",
+          );
+          Object.assign(who, { id: row.id });
+          // Native agents need the verified native door rather than the local-token door.
+          if (slug === "codex" || slug === "claude") Object.assign(who, {
+            slug, human: false, native_agent_verified: true, sponsoring_human_slug: "joe",
+            authorization_class: "sponsored_agent",
+          });
+          const saved = await invoke("save-deal-space-search-v1", {
+            ...args, search_id: randomUUID(), idempotency_key: randomUUID(),
+          }, who);
+          const ran = await invoke("run-deal-space-search-v1", {
+            deal_id: target, search_id: saved.search.id, expected_version: 1, idempotency_key: randomUUID(),
+          }, who);
+          assert.equal(ran.search.version, 2, slug);
+          const read = await invoke("read-deal-space-searches-v1", { deal_id: target, search_id: saved.search.id }, who);
+          assert.deepEqual(read.searches, [ran.search], slug);
+        }
+        for (const verb of ["read-deal-space-searches-v1", "save-deal-space-search-v1", "run-deal-space-search-v1"]) {
+          const input = verb.startsWith("read-") ? { deal_id: target, search_id: null } : args;
+          await assert.rejects(invoke(verb, input, { id: actor.id, slug: "untrusted", human: false }), /human_only/);
+        }
       });
     }
     const search_id = randomUUID();
