@@ -1,0 +1,15 @@
+{
+  "worker": [
+    "src/portal-proposals.ts",
+    "src/portal-web.ts"
+  ],
+  "node": [
+    "test/portal-proposals-postgres.test.ts",
+    "test/portal-web.test.ts"
+  ],
+  "entry": [
+    "test/portal-proposals-postgres.test.ts",
+    "src/portal-web.ts",
+    "test/portal-web.test.ts"
+  ]
+}
