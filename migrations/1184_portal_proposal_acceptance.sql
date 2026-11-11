@@ -8,6 +8,7 @@ declare portal ops.client_portal%rowtype; pub ops.client_publication%rowtype;
  members uuid[]; result jsonb; selected jsonb; added jsonb; removed jsonb; retained jsonb; retired jsonb; new_id uuid;
  actor_slug text:=current_setting('carr.acting_actor_slug',true);
 begin
+ if current_setting('transaction_isolation')<>'read committed' then raise exception 'proposal_isolation_unsupported'; end if;
  if actor_slug not in ('joe','dell') or actor_slug is null
  or current_setting('carr.verified_human_actor_slug',true) is distinct from actor_slug
  or current_setting('carr.organization_tenant_id',true) is distinct from 'carr-internal'
@@ -50,14 +51,18 @@ begin
  if selected is null or jsonb_typeof(selected)<>'array' then raise exception 'proposal_input_invalid'; end if;
  if jsonb_array_length(selected)>100 or exists(select 1 from jsonb_array_elements(selected) id where jsonb_typeof(id)<>'string')
  or (select count(distinct id) from jsonb_array_elements_text(selected) id)<>jsonb_array_length(selected)
- or exists(select 1 from jsonb_array_elements_text(selected) id where not ((result->'selected') ? id or (result->'mine') ? id) or (result->'retired') ? id)
+ or exists(select 1 from jsonb_array_elements_text(selected) id where not ((result->'selected') ? id or (result->'mine') ? id) or (p_request->>'decision'='accept' and (result->'retired') ? id))
  then raise exception 'proposal_input_invalid'; end if;
+ if p_request->>'decision'='keep' and selected is distinct from coalesce(cart.property_ids,'[]') then raise exception 'proposal_input_invalid'; end if;
+ if exists(select 1 from public.event e where e.organization_tenant_id='carr-internal' and e.subject_type='deal' and e.subject_id=p_deal
+ and e.verb='accept-portal-proposal-v1' and e.new_value->>'publication_id'=pub.id::text and e.new_value->>'source_version'=source.version::text)
+ then raise exception 'proposal_already_reviewed'; end if;
  if p_request->>'decision'='keep' then
- if selected is distinct from coalesce(cart.property_ids,'[]') then raise exception 'proposal_input_invalid'; end if;
  return result||jsonb_build_object('state','kept','property_ids',selected,'selection_version_id',cart.id);
  end if;
  new_id:=ops.append_tour_selection_cart_version('carr-internal',p_tour,cart.id,selected,coalesce(cart.selection_version,0),
  'sha256:'||encode(public.digest(convert_to(selected::text,'UTF8'),'sha256'),'hex'));
+ if new_id is null then raise exception 'proposal_source_changed'; end if;
  return result||jsonb_build_object('state','accepted','property_ids',selected,'selection_version_id',new_id);
 end $$;
 revoke all on function ops.review_portal_proposal(uuid,uuid,uuid,jsonb) from public,carr_reader,carr_writer,carr_authority,dot_reader;

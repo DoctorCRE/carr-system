@@ -100,7 +100,7 @@ import { engineeringRuntimeTools } from "./engineering-runtime.js";
 import { tourRightsProjectionTools } from "./tour-rights-projection.js";
 import { tourPropertyJurisdictionTools } from "./tour-property-jurisdiction.js";
 import { tourDomainTools } from "./tour-domain.js";
-import { portalProposalAcceptanceTools } from "./portal-proposal-acceptance.ts";
+import { portalProposalAcceptanceTools, portalProposalReplayQuery } from "./portal-proposal-acceptance.ts";
 import { tourPropertySearchTools, tourPropertySearchInputSchema, normalizeTourPropertySearch } from "./tour-property-search.js";
 import { installTourDealAccess } from "./tour-deal-access.js";
 import { dealSpaceSearchTools } from "./deal-space-searches.ts";
@@ -284,7 +284,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   if (verb === "record-finding" && args.kind === "email_delivery_failure")
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))",
       [JSON.stringify([verb, args.kind, actor.id, String(args.source || "").trim()])]);
-  const prior = await client.query(verb === 'log-activity' ? `select request_hash, response, false as permanent from tool_call where idempotency_key=$1
+  const prior = await client.query(verb === 'accept-portal-proposal-v1' ? portalProposalReplayQuery : verb === 'log-activity' ? `select request_hash, response, false as permanent from tool_call where idempotency_key=$1
     and ($2 or created_at > now() - interval '${REPLAY_WINDOW}')
     union all select new_value#>>'{email_application,request_hash}' as request_hash,
       new_value#>'{email_application,response}' as response, true as permanent from event

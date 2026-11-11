@@ -1,12 +1,20 @@
 // Compare isolated client choices and append only an explicitly accepted cart.
 import { type Schema, Validator } from "@cfworker/json-schema";
+import { REPLAY_WINDOW } from "./replay-receipt.ts";
 import { ToolError } from "./tool-error.ts";
-import type { Actor, Db, WithEnvelope, WriteEvent } from "./verb-contract.ts";
+import type { Actor, Db, WriteEvent } from "./verb-contract.ts";
+
+export const portalProposalReplayQuery = `select request_hash, response, false as permanent from tool_call where idempotency_key=$1
+    and ($2 or created_at > now() - interval '${REPLAY_WINDOW}')
+    union all select new_value#>>'{portal_acceptance,request_hash}' as request_hash,
+      new_value - 'portal_acceptance' as response, true as permanent from event
+      where idempotency_key=$1 and verb='accept-portal-proposal-v1' and subject_type='deal'
+        and organization_tenant_id='carr-internal' and new_value ? 'portal_acceptance'
+    order by permanent desc limit 2`;
 
 type Scope = { deal_id: string; publication_id: string; tour_id: string };
 export type ProposalReview = Scope & {
   schema_version: "portal-proposal-acceptance.v1";
-  state: "reviewed" | "accepted" | "kept";
   publication_version: number;
   source_version: number;
   cart_version: number;
@@ -18,9 +26,11 @@ export type ProposalReview = Scope & {
   removed: string[];
   retained: string[];
   retired: string[];
-  property_ids?: string[];
-  selection_version_id?: string | null;
-};
+} & (
+    | { state: "reviewed"; property_ids?: string[]; selection_version_id?: string | null }
+    | { state: "accepted"; property_ids: string[]; selection_version_id: string }
+    | { state: "kept"; property_ids: string[]; selection_version_id: string | null }
+  );
 const uuid: Schema = { type: "string", format: "uuid" };
 const ids: Schema = { type: "array", maxItems: 100, uniqueItems: true, items: uuid };
 const integer: Schema = { type: "integer", minimum: 0, maximum: 2147483646 };
@@ -52,23 +62,39 @@ type Acceptance = Scope & {
   decision: "accept" | "keep";
   property_ids: string[];
 };
-const decisionSchema = object({
-  ...scopeFields,
-  ok: { const: true },
-  schema_version: { const: "portal-proposal-acceptance.v1" },
-  state: { enum: ["accepted", "kept"] },
-  publication_version: integer,
-  source_version: integer,
-  cart_version: integer,
-  cart_version_id: nullableId,
-  property_ids: ids,
-  selection_version_id: nullableId,
-});
+const decisionGuards: Schema[] = [
+  {
+    anyOf: [
+      { properties: { state: { const: "reviewed" } } },
+      {
+        properties: { state: { const: "accepted" }, selection_version_id: uuid },
+        required: ["property_ids", "selection_version_id"],
+      },
+      { properties: { state: { const: "kept" } }, required: ["property_ids", "selection_version_id"] },
+    ],
+  },
+];
+export const proposalDecisionSchema: Schema = {
+  ...object({
+    ...scopeFields,
+    ok: { const: true },
+    schema_version: { const: "portal-proposal-acceptance.v1" },
+    state: { enum: ["accepted", "kept"] },
+    publication_version: integer,
+    source_version: integer,
+    cart_version: integer,
+    cart_version_id: nullableId,
+    property_ids: ids,
+    selection_version_id: nullableId,
+  }),
+  allOf: decisionGuards,
+};
 function validate(schema: Schema, value: unknown, code: string) {
   if (!new Validator(structuredClone(schema), "2020-12", false).validate(value).valid)
     throw new ToolError({ error: code });
 }
 export const proposalReviewSchema: Schema = {
+  allOf: decisionGuards,
   type: "object",
   required: [
     "schema_version",
@@ -122,7 +148,13 @@ function proposalSignal(review: ProposalReview) {
   };
 }
 export function portalProposalAcceptance(deps: {
-  withEnvelope: WithEnvelope;
+  withEnvelope: <T>(
+    c: Db,
+    actor: Actor,
+    verb: string,
+    args: object,
+    fn: (requestHash: string) => Promise<T>,
+  ) => Promise<T>;
   writeEvent: WriteEvent;
   partnerAuthoritySlugForActor: (actor: Actor) => string | null;
 }) {
@@ -140,7 +172,9 @@ export function portalProposalAcceptance(deps: {
         deals: deal ? { [deal.id]: { owner: deal.owner, version: deal.version } } : {},
       }),
     ]);
-    return query(c, scope, null);
+    const review = await query(c, scope, null);
+    if (review.state !== "reviewed") throw new ToolError({ error: "proposal_response_invalid" });
+    return review;
   }
   async function query(c: Db, scope: Scope, request: unknown) {
     try {
@@ -167,11 +201,11 @@ export function portalProposalAcceptance(deps: {
       const decision =
         (
           await c.query<{ new_value: unknown }>(
-            "select new_value from public.event where verb='accept-portal-proposal-v1' and subject_id=$1 and new_value->>'publication_id'=$2 and new_value->>'source_version'=$3 order by recorded_at desc,id desc limit 1",
+            "select new_value - 'portal_acceptance' as new_value from public.event where organization_tenant_id='carr-internal' and subject_type='deal' and verb='accept-portal-proposal-v1' and subject_id=$1 and new_value->>'publication_id'=$2 and new_value->>'source_version'=$3 limit 1",
             [review.deal_id, review.publication_id, String(review.source_version)],
           )
         ).rows[0]?.new_value ?? null;
-      if (decision !== null) validate(decisionSchema, decision, "proposal_response_invalid");
+      if (decision !== null) validate(proposalDecisionSchema, decision, "proposal_response_invalid");
       return { ok: true, review, decision, pending: decision !== null ? null : proposalSignal(review) };
     },
     accept: async (c: Db, actor: Actor, input: unknown) => {
@@ -179,9 +213,10 @@ export function portalProposalAcceptance(deps: {
       const args = structuredClone(input) as Acceptance;
       // Hold the canonical lock through envelope replay, append and audit.
       await authorize(c, actor, args);
-      return deps.withEnvelope(c, actor, "accept-portal-proposal-v1", args, async () => {
+      return deps.withEnvelope(c, actor, "accept-portal-proposal-v1", args, async (requestHash) => {
         const { deal_id, publication_id, tour_id, idempotency_key, ...request } = args;
         const review = await query(c, { deal_id, publication_id, tour_id }, request);
+        if (review.state === "reviewed") throw new ToolError({ error: "proposal_response_invalid" });
         const receipt = {
           ok: true,
           schema_version: review.schema_version,
@@ -198,7 +233,7 @@ export function portalProposalAcceptance(deps: {
         };
         await deps.writeEvent(c, actor, "accept-portal-proposal-v1", "deal", deal_id, {
           field: "tour_selection_proposal",
-          new: receipt,
+          new: { ...receipt, portal_acceptance: { request_hash: requestHash } },
           idempotency_key,
         });
         return receipt;
@@ -225,7 +260,7 @@ export function portalProposalAcceptanceTools(deps: Parameters<typeof portalProp
       humanOnly: true,
       humanCallerOnly: true,
       description:
-        "portal-proposal-acceptance.v1. Joe or Dell explicitly accepts exact canonical choices at reviewed source and cart versions, or keeps the current cart. Stale versions require review. Original-request retry replays its receipt for 30 days. Route and publication remain unchanged.",
+        "portal-proposal-acceptance.v1. Joe or Dell explicitly accepts exact canonical choices at reviewed source and cart versions, or keeps the current cart. Stale versions require review. Original-request retry replays its source-bound audit receipt even after tool_call expiry. Route and publication remain unchanged.",
       inputSchema: acceptSchema,
       handler: api.accept,
     },

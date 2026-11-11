@@ -103,6 +103,45 @@
     ]
   },
   "review": {
+    "allOf": [
+      {
+        "anyOf": [
+          {
+            "properties": {
+              "state": {
+                "const": "reviewed"
+              }
+            }
+          },
+          {
+            "properties": {
+              "state": {
+                "const": "accepted"
+              },
+              "selection_version_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "property_ids",
+              "selection_version_id"
+            ]
+          },
+          {
+            "properties": {
+              "state": {
+                "const": "kept"
+              }
+            },
+            "required": [
+              "property_ids",
+              "selection_version_id"
+            ]
+          }
+        ]
+      }
+    ],
     "type": "object",
     "required": [
       "schema_version",
@@ -276,9 +315,143 @@
     "mine": "decision=keep with the exact mine array; writes audit and receipt, appends no cart.",
     "choices": "decision=accept with an exact subset of selected union mine, excluding retired IDs.",
     "stale": "proposal_source_changed requires another review of both versions.",
-    "unknown": "Retry the same frozen idempotency key and exact request. Original receipt replays for the existing 30-day tool_call window.",
+    "unknown": "Retry the exact frozen request and key. The existing envelope verifies its full operation/principal manifest and replays the original source-bound audit receipt even after tool_call retention removes its row. Current authorization and publication retirement checks still run first.",
     "retired": "Authorization and publication retirement are checked before replay.",
     "notes": "Exact private client source text; never copied into canonical property facts.",
-    "production_proof": "On a containing release compare an existing proposal/current cart difference and an existing authorized acceptance receipt against the immutable resulting cart. No qualifying receipt means exit 78."
+    "production_proof": "On a containing release compare an existing proposal/current cart difference and an existing authorized acceptance receipt against the immutable resulting cart. No qualifying receipt means exit 78.",
+    "settlement": "A publication/client source version settles once under the portal lock. A different key after Keep mine or acceptance refuses with proposal_already_reviewed; reread returns its original decision. A newer client version reopens pending review.",
+    "transaction": "Registered verbs run in the existing READ COMMITTED dispatcher transaction. Other isolation levels refuse with proposal_isolation_unsupported to prevent a stale source snapshot."
+  },
+  "accept_response": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "deal_id": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "publication_id": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "tour_id": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "ok": {
+        "const": true
+      },
+      "schema_version": {
+        "const": "portal-proposal-acceptance.v1"
+      },
+      "state": {
+        "enum": [
+          "accepted",
+          "kept"
+        ]
+      },
+      "publication_version": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 2147483646
+      },
+      "source_version": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 2147483646
+      },
+      "cart_version": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 2147483646
+      },
+      "cart_version_id": {
+        "anyOf": [
+          {
+            "type": "string",
+            "format": "uuid"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "property_ids": {
+        "type": "array",
+        "maxItems": 100,
+        "uniqueItems": true,
+        "items": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "selection_version_id": {
+        "anyOf": [
+          {
+            "type": "string",
+            "format": "uuid"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "replayed": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "deal_id",
+      "publication_id",
+      "tour_id",
+      "ok",
+      "schema_version",
+      "state",
+      "publication_version",
+      "source_version",
+      "cart_version",
+      "cart_version_id",
+      "property_ids",
+      "selection_version_id"
+    ],
+    "allOf": [
+      {
+        "anyOf": [
+          {
+            "properties": {
+              "state": {
+                "const": "reviewed"
+              }
+            }
+          },
+          {
+            "properties": {
+              "state": {
+                "const": "accepted"
+              },
+              "selection_version_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "property_ids",
+              "selection_version_id"
+            ]
+          },
+          {
+            "properties": {
+              "state": {
+                "const": "kept"
+              }
+            },
+            "required": [
+              "property_ids",
+              "selection_version_id"
+            ]
+          }
+        ]
+      }
+    ]
   }
 }

@@ -196,7 +196,7 @@ test("identity merges, retrieval, board answers, partner-only deal acts and huma
   assert.equal(TOOLS["confirm-merge"].humanCallerOnly, true);
   assert.equal(TOOLS["confirm-merge"].humanOnly, true);
   const flagged = Object.keys(TOOLS).filter(name => TOOLS[name].humanCallerOnly === true);
-  assert.deepEqual(flagged.sort(), ["abandon-deal-deliverable", "answer-board-question", "answer-work-request-for-joe",
+  assert.deepEqual(flagged.sort(), ["abandon-deal-deliverable", "accept-portal-proposal-v1", "read-portal-proposal-review-v1", "answer-board-question", "answer-work-request-for-joe",
     "append-tour-entrance-verification-receipt", "cancel-pending-deal", "commit-winning-property",
     "confirm-email-deal-progress", "confirm-email-filing", "confirm-email-next-step", "confirm-merge", "confirm-requirement-reply", "dismiss-email-proposal", "edit-email-draft", "finalize-deal-deliverable", "handle-email-proposal", "invalidate-web-push-session-v1",
     "read-web-push-config-v1", "read-web-push-delivery-status-v1", "read-web-push-subscriptions-v1", "record-artifact-preservation-hold", "record-deal-closing", "record-evidence-subject-link", "record-lifecycle-correction",

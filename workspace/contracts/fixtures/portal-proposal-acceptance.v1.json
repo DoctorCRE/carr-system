@@ -24,6 +24,7 @@
     "cart_version_id": null,
     "publication_version": 2
   },
+  "decision": null,
   "pending": {
     "key": "00000000-0000-4000-8000-000000000011:5",
     "class": "review_needed",
@@ -36,6 +37,5 @@
     "deep_link": "/deals/00000000-0000-4000-8000-000000000041?proposal=00000000-0000-4000-8000-000000000011&version=5",
     "line": "Client Tour List choices await your review.",
     "requires_acceptance": true
-  },
-  "decision": null
+  }
 }

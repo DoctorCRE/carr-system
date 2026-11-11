@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "schema_version": "portal-proposal-acceptance.v1",
+  "state": "accepted",
+  "deal_id": "00000000-0000-4000-8000-000000000041",
+  "publication_id": "00000000-0000-4000-8000-000000000011",
+  "tour_id": "00000000-0000-4000-8000-000000000031",
+  "publication_version": 2,
+  "source_version": 6,
+  "cart_version": 0,
+  "cart_version_id": null,
+  "property_ids": [
+    "00000000-0000-4000-8000-000000000022"
+  ],
+  "selection_version_id": "00000000-0000-4000-8000-000000000032"
+}
