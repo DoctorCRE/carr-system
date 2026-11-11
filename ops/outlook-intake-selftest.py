@@ -505,6 +505,104 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(path.read_bytes(), before)
         self.assertFalse(self.fake.calls)
 
+    def legacy_ledger(self):
+        self.out().mkdir(parents=True, exist_ok=True)
+        state = {'done': {}, 'pending_full': {}, 'events_logged': {}, 'events_balled': {},
+                 'steps': {}, 'requests': {}}
+        payloads = [
+            ('log-activity', {'kind': 'email_in', 'ref': 'C-901',
+                              'email_source': {'mailbox_owner': 'joe', 'sender_email': CLIENT.email},
+                              'email_context': {'sender': {'email': CLIENT.email},
+                                                'recipients': [{'email': OWNER}]}}),
+            ('set-next-action', {'owner': 'joe', 'ref': 'C-901'}),
+            ('set-next-action', {'owner': 'joe', 'ref': 'L-902'})]
+        for n, (verb, args) in enumerate(payloads):
+            ident = str(uuid.uuid5(uuid.NAMESPACE_URL, f'synthetic-legacy-{n}'))
+            args['idempotency_key'] = ident
+            state['requests'][ident] = {'verb': verb, 'payload': json.dumps(args),
+                                        'acknowledged': n == 0, 'attempts': 1,
+                                        'error_code': 'key_reuse', 'disposition': 'blocked',
+                                        'created_at': int(NOW.timestamp())}
+        path = self.out() / intake.STATE
+        path.write_text(json.dumps(state))
+        return path, state
+
+    def bind_legacy(self):
+        return intake.run(self.repo, self.home, self.fake.ports(), reconcile_binding=True)
+
+    def test_prebinding_legacy_reconciliation_preserves_state_and_retires_actions(self):
+        path, state = self.legacy_ledger()
+        before = path.read_bytes()
+        self.assertEqual(self.run_intake().reason, 'ledger_binding_required')
+        self.assertEqual(self.bind_legacy().reason, 'ledger_bound')
+        self.assertEqual(path.read_bytes(), before)
+        binding = self.out() / 'binding.json'
+        bound = binding.read_bytes()
+        decodes = self.fake.decodes
+        self.assertEqual(self.bind_legacy().reason, 'ledger_bound')
+        self.assertEqual(binding.read_bytes(), bound)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(self.fake.decodes, decodes)
+        self.assertFalse(self.fake.calls)
+        self.assertEqual(self.run_intake().state, 'succeeded')
+        saved = json.loads(path.read_text())
+        self.assertEqual(saved['requests'], {k: r for k, r in state['requests'].items() if r['acknowledged']})
+        self.assertFalse(self.fake.writes('set-next-action'))
+
+    def test_prebinding_reconciliation_refuses_missing_or_conflicting_evidence(self):
+        for change in ('foreign_account', 'foreign_owner', 'no_owner', 'no_account',
+                       'key_conflict', 'broken_payload', 'empty_requests', 'state_identity'):
+            with self.subTest(change=change):
+                path, state = self.legacy_ledger()
+                requests = list(state['requests'].values())
+                args = json.loads(requests[0]['payload'])
+                if change == 'foreign_account':
+                    args['email_identity'] = {'mailbox_account': 'foreign@example.test', 'mailbox_owner': 'joe'}
+                elif change == 'foreign_owner':
+                    args['email_source']['mailbox_owner'] = 'dell'
+                elif change == 'no_owner':
+                    args.pop('email_source')
+                    state['requests'] = {next(iter(state['requests'])): requests[0]}
+                elif change == 'no_account':
+                    args.pop('email_context')
+                elif change == 'key_conflict':
+                    args['idempotency_key'] = str(uuid.uuid4())
+                elif change == 'empty_requests':
+                    state['requests'] = {}
+                elif change == 'state_identity':
+                    state['account_binding'] = intake._hash('foreign@example.test')
+                requests[0]['payload'] = '{broken' if change == 'broken_payload' else json.dumps(args)
+                path.write_text(json.dumps(state))
+                before = path.read_bytes()
+                result = self.bind_legacy()
+                self.assertEqual(result.state, 'failed')
+                self.assertEqual(path.read_bytes(), before)
+                self.assertFalse((self.out() / 'binding.json').exists())
+                self.assertFalse(self.fake.calls)
+
+    def test_prebinding_reconciliation_refuses_corrupt_state_and_active_writer(self):
+        path, _ = self.legacy_ledger()
+        path.write_text('{broken')
+        self.assertEqual(self.bind_legacy().reason, 'ledger_state_invalid')
+        self.assertEqual(path.read_text(), '{broken')
+        with (self.out() / 'lock').open('w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.assertEqual(self.bind_legacy().reason, 'previous_run_active')
+        self.assertFalse((self.out() / 'binding.json').exists())
+
+    def test_prebinding_reconciliation_refuses_foreign_decoded_account(self):
+        self.legacy_ledger()
+        self.run_intake()
+        original = intake._load
+        def foreign(db, account_id=None, account_address=None):
+            with closing(sqlite3.connect(db)) as con, con:
+                con.execute("UPDATE messages SET sender='foreign@example.test' WHERE id=-1")
+            return original(db, account_id, account_address)
+        with patch.object(intake, '_load', side_effect=foreign):
+            self.assertEqual(self.bind_legacy().reason, 'ledger_binding_evidence_invalid')
+        self.assertFalse((self.out() / 'binding.json').exists())
+        self.assertFalse(self.fake.calls)
+
     def test_matching_legacy_binding_preserves_request_keys(self):
         self.run_intake([mail(CLIENT.email, -timedelta(hours=1))])
         path = self.out() / intake.STATE
