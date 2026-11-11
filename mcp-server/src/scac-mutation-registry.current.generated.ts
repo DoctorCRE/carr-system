@@ -2447,6 +2447,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     authority_only: false,
     delegates_to: [],
   },
+  "read-deal-update-summary-v1": {
+    ingress_key: "mcp-tool:read-deal-update-summary-v1",
+    source_locator: "mcp-server/src/deal-update-summary.ts",
+    schema_digest: "784724ef93d02e11576b903f716c42d9b08a6e0715125523c97a5d7745c5da34",
+    write: false,
+    human_only: false,
+    human_caller_only: false,
+    authority_only: false,
+    delegates_to: [],
+  },
   "read-decision": {
     ingress_key: "mcp-tool:read-decision",
     source_locator: "mcp-server/src/tools.js",
