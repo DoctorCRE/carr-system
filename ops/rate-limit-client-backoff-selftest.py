@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Rate-limit retries through the shared reader and real CLI, using loopback only."""
 from concurrent.futures import ThreadPoolExecutor
+import http.client
+import socket
+import uuid
 import json
 import os
 from pathlib import Path
@@ -77,7 +80,10 @@ class BackoffTest(unittest.TestCase):
         self.assertEqual(self.responses, [])
 
     def test_stray_get_during_cli_backoff(self):
-        for path, expected_status in (('/', 404), ('/mcp', 405)):
+        for method, path, body in (('GET', '/', None), ('GET', '/mcp', None),
+                                   ('HEAD', '/mcp', None), ('OPTIONS', '/mcp', None),
+                                   ('POST', '/wrong', b'{}'), ('BAD', '/mcp', None),
+                                   ('POST', '/mcp', b'{'), ('POST', '/mcp', b'{}')):
             with self.subTest(path=path):
                 self.requests = []
                 self.received_429.clear()
@@ -86,8 +92,19 @@ class BackoffTest(unittest.TestCase):
                 with ThreadPoolExecutor(max_workers=1) as pool:
                     pending = pool.submit(self.cli, {'idempotency_key': 'unchanged'})
                     self.assertTrue(self.received_429.wait(10))
-                    probe = reader.read(self.url.removesuffix('/mcp') + path)
-                    self.assertEqual(probe.status, expected_status)
+                    if method == 'BAD':
+                        with socket.create_connection(self.server.server_address, timeout=3) as sock:
+                            sock.sendall(b'GET /mcp HTTP/invalid\r\n\r\n')
+                            self.assertIn(b'400', sock.recv(4096).split(b'\r\n')[0])
+                    else:
+                        conn = http.client.HTTPConnection(*self.server.server_address, timeout=3)
+                        try:
+                            conn.request(method, path, body)
+                            probe = conn.getresponse()
+                            self.assertEqual(probe.status, 404)
+                            probe.read()
+                        finally:
+                            conn.close()
                     self.assertEqual(len(self.requests), 1)
                     self.assertEqual(len(self.responses), 1)
                     result = pending.result()
