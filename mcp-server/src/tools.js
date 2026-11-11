@@ -10818,7 +10818,7 @@ registerTools(ruleContextRuntimeTools({ withEnvelope, ToolError }), "rule-contex
 const overdueUpdates = dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds, lockDealField, dealNextStepStatus, ToolError });
 registerTools(overdueUpdates.tools, "deal-update-resolution");
 
-registerTools(clientNeedTools({ withEnvelope, writeEvent }), "mcp-server/src/client-needs.ts");
+registerTools(clientNeedTools({ withEnvelope, writeEvent, partnerAuthoritySlugForActor }), "mcp-server/src/client-needs.ts");
 
 for (const family of toolFamilies) {
   registerTools(family.createTools({ withEnvelope, writeEvent, ToolError, resolveSubject,

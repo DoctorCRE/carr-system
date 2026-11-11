@@ -1,7 +1,6 @@
 // Record deal-owned client needs and match only current approved vendor applicability.
-import { Validator, type Schema } from "@cfworker/json-schema";
+import { type Schema, Validator } from "@cfworker/json-schema";
 import responseSchema from "../contracts/client-needs.v1.json" with { type: "json" };
-import { partnerAuthoritySlugForActor } from "./partner-authority.js";
 import { ToolError } from "./tool-error.ts";
 import type { Actor, Db, WithEnvelope, WriteEvent } from "./verb-contract.ts";
 
@@ -83,10 +82,12 @@ type RecordArgs = { idempotency_key: string; deal: string; need?: string; base_v
 type ApproveArgs = { idempotency_key: string; deal: string; need: string; base_version: number };
 type ReadArgs = { deal?: string; vendor?: string; limit?: number; offset?: number };
 function parse<T>(schema: object, args: unknown): T {
-  if (!new Validator(structuredClone(schema)).validate(args).valid) throw new ToolError({ error: "invalid_need_input" });
+  if (!new Validator(structuredClone(schema)).validate(args).valid)
+    throw new ToolError({ error: "invalid_need_input" });
   return args as T;
 }
-function authorize(actor: Actor, approve = false) {
+type PartnerResolver = (actor: Actor) => string | null;
+function authorize(actor: Actor, partnerAuthoritySlugForActor: PartnerResolver, approve = false) {
   const partner = partnerAuthoritySlugForActor(actor);
   // Coordinator default pending Joe's answer. Keep approval policy here.
   if (!partner || (approve && partner !== "joe")) throw new ToolError({ error: "AUTHORIZATION_REFUSED" });
@@ -132,8 +133,8 @@ async function lockContext(c: Db, deal: string, vendor?: string) {
     throw new ToolError({ error: "not_found" });
   return d;
 }
-async function readNeeds(c: Db, actor: Actor, args: unknown, subject: "deal" | "vendor") {
-  authorize(actor);
+async function readNeeds(c: Db, actor: Actor, args: unknown, subject: "deal" | "vendor", resolver: PartnerResolver) {
+  authorize(actor, resolver);
   const a = parse<ReadArgs>(readSchema(subject), args),
     id = a[subject],
     limit = a.limit ?? 20,
@@ -167,10 +168,19 @@ async function readNeeds(c: Db, actor: Actor, args: unknown, subject: "deal" | "
     rows: result.rows,
     next_offset: offset + limit < result.total ? offset + limit : null,
   };
-  if (!new Validator(structuredClone(responseSchema) as unknown as Schema).validate(response).valid) throw new ToolError({ error: "invalid_need_response" });
+  if (!new Validator(structuredClone(responseSchema) as unknown as Schema).validate(response).valid)
+    throw new ToolError({ error: "invalid_need_response" });
   return response;
 }
-export function clientNeedTools({ withEnvelope, writeEvent }: { withEnvelope: WithEnvelope; writeEvent: WriteEvent }) {
+export function clientNeedTools({
+  withEnvelope,
+  writeEvent,
+  partnerAuthoritySlugForActor,
+}: {
+  withEnvelope: WithEnvelope;
+  writeEvent: WriteEvent;
+  partnerAuthoritySlugForActor: PartnerResolver;
+}) {
   return {
     "read-deal-client-needs-v1": {
       write: false,
@@ -178,7 +188,7 @@ export function clientNeedTools({ withEnvelope, writeEvent }: { withEnvelope: Wi
       inputSchema: readSchema("deal"),
       description:
         "Read explicit deal-owned client needs and exact revisions for approval review. Never interprets checklist prose as approval.",
-      handler: (c: Db, actor: Actor, args: unknown) => readNeeds(c, actor, args, "deal"),
+      handler: (c: Db, actor: Actor, args: unknown) => readNeeds(c, actor, args, "deal", partnerAuthoritySlugForActor),
     },
     "read-vendor-client-needs-v1": {
       write: false,
@@ -186,7 +196,8 @@ export function clientNeedTools({ withEnvelope, writeEvent }: { withEnvelope: Wi
       inputSchema: readSchema("vendor"),
       description:
         "Read client-needs.v1 matches for one exact vendor. Only approved current unrestricted needs match; no vertical or geography inference. Live bounded pagination.",
-      handler: (c: Db, actor: Actor, args: unknown) => readNeeds(c, actor, args, "vendor"),
+      handler: (c: Db, actor: Actor, args: unknown) =>
+        readNeeds(c, actor, args, "vendor", partnerAuthoritySlugForActor),
     },
     "record-deal-client-need-v1": {
       write: true,
@@ -195,7 +206,7 @@ export function clientNeedTools({ withEnvelope, writeEvent }: { withEnvelope: Wi
       description:
         "Record, edit or withdraw an explicit sourced client need from its deal. Editing any need content lapses approval. Use the current need base_version.",
       handler: async (c: Db, actor: Actor, args: unknown) => {
-        authorize(actor);
+        authorize(actor, partnerAuthoritySlugForActor);
         const a = parse<RecordArgs>(recordSchema, args);
         if (
           Boolean(a.need) !== (a.base_version !== undefined) ||
@@ -231,7 +242,7 @@ export function clientNeedTools({ withEnvelope, writeEvent }: { withEnvelope: Wi
               throw new ToolError({ error: "version_conflict", current_version: before.version });
             await c.query(
               `update public.deal_client_need set vendor_id=$2,description=$3,applicability=$4,source_ref=$5,
-    source_revision=$6,observed_at=$7,fresh_until=$8,restriction=$9,withdrawn=$10,updated_by=$11 where id=$12`,
+    source_revision=$6,observed_at=$7,fresh_until=$8,restriction=$9,withdrawn=$10,updated_by=$11 where deal_id=$1 and id=$12`,
               [...params, a.need],
             );
             id = a.need;
@@ -262,7 +273,7 @@ export function clientNeedTools({ withEnvelope, writeEvent }: { withEnvelope: Wi
       description:
         "Approve the exact displayed client need revision from its deal. Refuses withdrawn, restricted or stale needs; edits lapse approval automatically.",
       handler: async (c: Db, actor: Actor, args: unknown) => {
-        authorize(actor, true);
+        authorize(actor, partnerAuthoritySlugForActor, true);
         const a = parse<ApproveArgs>(approveSchema, args);
         return withEnvelope(c, actor, "approve-deal-client-need-v1", a, async () => {
           const deal = await lockContext(c, a.deal);
