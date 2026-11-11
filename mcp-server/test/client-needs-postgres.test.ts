@@ -37,6 +37,7 @@ test("deal need lifecycle, exact vendor matching, audit and recorded contract", 
   try {
     await db.connect();
     await db.query("begin");
+    assert.equal((await db.query("select ops.scac_mutation_catalog_v118_current() as valid")).rows[0].valid, true);
     const joe = record((await db.query("select id,slug from actor where slug='joe'")).rows[0]);
     const actor = { ...joe, human: true };
     const party = async (name: string) =>

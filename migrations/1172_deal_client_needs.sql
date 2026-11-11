@@ -1,3 +1,6 @@
+-- rollback: forward-only; preserve approved need history and retire callers before removing storage.
+-- expand-contract: expand; add deal-owned needs without changing existing records.
+-- lock-review: new empty table, indexes and trigger; no existing row rewrite.
 -- Explicit client needs stay owned by their deal, separate from vendor scores.
 create table public.deal_client_need (
  id uuid primary key default gen_random_uuid(),
@@ -43,3 +46,21 @@ create trigger deal_client_need_revision before update on public.deal_client_nee
  for each row execute function public.revise_deal_client_need();
 grant select on public.deal_client_need to carr_reader;
 grant select,insert,update on public.deal_client_need to carr_writer;
+
+do $client_need_grants$
+declare
+ contract jsonb := ops.scac_current_grant_contract();
+ privilege text;
+begin
+ foreach privilege in array array['insert','update'] loop
+  contract := jsonb_set(contract,'{relation_dml}',contract->'relation_dml' || jsonb_build_array(jsonb_build_object(
+   'ingress_key','db-relation-acl:public.deal_client_need:carr_writer:' || privilege,
+   'ingress_kind','db_relation_acl','relation','public.deal_client_need',
+   'relation_kind','r','grantee','carr_writer','privilege',privilege,'grantable',false)));
+ end loop;
+ execute format('create or replace function ops.scac_current_grant_contract() returns jsonb '
+  'language sql immutable set search_path=pg_catalog as %L','select '||quote_literal(contract::text)||'::jsonb');
+ if ops.scac_mutation_catalog_v118_current() is not true then
+  raise exception 'Client need grant catalog is invalid';
+ end if;
+end $client_need_grants$;
