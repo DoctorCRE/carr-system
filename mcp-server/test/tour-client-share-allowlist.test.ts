@@ -175,7 +175,7 @@ test("the client allowlist is the packet facts and explicit public note and cann
 
 test("the JavaScript allowlist and the database allowlist are the same list", () => {
   const migration = readMigration(path.join(root, "migrations/0608_tour_client_field_allowlist.sql"));
-  const current = readMigration(path.join(root, "migrations/1175_tour_packet_appointments_public_note.sql"));
+  const current = readMigration(path.join(root, "migrations/1177_tour_packet_appointments_public_note.sql"));
   const body = current.split(/create or replace function ops\.tour_client_field_keys\(\)/i, 2)[1];
   assert.ok(body, "migration defines ops.tour_client_field_keys()");
   const array = body.match(/array\[([^\]]*)\]::text\[\]/i);
