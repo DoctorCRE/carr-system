@@ -1989,13 +1989,16 @@ def _ledger_binding(out: Path, settings: OutlookSettings, state: dict) -> dict:
     except (ValueError, OSError):
         raise ValueError('ledger_binding_invalid') from None
     else:
+        if retained == {**binding, 'provenance': 'operator_attested'}:
+            retained = binding
         if retained != binding:
             raise ValueError('ledger_binding_mismatch')
         os.chmod(path, 0o600)
     return binding
 
 
-def _legacy_binding_evidence(state: dict, settings: OutlookSettings) -> None:
+def _legacy_binding_evidence(state: dict, settings: OutlookSettings,
+                             attest_mailbox: str | None = None) -> None:
     """Require original request identity, not the identity of the current machine alone."""
     for field, expected in (
             ('filing_account', _hash(f'{settings.owner}|{settings.account}|{settings.folder_account_id}')),
@@ -2005,7 +2008,8 @@ def _legacy_binding_evidence(state: dict, settings: OutlookSettings) -> None:
     requests = state.get('requests')
     if not isinstance(requests, dict) or not requests:
         raise ValueError('ledger_binding_evidence_missing')
-    owner_seen = account_seen = False
+    owner_seen = False
+    account_seen = 'account_binding' in state or 'filing_account' in state
     for ident, request in requests.items():
         if not isinstance(request, dict) or not isinstance(request.get('acknowledged'), bool) \
                 or not isinstance(request.get('verb'), str) or not isinstance(request.get('payload'), str):
@@ -2027,7 +2031,6 @@ def _legacy_binding_evidence(state: dict, settings: OutlookSettings) -> None:
                         raise ValueError('ledger_binding_evidence_conflict')
                     account_seen = True
         if args.get('kind') in ('email_in', 'email_out'):
-            identity = args.get('email_identity', {})
             context = args.get('email_context', {})
             if not isinstance(context, dict):
                 raise ValueError('ledger_binding_evidence_invalid')
@@ -2038,23 +2041,25 @@ def _legacy_binding_evidence(state: dict, settings: OutlookSettings) -> None:
             addresses = [sender.get('email'), *(row.get('email') for row in recipients)]
             if context and settings.account not in addresses:
                 raise ValueError('ledger_binding_evidence_conflict')
-            if identity.get('mailbox_account') != settings.account and settings.account not in addresses:
-                raise ValueError('ledger_binding_evidence_missing')
-            account_seen = True
-    if not owner_seen or not account_seen:
+    if not owner_seen:
         raise ValueError('ledger_binding_evidence_missing')
+    if not account_seen and attest_mailbox is None:
+        raise ValueError('ledger_binding_evidence_insufficient')
 
 
 def _bind_legacy_ledger(out: Path, home: Path, ports: Ports,
                         settings: OutlookSettings, state: dict,
-                        legacy_decode: Callable[[Path, Path, Path], None] | None = None) -> dict:
+                        legacy_decode: Callable[[Path, Path, Path], None] | None = None,
+                        attest_mailbox: str | None = None) -> dict:
+    if attest_mailbox is not None and attest_mailbox != settings.account:
+        raise ValueError('ledger_binding_evidence_conflict')
     if (out / 'binding.json').exists():
         return _ledger_binding(out, settings, state)
     if not state or settings.folder_account_id is None:
         raise ValueError('ledger_binding_evidence_missing')
     save_legacy_ids = False
     try:
-        _legacy_binding_evidence(state, settings)
+        _legacy_binding_evidence(state, settings, attest_mailbox)
         with _decode(home, out, ports.decode, settings.folder_account_id, settings.account, settings) as (_, _, _, db, files):
             if legacy_decode is not None and 'mail_ids' not in state:
                 legacy_db = db.with_name('legacy.db')
@@ -2073,8 +2078,10 @@ def _bind_legacy_ledger(out: Path, home: Path, ports: Ports,
     if save_legacy_ids:
         _save(out, state)
     binding = _mailbox_identity(settings)
+    if attest_mailbox is not None:
+        binding['provenance'] = 'operator_attested'
     _private_write(out / 'binding.json', json.dumps(binding))
-    return binding
+    return _mailbox_identity(settings)
 
 
 def _normal_receipt(out: Path, settings: OutlookSettings, ports: Ports,
@@ -2104,7 +2111,8 @@ def _normal_receipt(out: Path, settings: OutlookSettings, ports: Ports,
 
 def run(repo: Path, home: Path, ports: Ports, *, settings: OutlookSettings | None = None,
         reconcile_binding: bool = False,
-        legacy_decode: Callable[[Path, Path, Path], None] | None = None) -> Outcome:
+        legacy_decode: Callable[[Path, Path, Path], None] | None = None,
+        attest_mailbox: str | None = None) -> Outcome:
     settings = settings or load_settings(home)
     settings.require_repo(repo)
     out = repo / OUT
@@ -2128,7 +2136,7 @@ def run(repo: Path, home: Path, ports: Ports, *, settings: OutlookSettings | Non
             outcome = Outcome('failed', 'ledger_state_invalid')
         else:
             try:
-                binding = (_bind_legacy_ledger(out, home, ports, settings, state, legacy_decode) if reconcile_binding
+                binding = (_bind_legacy_ledger(out, home, ports, settings, state, legacy_decode, attest_mailbox) if reconcile_binding
                            else _ledger_binding(out, settings, state))
             except ValueError as error:
                 outcome = Outcome('failed', str(error))
@@ -2476,7 +2484,8 @@ def _decoder(home: Path, settings: OutlookSettings | None = None) -> Callable[[P
     return decode
 
 
-def main(*, reconcile_binding: bool = False, reconcile_vendor: Path | None = None) -> int:
+def main(*, reconcile_binding: bool = False, reconcile_vendor: Path | None = None,
+         attest_mailbox: str | None = None) -> int:
     repo = Path(__file__).resolve().parents[1]
     home = Path.home()
     settings = load_settings(home)
@@ -2494,7 +2503,7 @@ def main(*, reconcile_binding: bool = False, reconcile_vendor: Path | None = Non
                   read_unresolved=lambda mail, today, deals, parties: unresolved_email.ask(
                       mail, today, deals, parties, settings.model))
     outcome = run(repo, home, ports, settings=settings, reconcile_binding=reconcile_binding,
-                  legacy_decode=legacy_decode)
+                  legacy_decode=legacy_decode, attest_mailbox=attest_mailbox)
     print(status_line(outcome))
     print(receipt_line(outcome, settings.repo))
     if not reconcile_binding and outcome.reason not in ('outside_window', 'previous_run_active', 'reconciled', 'reconcile_failed',

@@ -11,5 +11,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--decoder-vendor', type=Path,
                         help='separate current-source decoder build directory; preserves the installed decoder')
+    parser.add_argument('--attest-mailbox', metavar='ACCOUNT',
+                        help='operator attests the retained ledger belongs to this configured mailbox; decoder must verify it')
     args = parser.parse_args()
-    raise SystemExit(main(reconcile_binding=True, reconcile_vendor=args.decoder_vendor))
+    raise SystemExit(main(reconcile_binding=True, reconcile_vendor=args.decoder_vendor,
+                          attest_mailbox=args.attest_mailbox))

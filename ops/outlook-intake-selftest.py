@@ -512,6 +512,7 @@ class IntakeTest(unittest.TestCase):
         payloads = [
             ('log-activity', {'kind': 'email_in', 'ref': 'C-901',
                               'email_source': {'mailbox_owner': 'joe', 'sender_email': CLIENT.email},
+                              'email_identity': {'mailbox_account': OWNER},
                               'email_context': {'sender': {'email': CLIENT.email},
                                                 'recipients': [{'email': OWNER}]}}),
             ('set-next-action', {'owner': 'joe', 'ref': 'C-901'}),
@@ -535,6 +536,7 @@ class IntakeTest(unittest.TestCase):
                 request = next(iter(state['requests'].values()))
                 args = json.loads(request['payload'])
                 args.pop('email_source')
+                args.pop('email_identity')
                 args['kind'] = 'email_out'
                 args['email_context'] = {'sender': {'email': 'other-mailbox@example.test'},
                                          'recipients': [{'email': OWNER}]}
@@ -550,6 +552,64 @@ class IntakeTest(unittest.TestCase):
                 self.assertEqual(path.read_bytes(), retained[-1])
                 self.assertFalse(self.fake.calls)
         self.assertEqual(*retained)
+
+    def test_prebinding_attestation_binds_once_and_normal_run_preserves_binding(self):
+        path, state = self.legacy_ledger()
+        request = next(iter(state['requests'].values()))
+        args = json.loads(request['payload'])
+        args.pop('email_identity')
+        request['payload'] = json.dumps(args)
+        path.write_text(json.dumps(state))
+        before = path.read_bytes()
+        self.run_intake()
+        self.assertEqual(self.bind_legacy().reason, 'ledger_binding_evidence_insufficient')
+        result = intake.run(self.repo, self.home, self.fake.ports(), reconcile_binding=True,
+                            attest_mailbox=OWNER)
+        self.assertEqual(result.reason, 'ledger_bound')
+        binding = self.out() / 'binding.json'
+        self.assertEqual(json.loads(binding.read_text())['provenance'], 'operator_attested')
+        bound = binding.read_bytes()
+        decodes = self.fake.decodes
+        for _ in range(2):
+            self.assertEqual(intake.run(self.repo, self.home, self.fake.ports(), reconcile_binding=True,
+                                       attest_mailbox=OWNER).reason, 'ledger_bound')
+        self.assertEqual(self.fake.decodes, decodes)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(binding.read_bytes(), bound)
+        self.assertFalse(self.fake.calls)
+        self.assertNotIn(self.run_intake().reason, ('ledger_binding_mismatch', 'ledger_binding_invalid'))
+        self.assertEqual(binding.read_bytes(), bound)
+
+    def test_prebinding_attestation_refuses_retained_and_decoder_conflicts(self):
+        for conflict in ('account', 'owner', 'hash', 'attestation', 'decoder'):
+            with self.subTest(conflict=conflict):
+                path, state = self.legacy_ledger()
+                request = next(iter(state['requests'].values()))
+                args = json.loads(request['payload'])
+                args.pop('email_identity')
+                if conflict == 'account':
+                    args['email_identity'] = {'mailbox_account': 'foreign@example.test'}
+                elif conflict == 'owner':
+                    args['email_source']['mailbox_owner'] = 'dell'
+                elif conflict == 'hash':
+                    state['account_binding'] = intake._hash('foreign@example.test')
+                request['payload'] = json.dumps(args)
+                path.write_text(json.dumps(state))
+                before = path.read_bytes()
+                self.run_intake()
+                original = intake._load
+                def foreign(db, account_id=None, account_address=None):
+                    with closing(sqlite3.connect(db)) as con, con:
+                        con.execute("UPDATE messages SET sender='foreign@example.test' WHERE id=-1")
+                    return original(db, account_id, account_address)
+                with patch.object(intake, '_load', side_effect=foreign if conflict == 'decoder' else original):
+                    result = intake.run(self.repo, self.home, self.fake.ports(), reconcile_binding=True,
+                                        attest_mailbox='foreign@example.test' if conflict == 'attestation' else OWNER)
+                self.assertEqual(result.reason, 'ledger_binding_evidence_invalid' if conflict == 'decoder'
+                                 else 'ledger_binding_evidence_conflict')
+                self.assertFalse((self.out() / 'binding.json').exists())
+                self.assertEqual(path.read_bytes(), before)
+                self.assertFalse(self.fake.calls)
 
     def bind_legacy(self):
         return intake.run(self.repo, self.home, self.fake.ports(), reconcile_binding=True)
@@ -598,6 +658,7 @@ class IntakeTest(unittest.TestCase):
                     state['requests'] = {next(iter(state['requests'])): requests[0]}
                 elif change == 'no_account':
                     args.pop('email_context')
+                    args.pop('email_identity')
                 elif change == 'key_conflict':
                     args['idempotency_key'] = str(uuid.uuid4())
                 elif change == 'empty_requests':
@@ -691,15 +752,17 @@ class IntakeTest(unittest.TestCase):
                 binding = self.out() / 'binding.json'
                 binding.unlink(missing_ok=True)
                 path, state = self.legacy_ledger()
+                request = next(iter(state['requests'].values()))
+                args = json.loads(request['payload'])
+                args.pop('email_identity')
                 if conflict:
-                    request = next(iter(state['requests'].values()))
-                    args = json.loads(request['payload'])
                     args['email_source']['mailbox_owner'] = 'dell'
-                    request['payload'] = json.dumps(args)
-                    path.write_text(json.dumps(state))
+                request['payload'] = json.dumps(args)
+                path.write_text(json.dumps(state))
                 self.assertEqual(self.run_intake().reason, 'ledger_binding_required')
                 before = path.read_bytes()
-                with patch('sys.argv', ['reconcile-outlook-ledger-binding.py', '--decoder-vendor', str(self.tmp / 'separate-decoder')]), \
+                with patch('sys.argv', ['reconcile-outlook-ledger-binding.py', '--decoder-vendor', str(self.tmp / 'separate-decoder'),
+                                         '--attest-mailbox', OWNER]), \
                         patch.object(intake.Path, 'home', return_value=self.home), \
                         patch.object(intake, '_decoder', return_value=self.fake.decode) as decoder, \
                         patch.object(intake, '_carr', return_value=self.fake.carr), \
@@ -3366,7 +3429,7 @@ class IntakeTest(unittest.TestCase):
         settings = load_settings(self.home)
         order, models = [], []
 
-        def fake_run(repo, home, ports, *, settings=None, reconcile_binding=False, legacy_decode=None):
+        def fake_run(repo, home, ports, *, settings=None, reconcile_binding=False, legacy_decode=None, attest_mailbox=None):
             order.append('intake')
             ports.read_unresolved({'subject': 'S', 'text': 'T', 'sender': 'a@b.test'}, datetime(2026, 10, 26).date(), [], [])
             return intake.Outcome('succeeded', 'ok')
