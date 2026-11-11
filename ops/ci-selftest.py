@@ -1559,6 +1559,11 @@ if "--no-download" in args:
     assert archive.read_bytes() == b"trusted-zsh-package"
     assert root != original.parent
     assert archive.stat().st_mode & 0o777 == 0o444
+    if mode == "partial-cache":
+        print("E: Unable to fetch some archives", file=sys.stderr)
+    if mode == "cached-dpkg-error":
+        print("dpkg: error processing package zsh (--configure)", file=sys.stderr)
+        sys.exit(100)
     sys.exit(124 if mode == "cached-timed-out" else 100 if mode == "partial-cache" else 0)
 attempt = sum("install" in call and "--no-download" not in call for call in calls)
 if mode in ("dpkg-error", "dependencies", "held-packages", "unknown-error") or (mode == "fatal-second" and attempt == 2) or (mode == "fatal-third" and attempt == 3):
@@ -1566,6 +1571,17 @@ if mode in ("dpkg-error", "dependencies", "held-packages", "unknown-error") or (
     sys.exit(100)
 if mode == "timed-out" or (mode == "transient-timeout" and len(calls) == 1) or (mode in ("success-third", "fatal-second", "fatal-third") and attempt < 3):
     sys.exit(124)
+network_errors = {
+    "dns-error": "Temporary failure resolving archive.ubuntu.com",
+    "resolve-error": "Could not resolve archive.ubuntu.com",
+    "fetch-error": "E: Failed to fetch http://archive.ubuntu.com/zsh.deb 404 Not Found",
+    "connection-timeout": "Connection timed out [IP: 1.2.3.4 80]",
+    "connection-refused": "Could not connect to archive.ubuntu.com:80 Connection refused",
+    "http-error": "503 Service Unavailable http://archive.ubuntu.com/ubuntu",
+}
+if mode in network_errors and attempt == 1:
+    print(network_errors[mode], file=sys.stderr)
+    sys.exit(100)
 if mode == "native-error":
     sys.exit(42)
 if mode in ("cached", "cache-replaced"):
@@ -1585,6 +1601,7 @@ if not archive.exists():
             ("preinstalled", [], 0),
             ("cached", ["offline"], 0),
             ("cached-timed-out", ["offline"], 124),
+            ("cached-dpkg-error", ["offline"], 100),
             ("cache-replaced", ["offline"], 0),
             ("cold", ["install"], 0),
             ("tampered", ["install"], 0),
@@ -1600,6 +1617,12 @@ if not archive.exists():
             ("publish-error", ["install"], 1),
             ("old-version", ["install"], 0),
             ("symlink", ["install"], 0),
+            ("dns-error", ["install", "update", "install"], 0),
+            ("resolve-error", ["install", "update", "install"], 0),
+            ("fetch-error", ["install", "update", "install"], 0),
+            ("connection-timeout", ["install", "update", "install"], 0),
+            ("connection-refused", ["install", "update", "install"], 0),
+            ("http-error", ["install", "update", "install"], 0),
             ("dpkg-error", ["install"], 100),
             ("dependencies", ["install"], 100),
             ("held-packages", ["install"], 100),
@@ -1611,7 +1634,7 @@ if not archive.exists():
             archives = fixture / mode
             archives.mkdir()
             archive = archives / "zsh_1_amd64.deb"
-            if mode in ("cached", "cache-replaced", "partial-cache", "tampered", "metadata-error", "old-version", "cached-timed-out", "metadata-deadline"):
+            if mode in ("cached", "cache-replaced", "partial-cache", "tampered", "metadata-error", "old-version", "cached-timed-out", "metadata-deadline", "cached-dpkg-error"):
                 archive.write_bytes(b"altered-zsh-package" if mode == "tampered" else b"trusted-zsh-package")
             if mode == "old-version":
                 archive.rename(archives / "zsh_2_amd64.deb")
