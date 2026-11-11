@@ -4,7 +4,7 @@ The registered `lead-board` workspace read owns Reachable and Research. The oute
 
 Reachable requires all of the following in one snapshot.
 
-- A successful contact on this exact lead, dated after lead creation, no later than the read clock, within 90 days. Manual call, text, inbound email, meeting or tour requires `connected=true`. The activity's lead relationship binds it to the current party. Any explicit conflicting party binding refuses it.
+- A successful contact on this exact lead, dated after lead creation, no later than the read clock, within 90 days. Manual call, text, inbound email, meeting or tour requires `connected=true`. The activity's lead relationship binds it to the current party. Optional free-text detail never establishes or negates the structured manual outcome. Empty, plain-text, JSON and malformed JSON notes preserve that outcome. A parseable object with an explicit conflicting party binding still refuses it.
 - For `mail_ingest` or `local_mail`, only inbound mail with `match=exact`, the same party ID, a nonempty `evidence_ref` and `automated=false` qualifies. Connected alone cannot bypass these machine-ingest checks. Outbound email never proves successful contact.
 - A found, sourced, nonfuture email or office_phone finding with an explicit unexpired expiry and exact equality to the current party email or office phone. Email must have an email shape, phones at least seven digits. Bare contact values and identity verification are insufficient.
 - Contact eligibility is true and no current discrepancy or proposed correction exists. Restrictions, research completeness and evidence conflicts remain separately visible. An expired or missing route or unsuccessful contact yields Research, never a bad-lead judgment.
@@ -26,6 +26,9 @@ The model abstracts a complete refreshed snapshot into current route, recent suc
 | Suppression, restriction, conflict and renewal | registered board preserves identity, owns classification, and exposes exact source evidence under carr_reader |
 | Future, stale or pre-lead contact | registered board preserves identity, owns classification, and exposes exact source evidence under carr_reader |
 | Exact inbound reply and invalid machine bindings | registered board preserves identity, owns classification, and exposes exact source evidence under carr_reader |
+| Supported manual contact refreshed with empty, plain-text, JSON or malformed JSON notes | manual contact uses structured outcome across optional detail shapes; registered board preserves identity, owns classification, and exposes exact source evidence under carr_reader |
+| Unanswered manual contact with any note shape | manual contact uses structured outcome across optional detail shapes |
+| Conflicting party metadata or missing/invalid machine detail | structured party conflicts and invalid machine binding remain research |
 | Source refresh and removal | source revision changes with source facts and preserves future evidence as unknown |
 
 ## Production proof

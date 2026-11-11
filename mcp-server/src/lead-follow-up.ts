@@ -154,7 +154,7 @@ function successfulContact(leadId: string, input: ReachabilityInput, now: number
       const parsed: unknown = JSON.parse(a.detail || "{}");
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) detail = parsed as Record<string, unknown>;
     } catch {
-      return false;
+      // Manual notes are free text; machine sources still require the bindings below.
     }
     if (detail.party_id !== undefined && detail.party_id !== input.party_id) return false;
     if (["mail_ingest", "local_mail"].includes(a.source))
