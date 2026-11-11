@@ -18,7 +18,34 @@ class Unavailable(Exception):
     pass
 
 
-def check_route(detail, route_id):
+def check_coordinate_review(stop, point):
+    review = stop.get('coordinate_review')
+    if not review:
+        raise Unavailable('coordinate review contract unavailable')
+    assert review['schema'] == 'tour-coordinate-review.v1', 'coordinate review version mismatch'
+    assert review['property_id'] == stop['property_id'], 'coordinate review property mismatch'
+    assert review['as_of'] and isinstance(review['property_evidence'], list), 'missing property evidence'
+    candidates = review['candidates']
+    assert candidates and review['status'] == 'candidates', 'candidate evidence missing'
+    source = point['source']
+    selected = next((row for row in candidates if row['coordinate_candidate_id'] == source['coordinate_candidate_id']), None)
+    assert selected is not None, 'navigation candidate absent from review'
+    assert selected['property_id'] == stop['property_id'], 'candidate property mismatch'
+    assert selected['position'] == point['position'], 'review/navigation position mismatch'
+    for field in ('coordinate_role', 'precision_class', 'review_state'):
+        assert selected[field] == source[field], f'review/navigation {field} mismatch'
+    for field in ('source_evidence_id', 'rights_receipt_id'):
+        owner = selected['source'] if field == 'source_evidence_id' else selected['rights']
+        assert owner[field] == source[field], f'review/navigation {field} mismatch'
+    assert selected['rights']['status'] == 'usable', 'navigation rights unavailable'
+    assert selected['approval']['status'] == 'verified_entrance', 'entrance approval unavailable'
+    receipt = selected['approval']['receipt']
+    assert receipt['verification_receipt_id'] == source['entrance_verification_receipt_id'], 'entrance receipt mismatch'
+    for field in ('verifier_actor_id', 'verified_at', 'evidence_reference', 'native_navigation_proof', 'receipt_digest'):
+        assert receipt[field] == source[field], f'review/navigation {field} mismatch'
+
+
+def check_route(detail, route_id, coordinate_review=False):
     route = next((row for row in detail['routes'] if row['id'] == route_id), None)
     if route is None:
         raise Unavailable('route unavailable')
@@ -48,6 +75,8 @@ def check_route(detail, route_id):
             assert source[field], f'missing source {field}'
         assert source['native_navigation_proof']['status'] == 'passed', 'entrance navigation not verified'
         assert -90 <= point['position']['latitude'] <= 90 and -180 <= point['position']['longitude'] <= 180, 'invalid position'
+        if coordinate_review:
+            check_coordinate_review(stop, point)
     return {'contract_version': nav['contract_version'], 'route_version_id': route_id, 'stops': len(active)}
 
 
@@ -57,6 +86,7 @@ def main():
     parser.add_argument('--tour-id', required=True)
     parser.add_argument('--route-id', required=True)
     parser.add_argument('--cookie-jar', type=Path)
+    parser.add_argument('--coordinate-review', action='store_true')
     args = parser.parse_args()
     try:
         with proof_deadline(30, Unavailable):
@@ -83,7 +113,7 @@ def main():
             jar = http.cookiejar.MozillaCookieJar(str(args.cookie_jar))
             jar.load(ignore_discard=True)
             detail = get(f'https://app.doctorcre.com/api/tours/detail?tour_id={args.tour_id}', jar)['data']
-            receipt = check_route(detail, args.route_id)
+            receipt = check_route(detail, args.route_id, args.coordinate_review)
             print(json.dumps({'status': 'passed', 'source_commit': served, **receipt}))
             return 0
     except (Unavailable, OSError, ValueError, KeyError, StopIteration, subprocess.TimeoutExpired) as error:
