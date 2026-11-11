@@ -5,8 +5,8 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import { Validator } from "@cfworker/json-schema";
 import pg from "pg";
-import { publicError } from "../src/public-errors.ts";
 import { dealSpaceSearchContracts } from "../src/deal-space-searches.ts";
+import { publicError } from "../src/public-errors.ts";
 
 const { authenticatedIdentity, agentActorForToken } = await import(new URL("../src/identity.js", import.meta.url).href);
 
