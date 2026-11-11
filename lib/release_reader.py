@@ -4,6 +4,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import http.cookiejar
+from email.utils import parsedate_to_datetime
+import random
+import re
+import sys
+import time
 from pathlib import Path
 import urllib.error
 import urllib.request
@@ -28,6 +33,33 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 _OPENER = urllib.request.build_opener(NoRedirect)
 
 
+def rate_limited(status: int, body: bytes) -> bool:
+    return status == 429 or bool(re.search(
+        rb'(?:cloudflare[\s\S]{0,200}?(?:error\s*)?1015|error\s*(?:code\s*:?\s*)?1015)',
+        body, re.I)) and body.lstrip().startswith(b'<')
+
+
+def retry_delay(status: int, headers: dict[str, str], body: bytes,
+                attempt: int, elapsed: float, *, now: float | None = None) -> float | None:
+    """None means return the original response; never shorten Retry-After."""
+    if not rate_limited(status, body) or attempt >= 6:
+        return None
+    value = next((v.strip() for k, v in headers.items() if k.lower() == 'retry-after'), '')
+    delay: float | None = None
+    if re.fullmatch(r'[0-9]+', value):
+        # Huge integers need no conversion to float to exceed the budget.
+        digits = value.lstrip('0') or '0'
+        delay = int(digits) if len(digits) < 10 else 91
+    elif value:
+        try:
+            delay = max(0, parsedate_to_datetime(value).timestamp() - (time.time() if now is None else now))
+        except (ValueError, TypeError, OverflowError):
+            pass
+    if delay is None:
+        delay = 5 * 2 ** (attempt - 1) + random.uniform(0, 1)
+    return delay if elapsed + delay < 90 else None
+
+
 def read(url: str, opener=_OPENER.open, timeout: float = 15, *,
          headers: dict[str, str] | None = None, max_bytes: int | None = None,
          cookie_jar: http.cookiejar.CookieJar | None = None) -> Reply:
@@ -38,11 +70,28 @@ def read(url: str, opener=_OPENER.open, timeout: float = 15, *,
     request_headers.setdefault("user-agent", USER_AGENT)
     request_headers[MARKER["header"]] = MARKER["value"]
     request = urllib.request.Request(url, method="GET", headers=request_headers)
-    try:
-        with opener(request, timeout=timeout) as response:
+    started = time.monotonic()
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            response = opener(request, timeout=timeout)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
             body = response.read() if max_bytes is None else response.read(max_bytes + 1)
-            return Reply(response.status, dict(response.headers.items()), body)
-    except urllib.error.HTTPError as error:
-        with error:
-            body = error.read() if max_bytes is None else error.read(max_bytes + 1)
-            return Reply(error.code, dict(error.headers.items()), body)
+            reply = Reply(response.status, dict(response.headers.items()), body)
+        delay = retry_delay(reply.status, reply.headers, body, attempt, time.monotonic() - started)
+        if delay is None:
+            if rate_limited(reply.status, body):
+                print(f'rate limit (HTTP 429 / Cloudflare 1015); attempts={attempt}', file=sys.stderr)
+            return reply
+        time.sleep(delay)
+
+
+if __name__ == '__main__':
+    call = json.load(sys.stdin)
+    body = call['body'].encode()
+    print(json.dumps({'limited': rate_limited(call['status'], body),
+                      'delay': retry_delay(call['status'], call['headers'], body,
+                                           call['attempt'], call['elapsed'])}))

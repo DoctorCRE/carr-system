@@ -93,6 +93,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
+import { setTimeout as sleep } from "node:timers/promises";
 import { humanOnlyGuidance, isHumanOnlyError } from "./human-only-hint.ts";
 import {
   LOCAL_CLIENT_PROFILE_NAMES, selectLocalClientCredential, tokenFileSecurityIssue,
@@ -211,20 +213,39 @@ async function runViaWorker(verbName, verbArgs) {
     setTimeout(() => controller.abort(), Math.max(0, deadline - Date.now()));
   let res;
   let bodyText;
+  let limited = false;
+  let attempts = 0;
+  const started = performance.now();
+  const requestBody = JSON.stringify({
+    jsonrpc: "2.0", id: 1, method: "tools/call",
+    params: { name: verbName, arguments: verbArgs },
+  });
   try {
     if (deadline !== 0 && deadline <= Date.now()) controller.abort();
-    res = await fetch(CARR_MCP_URL, {
-      method: "POST",
-      signal: controller.signal,
-      headers: { "content-type": "application/json", authorization: `Bearer ${credential.token}` },
-      body: JSON.stringify({
-        jsonrpc: "2.0", id: 1, method: "tools/call",
-        params: { name: verbName, arguments: verbArgs },
-      }),
-    });
-    bodyText = await res.text();
+    while (true) {
+      attempts++;
+      res = await fetch(CARR_MCP_URL, {
+        method: "POST",
+        signal: controller.signal,
+        headers: { "content-type": "application/json", authorization: `Bearer ${credential.token}` },
+        body: requestBody,
+      });
+      bodyText = await res.text();
+      limited = false;
+      if (res.status !== 429 && !bodyText.trimStart().startsWith("<")) break;
+      const policy = JSON.parse(execFileSync("python3", [path.join(REPO, "lib", "release_reader.py")], {
+        input: JSON.stringify({ status: res.status, headers: Object.fromEntries(res.headers || []),
+          body: bodyText, attempt: attempts, elapsed: (performance.now() - started) / 1000 }),
+        encoding: "utf8", timeout: deadline === 0 ? 5000 : Math.max(1, Math.min(5000, deadline - Date.now())),
+        maxBuffer: 1024 * 1024,
+      }));
+      limited = policy.limited;
+      if (policy.delay === null) break;
+      await sleep(policy.delay * 1000, undefined, { signal: controller.signal });
+    }
   } catch (e) {
-    if (controller.signal.aborted) {
+    if (limited) console.error(`rate limit (HTTP 429 / Cloudflare 1015); attempts=${attempts}`);
+    if (controller.signal.aborted || (deadline !== 0 && deadline <= Date.now())) {
       console.error("could not reach the deployed Worker: record call deadline exceeded");
       process.exit(1);
     }
@@ -236,6 +257,7 @@ async function runViaWorker(verbName, verbArgs) {
     process.exit(1);
   } finally {
     clearTimeout(timer);
+    if (limited) console.error(`rate limit (HTTP 429 / Cloudflare 1015); attempts=${attempts}`);
   }
 
   let body;
