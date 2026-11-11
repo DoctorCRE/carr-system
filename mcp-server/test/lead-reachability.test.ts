@@ -119,3 +119,19 @@ test("producer recordings pass the consumer contract and reproduce through the r
     assert.deepEqual({ ...actual, evaluated_at: expected.evaluated_at }, expected);
   }
 });
+
+
+test("successful exact-lead contact and current matching route make the lead reachable", async () => {
+  const input = { party_id: id, created_at: "2020-01-01T00:00:00Z", email: "reachable@example.test", cell: null, phone: null,
+    activities: [{ id, lead_id: id, kind: "call", connected: true, occurred_at: new Date(Date.now()-60000).toISOString(), source: "manual", detail: null }] };
+  const route = { ...evidence, kind: "email", value: { found: true, email: input.email } };
+  const fields = { reachability_input: input };
+  const positive = await board([route], fields);
+  assert.equal(positive.classification, "reachable");
+  assert.equal(object(positive.successful_contact).activity_id, id);
+  assert.equal(object(positive.usable_route).kind, "email");
+  for (const change of [{ suppressed: true }, { contact_eligible: false }, { reachability_input: { ...input, activities: [{ ...input.activities[0], connected: false }] } }])
+    assert.equal((await board([route], { ...fields, ...change })).classification, "research");
+  for (const change of [{ expired: true }, { expires_on: null }, { value: { email: "other@example.test" } }, { source: "" }])
+    assert.equal((await board([{ ...route, ...change }], fields)).classification, "research");
+});
