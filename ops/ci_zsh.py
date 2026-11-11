@@ -7,6 +7,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 from urllib.parse import unquote
 
 
@@ -99,12 +100,22 @@ def main():
             result = apt([*install, "--no-download"], 120)
             if result != 100:
                 return result
-        result = apt(install, 180)
-        if result == 100:
-            result = apt(["update", "-qq"], 60)
+        for attempt, backoff in enumerate((0, 2, 4), start=1):
+            if backoff:
+                time.sleep(backoff)
+            result = apt(install, 180)
             if result == 0:
-                result = apt(install, 180)
+                break
+            if result not in (100, 124):
+                return result
+            if result == 100 and attempt == 1:
+                refreshed = apt(["update", "-qq"], 60)
+                if refreshed != 0:
+                    print("zsh package index refresh failed with exit " + str(refreshed), file=sys.stderr)
+                    return refreshed
+            print(f"zsh install attempt {attempt}/3 failed with exit {result}", file=sys.stderr)
         if result != 0:
+            print("zsh installation failed after 3 attempts", file=sys.stderr)
             return result
         verify_archives(private, private, cache, "install")
         return 0
