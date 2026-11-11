@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Rate-limit retries through the shared reader and real CLI, using loopback only."""
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
@@ -22,6 +23,7 @@ class BackoffTest(unittest.TestCase):
     def setUp(self):
         self.responses = []
         self.requests = []
+        self.received_429 = threading.Event()
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -36,6 +38,8 @@ class BackoffTest(unittest.TestCase):
                     self.send_header(name, value)
                 self.end_headers()
                 self.wfile.write(body)
+                if status == 429:
+                    owner.received_429.set()
 
             do_POST = do_GET
 
@@ -66,6 +70,26 @@ class BackoffTest(unittest.TestCase):
         self.assertEqual(len(self.requests), 2)
         self.assertEqual(self.requests[0], self.requests[1])
         self.assertEqual(self.responses, [])
+
+    def test_stray_get_during_cli_backoff(self):
+        for path, expected_status in (('/', 404), ('/mcp', 405)):
+            with self.subTest(path=path):
+                self.requests = []
+                self.received_429.clear()
+                self.responses = [(429, {}, b'limited'),
+                                  (200, {}, b'{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"null"}]}}')]
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    pending = pool.submit(self.cli, {'idempotency_key': 'unchanged'})
+                    self.assertTrue(self.received_429.wait(10))
+                    probe = reader.read(self.url.removesuffix('/mcp') + path)
+                    self.assertEqual(probe.status, expected_status)
+                    self.assertEqual(len(self.requests), 1)
+                    self.assertEqual(len(self.responses), 1)
+                    result = pending.result()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(len(self.requests), 2)
+                self.assertEqual(self.requests[0], self.requests[1])
+                self.assertEqual(self.responses, [])
 
     def test_reader_429_then_success(self):
         self.responses = [(429, {'Retry-After': '0'}, b'limited'), (200, {}, b'recovered')]
