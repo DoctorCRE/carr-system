@@ -75,6 +75,8 @@ export function dealSpaceSearchTools({
     if ("expected_version" in args && args.expected_version > 2147483646)
       throw new ToolError({ error: "space_search_input_invalid" });
     if ("criteria" in args) {
+      if (args.client_prefill_source !== null && args.client_prefill_source.observed_at.length > 64)
+        throw new ToolError({ error: "space_search_input_invalid" });
       if (!args.name.trim() || args.criteria.cursor !== null)
         throw new ToolError({ error: "space_search_input_invalid" });
       args.criteria = normalizeCriteria(args.criteria);
@@ -120,7 +122,7 @@ export function dealSpaceSearchTools({
       authorityOnly: true,
       humanOnly: true,
       description:
-        "deal-space-searches.v1. Create with expected_version=0 and a new search_id, or replace a brief at its exact current version. Stores canonical criteria plus full requirements and optional client prefill provenance. Criteria cursor must be null. Inputs outside PostgreSQL text or mutable int4 version domains refuse with space_search_input_invalid. Drafts and archived briefs cannot run. Restore an archived brief by saving status=saved. Does not query MLS, create a planner, or change a Tour.",
+        "deal-space-searches.v1. Create with expected_version=0 and a new search_id, or replace a brief at its exact current version. Stores canonical criteria plus full requirements and optional client prefill provenance. Criteria cursor must be null. Provenance timestamps are limited to 64 characters. Inputs outside PostgreSQL text or mutable int4 version domains refuse with space_search_input_invalid. Drafts and archived briefs cannot run. Restore an archived brief by saving status=saved. Does not query MLS, create a planner, or change a Tour.",
       inputSchema: saveSchema,
       handler: async (c: Db, actor: Actor, input: VerbInputs["save-deal-space-search-v1"]) => {
         const { request, value: args } = parse("save-deal-space-search-v1", input);

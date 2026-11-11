@@ -236,7 +236,8 @@ test("saved search lifecycle, canonical run, reopen, conflict, archive and autho
         observed_at: "2026-11-10T00:00:00Z",
       },
     };
-    await t.test("registered saved-search input-domain inventory never leaks generic failures", async () => {
+    await t.test("registered saved-search input-domain inventory never leaks generic failures", async (boundary) => {
+      boundary.mock.method(console, "error", () => {});
       const requests: Record<string, Record<string, unknown>> = {
         "save-deal-space-search-v1": { ...save, search_id: randomUUID(), idempotency_key: randomUUID() },
         "run-deal-space-search-v1": {
@@ -334,6 +335,13 @@ test("saved search lifecycle, canonical run, reopen, conflict, archive and autho
         for (const path of [["name"], ["requirements"], ["client_prefill_source", "source_ref"], ["criteria", "query"]])
           add("save-deal-space-search-v1", path, `a${String.fromCharCode(unit)}b`, "space_search_input_invalid");
       }
+      for (const size of [43, 44])
+        add(
+          "save-deal-space-search-v1",
+          ["client_prefill_source", "observed_at"],
+          `2026-11-10T00:00:00.${"1".repeat(size)}Z`,
+          size === 44 ? "space_search_input_invalid" : undefined,
+        );
       const documented = new Set([
         "space_search_input_invalid",
         "space_search_unavailable",
