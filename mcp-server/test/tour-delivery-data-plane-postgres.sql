@@ -140,7 +140,7 @@ begin
     returning id into render_id;
     result_id:=ops.record_tour_pdf_render_result('tour-delivery-proof',render_id,'review_ready',
       'artifact:tour-pdf:abcdefghijklmnop','sha256:'||repeat('5',64),
-      'tour-pdf/tour-delivery-proof/'||render_id||'/'||repeat('5',64)||'.pdf',100,2,0,'sha256:'||repeat('6',64),v_actor_id);
+      'tour-pdf/tour-delivery-proof/'||render_id||'/'||repeat('5',64)||'.pdf',100,3,0,'sha256:'||repeat('6',64),v_actor_id);
     perform ops.record_tour_pdf_human_review('tour-delivery-proof',render_id,'sha256:'||repeat('6',64),
       'accept',now(),'sha256:'||repeat('7',64),'Reviewed synthetic packet',v_actor_id);
     projection_ref:='projection:public:'||substr(encode(public.digest('tour-delivery-proof:ac000000-0000-4000-8000-000000000001:'||v_digest,'sha256'),'hex'),1,32);
@@ -327,14 +327,23 @@ declare
   v_result uuid;
 begin
   v_result:=ops.record_tour_pdf_render_result('tour-pdf-storage-ref-proof','ab000000-0000-4000-8000-000000000001','review_ready',
-    'artifact:tour-pdf:ab000000000040008000000000000001','sha256:'||repeat('7',64),v_ref,12345,1,0,'sha256:'||repeat('8',64),
+    'artifact:tour-pdf:ab000000000040008000000000000001','sha256:'||repeat('7',64),v_ref,12345,2,0,'sha256:'||repeat('8',64),
     'actor:ab000000-0000-4000-8000-0000000000aa');
   if v_result is null then raise exception 'valid storage_ref returned no render result'; end if;
   begin
     perform ops.record_tour_pdf_render_result('tour-pdf-storage-ref-proof','ab000000-0000-4000-8000-000000000002','review_ready',
+      'artifact:tour-pdf:ab000000000040008000000000000002','sha256:'||repeat('7',64),v_ref,12345,1,0,'sha256:'||repeat('8',64),
+      'actor:ab000000-0000-4000-8000-0000000000aa');
+    raise exception 'packet without overview was accepted';
+  exception when raise_exception then
+    if sqlerrm='packet without overview was accepted' then raise; end if;
+  end;
+
+  begin
+    perform ops.record_tour_pdf_render_result('tour-pdf-storage-ref-proof','ab000000-0000-4000-8000-000000000002','review_ready',
       'artifact:tour-pdf:ab000000000040008000000000000002','sha256:'||repeat('7',64),
       'tour-pdf/tour-pdf-storage-ref-proof/ab000000-0000-4000-8000-000000000002/'||repeat('a',400)||'.pdf',
-      12345,1,0,'sha256:'||repeat('8',64),'actor:ab000000-0000-4000-8000-0000000000aa');
+      12345,2,0,'sha256:'||repeat('8',64),'actor:ab000000-0000-4000-8000-0000000000aa');
     raise exception 'over-length storage_ref was accepted';
   exception when raise_exception then
     if sqlerrm='over-length storage_ref was accepted' then raise; end if;

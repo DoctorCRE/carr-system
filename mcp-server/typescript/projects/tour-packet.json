@@ -1,0 +1,14 @@
+{
+  "worker": [
+    "src/tour-packet-template.ts",
+    "src/deliverable-qc.ts"
+  ],
+  "node": [
+    "test/tour-packet-parity.test.ts"
+  ],
+  "entry": [
+    "src/tour-packet-template.ts",
+    "src/deliverable-qc.ts",
+    "test/tour-packet-parity.test.ts"
+  ]
+}

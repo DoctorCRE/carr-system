@@ -28,7 +28,7 @@ export async function prepareTourPdfArtifact(renderInput) {
   });
   const markersDigest = await digest(JSON.stringify(rendered.markers));
   const expected = {
-    page_count: rendered.propertyCount, property_refs: rendered.propertyRefs, markers: rendered.markers,
+    page_count: rendered.pageCount, overview_page_count: 1, property_refs: rendered.propertyRefs, markers: rendered.markers,
     projection_digest: renderInput.projection_digest, template_digest: templateDigest,
     renderer_digest: rendererDigest, qc_ruleset_digest: qcRulesetDigest,
     font_digests: rendered.fontDigests, asset_digests: [],

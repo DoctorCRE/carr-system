@@ -3340,7 +3340,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "record-tour-pdf-render-result": {
     ingress_key: "mcp-tool:record-tour-pdf-render-result",
     source_locator: "mcp-server/src/tour-artifacts.js",
-    schema_digest: "a9be96b68548a1138a8c790541fd31efd394a23d69828d29bce6f55ee5a514cd",
+    schema_digest: "ac882a77fd4ad009f66b798ae9377e1e7739089294c2bfc3ab141c3bc701aaa4",
     write: true,
     human_only: false,
     human_caller_only: false,
