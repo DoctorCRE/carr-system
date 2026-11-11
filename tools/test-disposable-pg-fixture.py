@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """A nested PostgreSQL proof owns one host-wide fixture budget until teardown."""
+import ast
 import os
 from pathlib import Path
 import select
@@ -15,6 +16,34 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.disposable_pg_fixture import DisposablePostgres, postgres_bin_dir, fixture_root_from_line
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class LauncherCoverage(unittest.TestCase):
+    def test_python_fixtures_do_not_launch_postgres_outside_shared_launcher(self):
+        violations = []
+        paths = subprocess.check_output(['git', 'ls-files', '*.py'], cwd=ROOT, text=True).splitlines()
+        for relative in paths:
+            if relative == 'lib/disposable_pg_fixture.py':
+                continue
+            tree = ast.parse((ROOT / relative).read_text(), filename=relative)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call) or not node.args:
+                    continue
+                if not isinstance(node.func, ast.Attribute) or not isinstance(node.func.value, ast.Name):
+                    continue
+                if node.func.value.id != 'subprocess' or node.func.attr not in {
+                        'run', 'Popen', 'call', 'check_call', 'check_output'}:
+                    continue
+                command = node.args[0]
+                if not isinstance(command, (ast.List, ast.Tuple)) or not command.elts:
+                    continue
+                executable = ast.unparse(command.elts[0])
+                arguments = ast.unparse(command)
+                if ('initdb' in executable and '--version' not in arguments or
+                        'pg_ctl' in executable and "'start'" in arguments or
+                        executable in {"'postgres'", '"postgres"'}):
+                    violations.append(f'{relative}:{node.lineno}')
+        self.assertEqual(violations, [], 'use DisposablePostgres.run for fixture startup')
 
 
 class DisposablePostgresBudget(unittest.TestCase):
