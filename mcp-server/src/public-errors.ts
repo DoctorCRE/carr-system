@@ -34,6 +34,8 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["space_search_version_conflict", "Reopen the saved search and retry with its current version."],
   ["space_search_not_runnable", "Save the search before running it. Draft and archived searches cannot run."],
   ["space_search_run_unavailable", "The canonical search could not run. Prior saved results are preserved."],
+  ["tour_input_invalid", "Supply canonical property-search filters using the documented operation shape."],
+  ["tour_search_range_invalid", "Set minimum square feet no greater than maximum square feet."],
   ["push_not_configured", "Web push is not configured."],
   ["push_config_invalid", "The configured web push public key is invalid."],
   ["push_session_required", "Sign in as a partner to read web push configuration."],

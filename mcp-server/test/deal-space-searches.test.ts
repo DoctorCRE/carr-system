@@ -338,10 +338,7 @@ test("saved search lifecycle, canonical run, reopen, conflict, archive and autho
     assert.deepEqual(reopened.searches, [run.search]);
     assert.equal((await invoke("read-deal-space-searches-v1", { deal_id: deal, search_id: null })).searches.length, 1);
     for (const [criteria, code] of [
-      ...["", "   ", "medical\u0000office"].map((query) => [
-        { ...filters, query },
-        "tour_input_invalid",
-      ] as const),
+      ...["", "   ", "medical\u0000office"].map((query) => [{ ...filters, query }, "tour_input_invalid"] as const),
       [{ ...filters, min_square_feet: 9000, max_square_feet: 8000 }, "tour_search_range_invalid"],
     ] as const)
       await assert.rejects(
