@@ -1,0 +1,5 @@
+{
+  "worker": ["src/lead-follow-up.ts", "src/lead-workspace.ts"],
+  "node": ["test/lead-reachability.test.ts", "test/lead-reachability-postgres.test.ts"],
+  "entry": ["test/lead-reachability.test.ts", "test/lead-reachability-postgres.test.ts"]
+}
