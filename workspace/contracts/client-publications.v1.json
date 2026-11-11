@@ -1,0 +1,54 @@
+{
+  "schema_version": "client-publications.v1",
+  "owner": "DoctorCRE/carr-system",
+  "verbs": {
+    "list-deal-client-publications": {
+      "input": [
+        "deal_id"
+      ],
+      "output": "partner drafts and published records with versions"
+    },
+    "preview-deal-client-view": {
+      "input": [
+        "deal_id"
+      ],
+      "output": "portal projection or null"
+    },
+    "set-client-publication": {
+      "input": [
+        "idempotency_key",
+        "deal_id",
+        "publication_id",
+        "base_version",
+        "published",
+        "kind",
+        "title"
+      ],
+      "content": "text for milestone/document/tour/report; deliverable_id and deliverable_version (required exact current version) for deliverable",
+      "output": [
+        "id",
+        "version",
+        "published"
+      ]
+    }
+  },
+  "invariants": [
+    "Only authenticated partners Joe and Dell or their verified partner-authority agents may author or preview a deal the sponsoring partner can access. Publication rows use the partner identity; audit events retain the actual actor.",
+    "The password-authenticated read-client-portal and partner preview use the same projection.",
+    "Milestones remain hidden until explicitly published. Live deal phases are never automatically projected.",
+    "Deliverables must remain finalized, shared, same-deal and at the exact published version.",
+    "Published file metadata contains id, filename, MIME and byte count. It contains no object key or download capability.",
+    "Tour text publication does not create or edit a tour. Tours are authored inside deals.",
+    "Publication never sends, deploys or grants a public CARR mutation route. Hosting and download delivery are separate jobs."
+  ],
+  "limits": {
+    "active_publications": 100,
+    "total_publication_records": 1000,
+    "existing_shared_materials": 100
+  },
+  "consumer_note": "Consumers must render publications (including milestone items), treat roadmap as empty, and never infer visibility from a file's shared designation alone. This is an additive portal payload field with an intentional removal of automatic phase exposure.",
+  "contract_version": "1.1.0",
+  "recovered_from": "541e47ffce83bbd6cb591545417be0dd91a3ea0c",
+  "conflict_resolution": "WR586 CLIENT-VIEW is later than WR227 AC2. Published milestones replace automatic live-phase exposure. Roadmap remains an empty compatibility shape. Existing portal URL/password/session behavior is unchanged.",
+  "write_recovery": "Retry the identical command with the identical UUID idempotency key after an unknown outcome. A different payload reusing that key fails key_reuse. Re-read the authored list to reconcile a version conflict. Withdrawal remains allowed when the existing linked file has become private or stale; it preserves the pinned file identity and never exposes it."
+}

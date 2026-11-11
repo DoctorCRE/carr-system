@@ -162,6 +162,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "revoke-web-push-subscription-v1",
     "run-deal-space-search-v1",
     "save-deal-space-search-v1",
+    "set-client-publication",
     "set-deal-deliverable-visibility",
     "set-prospect-engagement-status",
     "snooze-email-proposal",
