@@ -106,7 +106,8 @@
     "v_capture_candidate_queue",
     "v_party_graph",
     "v_lead_client_best",
-    "v_lead_prospect_engagement"
+    "v_lead_prospect_engagement",
+    "v_lead_workspace"
   ],
   "settings": {
     "default_transaction_read_only": "on",
