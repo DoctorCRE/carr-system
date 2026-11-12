@@ -9,6 +9,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import urllib.error
 from pathlib import Path
 import sys
@@ -98,32 +99,83 @@ def _monthly_costs(api, costs, now, project_id):
     return next(provider for provider in report['providers'] if provider['provider'] == 'neon')
 
 
+def _project_inventory(api, org_id):
+    """Read all projects; unknown details cannot prove name absence.
+
+    Neon PaginationResponse.cursor marks the last item, not has-more.
+    https://neon.com/api_spec/release/v2.json (listProjects, ProjectsResponse)
+    """
+    projects, seen, cursor = [], set(), None
+    for _ in range(100):
+        query = {'org_id': org_id, 'limit': 100, **({'cursor': cursor} if cursor else {})}
+        page = api('GET', '/projects?' + urllib.parse.urlencode(query))
+        pagination = page.get('pagination', {})
+        if (page.get('unavailable_project_ids')
+                or not isinstance(page.get('projects'), list)
+                or not all(isinstance(p, dict) and isinstance(p.get('name'), str) for p in page['projects'])
+                or not isinstance(pagination, dict)):
+            raise MeteringRefusal('project inventory is incomplete')
+        projects.extend(page['projects'])
+        cursor = pagination.get('cursor')
+        if not cursor:
+            return projects
+        if not isinstance(cursor, str) or cursor in seen:
+            raise MeteringRefusal('project pagination invalid or repeated')
+        seen.add(cursor)
+    raise MeteringRefusal('project pagination exceeded limit')
+
+
+def validate_dump_path(path):
+    if path.exists() or path.is_symlink():
+        raise MeteringRefusal('schema dump path already exists')
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # Probe file creation rather than trusting permission bits or os.access.
+    with tempfile.TemporaryFile(dir=path.parent):
+        pass
+
+
+def postgres_environment(uri, options):
+    from psycopg.conninfo import conninfo_to_dict
+
+    parameters = conninfo_to_dict(uri)
+    names = {'host': 'PGHOST', 'port': 'PGPORT', 'user': 'PGUSER',
+             'password': 'PGPASSWORD', 'dbname': 'PGDATABASE', 'sslmode': 'PGSSLMODE',
+             'channel_binding': 'PGCHANNELBINDING', 'sslrootcert': 'PGSSLROOTCERT',
+             'connect_timeout': 'PGCONNECT_TIMEOUT', 'options': 'PGOPTIONS'}
+    if not {'host', 'user', 'dbname'} <= parameters.keys() or parameters.keys() - names.keys():
+        raise MeteringRefusal('unsupported PostgreSQL connection parameters')
+    # Inherited libpq defaults must not override this explicit connection.
+    env = {key: value for key, value in os.environ.items() if not key.startswith('PG')}
+    env.update({names[key]: value for key, value in parameters.items()})
+    env.setdefault('PGPORT', '5432')
+    env.setdefault('PGSSLMODE', 'require')
+    env.update(PGOPTIONS=options, PGCONNECT_TIMEOUT='20')
+    return env
+
+
 def create_registered_project(name, policy, costs, api, intent, now, *, initialize=None):
     registration = policy['execution_gates'][GATE]['registration']
     if name != registration['name'] or costs['neon']['org_id'] != registration['org_id']:
         raise MeteringRefusal('unknown persistent registration or billing organization')
     if intent.exists():
         raise MeteringRefusal('creation intent exists; reconcile provider state before recovery')
+    validate_dump_path(Path(registration['initialization']['dump_path']))
     source = registration['source']
+    target = registration['destination']
     project = source['project_id']
     project_path = f'/projects/{project}'
     source_project = api('GET', project_path)['project']
     if source_project['org_id'] != registration['org_id']:
         raise MeteringRefusal('project organization differs from registration')
     inventory = api('GET', project_path + '/branches')
-    if inventory.get('pagination', {}).get('cursor'):
+    if inventory.get('pagination', {}).get('next'):
         raise MeteringRefusal('branch inventory is incomplete')
     branches = inventory['branches']
     parents = [b for b in branches if b['id'] == source['branch_id']]
     if len(parents) != 1 or parents[0]['name'] != source['branch_name']:
         raise MeteringRefusal('registered production source is absent or renamed')
-    projects_path = '/projects?' + urllib.parse.urlencode({'org_id': registration['org_id'], 'limit': 100})
-    projects = api('GET', projects_path)
-    if (projects.get('pagination', {}).get('cursor')
-            or not isinstance(projects.get('projects'), list)
-            or not all(isinstance(p, dict) and isinstance(p.get('name'), str) for p in projects['projects'])):
-        raise MeteringRefusal('project inventory is incomplete')
-    existing = sum(p['name'] == name for p in projects['projects'])
+    projects = _project_inventory(api, registration['org_id'])
+    existing = sum(p['name'] == name for p in projects)
     spending = api('GET', f"/organizations/{registration['org_id']}/billing/spending_limit")
     cents = spending['spending_limit_cents']
     if isinstance(cents, bool) or not isinstance(cents, int) or cents < 0:
@@ -136,7 +188,8 @@ def create_registered_project(name, policy, costs, api, intent, now, *, initiali
     decision = authorize_metered_execution(policy, GATE, request, today=now.date())
     payload = {'project': {'name': name, 'org_id': registration['org_id'],
                'region_id': source_project['region_id'], 'pg_version': source_project['pg_version'],
-               'branch': {'name': name},
+               'branch': {'name': name, 'database_name': target['database_name'],
+                          'role_name': target['role_name']},
                'default_endpoint_settings': {k: (0 if k == 'suspend_timeout_seconds' else v)
                    for k, v in registration['endpoint'].items() if k != 'type'}}}
     # Keep the intent even on timeout: POST may have succeeded without a reply.
@@ -149,11 +202,8 @@ def create_registered_project(name, policy, costs, api, intent, now, *, initiali
     except ProviderError as exc:
         if 400 <= exc.status < 500 and exc.status != 408:
             try:
-                inventory = api('GET', projects_path)
-                absent = (not inventory.get('pagination', {}).get('cursor')
-                          and isinstance(inventory.get('projects'), list)
-                          and all(isinstance(b, dict) and isinstance(b.get('name'), str)
-                                  and b['name'] != name for b in inventory['projects']))
+                inventory = _project_inventory(api, registration['org_id'])
+                absent = all(p['name'] != name for p in inventory)
             except Exception:
                 absent = False
             if absent:
@@ -179,12 +229,12 @@ def create_registered_project(name, policy, costs, api, intent, now, *, initiali
         handle.flush()
         os.fsync(handle.fileno())
 
-    def connection_uri(project_id, branch_id):
-        query = urllib.parse.urlencode({'branch_id': branch_id, 'database_name': source['database_name'],
-                                        'role_name': source['role_name'], 'pooled': 'false'})
+    def connection_uri(project_id, branch_id, identity):
+        query = urllib.parse.urlencode({'branch_id': branch_id, 'database_name': identity['database_name'],
+                                        'role_name': identity['role_name'], 'pooled': 'false'})
         return api('GET', f'/projects/{project_id}/connection_uri?' + query)['uri']
-    proof = (initialize or initialize_schema)(connection_uri(project, source['branch_id']),
-              connection_uri(destination['id'], branch['id']),
+    proof = (initialize or initialize_schema)(connection_uri(project, source['branch_id'], source),
+              connection_uri(destination['id'], branch['id'], target),
               Path(registration['initialization']['dump_path']))
     if proof.get('schema_parity') is not True or proof.get('zero_rows') is not True:
         raise MeteringRefusal('schema initialization proof failed; reconcile creation intent')
@@ -236,8 +286,8 @@ def initialize_schema(source_uri, destination_uri, path):
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     # Exclusive creation prevents overwriting an earlier private evidence artifact.
     with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as dump:
-        env = {**os.environ, 'PGDATABASE': source_uri,
-               'PGOPTIONS': '-c default_transaction_read_only=on -c statement_timeout=120000'}
+        env = postgres_environment(source_uri,
+               '-c default_transaction_read_only=on -c statement_timeout=120000')
         subprocess.run(['pg_dump', '--schema-only', '--no-owner', '--no-privileges',
                         '--no-policies', '--no-subscriptions', '--no-security-labels',
                         '--lock-wait-timeout=10s', '--no-password'],
@@ -247,8 +297,8 @@ def initialize_schema(source_uri, destination_uri, path):
     with path.open() as dump:
         subprocess.run(['psql', '-X', '--no-password', '--set=ON_ERROR_STOP=1',
                         '--single-transaction'],
-                       env={**os.environ, 'PGDATABASE': destination_uri,
-                            'PGOPTIONS': '-c statement_timeout=120000 -c lock_timeout=10000'},
+                       env=postgres_environment(destination_uri,
+                            '-c statement_timeout=120000 -c lock_timeout=10000'),
                        stdin=dump, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                        check=True, timeout=300)
     actual = catalog(destination_uri)

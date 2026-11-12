@@ -205,12 +205,10 @@
           "role_name": "neondb_owner"
         },
         "destination": {
-          "kind": "project",
-          "root_branch": true
+          "database_name": "neondb",
+          "role_name": "neondb_owner"
         },
         "initialization": {
-          "method": "pg_dump",
-          "schema_only": true,
           "dump_path": "/Users/booko/engine-facts/full-schema.sql"
         }
       },

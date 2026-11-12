@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import copy
 import io
+import os
+import shutil
+import subprocess
 import urllib.error
 import importlib.util
 import json
@@ -25,9 +28,8 @@ REGISTRATION = {
     'source': {'branch_name': 'production', 'branch_id': 'br-summer-breeze-aw7jh2m5',
                'project_id': 'steep-field-48688294', 'database_name': 'neondb',
                'role_name': 'neondb_owner'},
-    'destination': {'kind': 'project', 'root_branch': True},
-    'initialization': {'method': 'pg_dump', 'schema_only': True,
-                       'dump_path': '/Users/booko/engine-facts/full-schema.sql'},
+    'destination': {'database_name': 'neondb', 'role_name': 'neondb_owner'},
+    'initialization': {'dump_path': '/Users/booko/engine-facts/full-schema.sql'},
     'org_id': 'org-dry-dew-75906281', 'owner': 'DoctorCRE engine',
     'endpoint': {'type': 'read_write', 'autoscaling_limit_min_cu': 0.25,
                  'autoscaling_limit_max_cu': 0.25, 'suspend_timeout_seconds': 300},
@@ -85,6 +87,7 @@ spec = importlib.util.spec_from_file_location('persistent_neon', ROOT / 'ops/neo
 assert spec is not None and spec.loader is not None
 creator = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(creator)
+VALIDATE_DUMP_PATH = creator.validate_dump_path
 
 
 class CreatorTests(unittest.TestCase):
@@ -94,6 +97,12 @@ class CreatorTests(unittest.TestCase):
         self.intent = Path(self.tmp.name) / 'intent.json'
         self.now = datetime(2026, 11, 11, tzinfo=timezone.utc)
         self.costs = json.loads((ROOT / 'ops/config/system-costs.v1.json').read_text())
+        self.dump_path = Path(self.tmp.name) / 'schema.sql'
+        # Exercise real path checks under the test directory, including CLI tests.
+        probe = patch.object(creator, 'validate_dump_path',
+                             side_effect=lambda path: VALIDATE_DUMP_PATH(self.dump_path))
+        probe.start()
+        self.addCleanup(probe.stop)
         self.calls = []
         self.branches = [{'id': REGISTRATION['source']['branch_id'], 'name': 'production', 'default': True}]
         self.consumption = json.loads((ROOT / 'tools/fixtures/system-costs/neon.json').read_text())
@@ -115,7 +124,7 @@ class CreatorTests(unittest.TestCase):
             self.assertTrue(self.intent.exists())
             self.assertEqual(path, '/projects')
             self.assertEqual(payload['project']['org_id'], REGISTRATION['org_id'])
-            self.assertEqual(payload['project']['branch'], {'name': 'engine-test'})
+            self.assertEqual(payload['project']['branch'], {'name': 'engine-test', **REGISTRATION['destination']})
             self.assertEqual(payload['project']['default_endpoint_settings'],
                              {k: (0 if k == 'suspend_timeout_seconds' else v)
                               for k, v in REGISTRATION['endpoint'].items() if k != 'type'})
@@ -181,6 +190,125 @@ class CreatorTests(unittest.TestCase):
             with self.assertRaises(MeteringRefusal):
                 self.create()
             self.assert_no_post()
+
+    def test_project_inventory_pages_and_single_page(self):
+        normal = self.api
+        for pages in ([{'projects': [], 'pagination': {}}],
+                      [{'projects': [{'name': 'production', 'id': 'p'}],
+                        'pagination': {'cursor': 'p'}}, {'projects': [], 'pagination': {}}],
+                      [{'projects': [{'name': 'other', 'id': 'a'}], 'pagination': {'cursor': 'a'}},
+                       {'projects': [{'name': 'engine-test', 'id': 'b'}], 'pagination': {'cursor': 'b'}},
+                       {'projects': [], 'pagination': {}}]):
+            with self.subTest(pages=pages):
+                self.intent.unlink(missing_ok=True)
+                self.calls.clear()
+                remaining = iter(pages)
+                cursors = []
+                def paginated(method, path, payload=None):
+                    if path.startswith('/projects?'):
+                        cursors.append(creator.urllib.parse.parse_qs(creator.urllib.parse.urlsplit(path).query).get('cursor'))
+                        return next(remaining)
+                    return normal(method, path, payload)
+                self.api = paginated
+                if len(pages) == 3:
+                    with self.assertRaises(MeteringRefusal):
+                        self.create()
+                    self.assert_no_post()
+                else:
+                    self.assertTrue(self.create()['creation_confirmed'])
+                self.assertEqual(len(cursors), len(pages))
+                if len(pages) > 1:
+                    self.assertEqual(cursors[1], [pages[0]['pagination']['cursor']])
+
+    def test_paginated_rejection_proves_absence(self):
+        normal = self.api
+        posted = False
+        reads = []
+        def rejecting(method, path, payload=None):
+            nonlocal posted
+            if method == 'POST':
+                posted = True
+                raise creator.ProviderError(412, 'rejected')
+            if posted and path.startswith('/projects?'):
+                reads.append(path)
+                if len(reads) == 1:
+                    return {'projects': [{'name': 'other', 'id': 'a'}],
+                            'pagination': {'cursor': 'a'}}
+                return {'projects': []}
+            return normal(method, path, payload)
+        self.api = rejecting
+        with self.assertRaises(creator.ProviderError) as caught:
+            self.create()
+        self.assertEqual(caught.exception.creation_outcome, 'not_created')
+        self.assertFalse(self.intent.exists())
+        self.assertEqual(len(reads), 2)
+        self.assertIn('cursor=a', reads[1])
+
+    def test_project_pagination_is_bounded(self):
+        for repeated in (True, False):
+            calls = []
+            def endless(method, path, payload=None):
+                calls.append(path)
+                return {'projects': [], 'pagination': {'cursor': 'a' if repeated else str(len(calls))}}
+            with self.assertRaises(MeteringRefusal):
+                creator._project_inventory(endless, REGISTRATION['org_id'])
+            self.assertEqual(len(calls), 2 if repeated else 100)
+
+    def test_unavailable_project_details_refuse_and_retain_intent(self):
+        normal = self.api
+        for after_post in (False, True):
+            with self.subTest(after_post=after_post):
+                self.intent.unlink(missing_ok=True)
+                self.calls.clear()
+                posted = False
+                def unavailable(method, path, payload=None):
+                    nonlocal posted
+                    if method == 'POST':
+                        posted = True
+                        self.calls.append((method, path, payload))
+                        raise creator.ProviderError(422, 'rejected')
+                    if path.startswith('/projects?') and (posted or not after_post):
+                        return {'projects': [], 'unavailable_project_ids': ['unknown'],
+                                'pagination': {}}
+                    return normal(method, path, payload)
+                self.api = unavailable
+                with self.assertRaises(MeteringRefusal):
+                    self.create()
+                self.assertEqual(self.intent.exists(), after_post)
+                if not after_post:
+                    self.assert_no_post()
+
+    def test_dump_path_refuses_before_intent_and_post(self):
+        for kind in ('exists', 'broken_symlink', 'parent_file', 'unwritable'):
+            with self.subTest(kind=kind):
+                self.dump_path = Path(self.tmp.name) / kind / 'dump.sql'
+                self.dump_path.parent.mkdir()
+                if kind == 'exists':
+                    self.dump_path.touch()
+                elif kind == 'broken_symlink':
+                    self.dump_path.symlink_to(self.dump_path.parent / 'absent')
+                elif kind == 'parent_file':
+                    self.dump_path.parent.rmdir()
+                    self.dump_path.parent.touch()
+                else:
+                    self.dump_path.parent.chmod(0o500)
+                try:
+                    with self.assertRaises((MeteringRefusal, OSError)):
+                        self.create()
+                    self.assert_no_post()
+                    self.assertFalse(self.intent.exists())
+                finally:
+                    if kind == 'unwritable':
+                        self.dump_path.parent.chmod(0o700)
+
+    def test_branch_next_refuses_before_creation(self):
+        normal = self.api
+        self.api = lambda method, path, payload=None: (
+            {'branches': self.branches, 'pagination': {'next': 'another'}}
+            if path.endswith('/branches') else normal(method, path, payload))
+        with self.assertRaises(MeteringRefusal):
+            self.create()
+        self.assert_no_post()
 
     def test_initialize_failure_retains_intent(self):
         self.initialize = lambda *args: (_ for _ in ()).throw(MeteringRefusal('restore failed'))
@@ -437,9 +565,33 @@ class CreatorTests(unittest.TestCase):
 
 
 class SchemaInitializationTests(unittest.TestCase):
+    def test_real_libpq_clients_use_host_without_secret_disclosure(self):
+        uri = 'postgresql://' + 'synthetic:pw@127.0.0.1:1/synthetic?sslmode=require'
+        for binary in ('pg_dump', 'psql'):
+            with self.subTest(binary=binary):
+                executable = shutil.which(binary) or str(Path('/opt/homebrew/opt/libpq/bin') / binary)
+                self.assertTrue(Path(executable).is_file(), 'real PostgreSQL client required')
+                build = creator.postgres_environment
+                with patch.dict(os.environ, {'PGHOST': '/nonexistent-socket', 'PGSERVICE': 'wrong'}):
+                    env = build(uri, '-c statement_timeout=2000')
+                env['PGCONNECT_TIMEOUT'] = '2'
+                args = [executable, '--no-password']
+                args += ['--schema-only'] if binary == 'pg_dump' else ['-X', '-c', 'SELECT 1']
+                result = subprocess.run(args, env=env, capture_output=True, text=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('127.0.0.1', result.stderr)
+                self.assertIn('port 1', result.stderr)
+                self.assertNotIn('socket', result.stderr)
+                for secret in ('pw', uri):
+                    self.assertNotIn(secret, str(args) + result.stdout + result.stderr)
+                self.assertEqual(env['PGDATABASE'], 'synthetic')
+                self.assertEqual(env['PGSSLMODE'], 'require')
+
     def test_schema_only_restore_proof_and_failures(self):
         from unittest.mock import MagicMock
         import psycopg
+        source_uri = 'postgresql://' + 'source:pw@127.0.0.1:1/source?sslmode=require'
+        destination_uri = 'postgresql://' + 'destination:pw@127.0.0.1:1/destination?sslmode=require'
         for failure in (None, 'parity', 'rows', 'dump', 'restore', 'foreign'):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
                 path = Path(tmp) / 'full-schema.sql'
@@ -454,34 +606,34 @@ class SchemaInitializationTests(unittest.TestCase):
                 connections = [source, destination, check]
                 def connect(uri, **kwargs):
                     self.assertIn('default_transaction_read_only=on', kwargs['options'])
-                    self.assertEqual(uri, 'source-secret' if len(connections) == 3 else 'destination-secret')
+                    self.assertEqual(uri, source_uri if len(connections) == 3 else destination_uri)
                     context = MagicMock()
                     context.__enter__.return_value = connections.pop(0)
                     return context
                 commands = []
                 def run(args, **kwargs):
                     commands.append(args)
-                    self.assertNotIn('source-secret', args)
-                    self.assertNotIn('destination-secret', args)
+                    self.assertNotIn('pw', ' '.join(args))
+                    self.assertNotIn('pw', ' '.join(args))
                     if args[0] == 'pg_dump':
                         self.assertIn('--schema-only', args)
                         for flag in ('--no-owner', '--no-privileges', '--no-policies', '--no-subscriptions'):
                             self.assertIn(flag, args)
-                        self.assertEqual(kwargs['env']['PGDATABASE'], 'source-secret')
+                        self.assertEqual(kwargs['env']['PGDATABASE'], 'source')
                         self.assertIn('default_transaction_read_only=on', kwargs['env']['PGOPTIONS'])
                         kwargs['stdout'].write('-- synthetic schema only')
                     else:
                         self.assertIn('--single-transaction', args)
-                        self.assertEqual(kwargs['env']['PGDATABASE'], 'destination-secret')
+                        self.assertEqual(kwargs['env']['PGDATABASE'], 'destination')
                     if failure == ('dump' if args[0] == 'pg_dump' else 'restore'):
                         raise creator.subprocess.CalledProcessError(1, args)
                 with patch.object(psycopg, 'connect', side_effect=connect), \
                         patch.object(creator.subprocess, 'run', side_effect=run):
                     if failure:
                         with self.assertRaises((MeteringRefusal, creator.subprocess.CalledProcessError)):
-                            creator.initialize_schema('source-secret', 'destination-secret', path)
+                            creator.initialize_schema(source_uri, destination_uri, path)
                     else:
-                        proof = creator.initialize_schema('source-secret', 'destination-secret', path)
+                        proof = creator.initialize_schema(source_uri, destination_uri, path)
                         self.assertTrue(proof['zero_rows'])
                         self.assertTrue(proof['schema_parity'])
                         self.assertEqual(proof['user_tables_checked'], 1)
