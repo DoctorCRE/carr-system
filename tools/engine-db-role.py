@@ -24,8 +24,12 @@ import staging_database_credential as credentials
 
 ROLE = 'engine_business_reader'
 SPEC = ROOT / 'tools/config/engine-business-reader.json'
+ALLOWED_FUNCTIONS = frozenset({
+    'carr_business_date(timestamp with time zone)', 'practice_address_key(text)',
+})
 CHECKS = (
     'role_flags_match', 'no_memberships', 'no_ops_or_auth_usage', 'function_grants_match',
+    'functions_executable', 'no_schema_create', 'no_database_create',
     'no_default_grants', 'no_sequence_rights', 'read_only_default', 'activity_whole_table_select',
     'ops_read_refused', 'insert_refused', 'update_refused', 'delete_refused',
     'timezone_utc', 'statement_timeout_15s', 'idle_timeout_30s',
@@ -39,8 +43,11 @@ class Refusal(RuntimeError):
 def validate_spec(data):
     if data['role'] != ROLE or data['schema'] != 'public':
         raise Refusal('role spec exceeds the authorized role or schema')
-    if data.get('functions') != ['carr_business_date(timestamp with time zone)']:
-        raise Refusal('function spec differs from the authorized function')
+    functions = data.get('functions')
+    if (not isinstance(functions, list)
+            or any(not isinstance(name, str) or name not in ALLOWED_FUNCTIONS for name in functions)
+            or len(functions) != len(set(functions))):
+        raise Refusal('function spec must be a duplicate-free subset of the authorized functions')
     names = data['tables'] + data['views']
     if not names or len(names) != len(set(names)) or any(
         not re.fullmatch('[a-z_][a-z_0-9]*', name) for name in names
@@ -213,6 +220,13 @@ def proof(uri, data):
             has_schema_privilege(current_user,'ops','USAGE') OR
             has_schema_privilege(current_user,'neon_auth','USAGE'))""").fetchone()[0]
         result['function_grants_match'] = function_grants_match(conn, data)
+        result['functions_executable'] = all([conn.execute(
+            "SELECT has_function_privilege(current_user,%s,'EXECUTE')",
+            ('public.' + name,)).fetchone()[0] for name in data['functions']])
+        result['no_schema_create'] = conn.execute("""SELECT NOT EXISTS(
+            SELECT FROM pg_namespace WHERE has_schema_privilege(current_user,oid,'CREATE'))""").fetchone()[0]
+        result['no_database_create'] = conn.execute(
+            "SELECT NOT has_database_privilege(current_user,current_database(),'CREATE')").fetchone()[0]
         result['no_default_grants'] = conn.execute("""SELECT NOT EXISTS(
             SELECT FROM pg_default_acl d,aclexplode(d.defaclacl) a
             WHERE a.grantee=(SELECT oid FROM pg_roles WHERE rolname=current_user))""").fetchone()[0]
