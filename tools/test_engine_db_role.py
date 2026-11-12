@@ -57,7 +57,7 @@ class ReaderRoleTests(unittest.TestCase):
         self.assertIn('activity', data['tables'])
         self.assertIn('v_deal_room_current_lease', data['views'])
         self.assertEqual(data['settings']['timezone'], 'UTC')
-        self.assertEqual(len(set(data['tables'] + data['views'])), 98)
+        self.assertEqual(len(set(data['tables'] + data['views'])), 99)
 
     def test_spec_rejects_role_or_identifier_expansion(self):
         data = role.load_spec()
@@ -75,6 +75,7 @@ class ReaderRoleTests(unittest.TestCase):
         self.assertIn('GRANT SELECT ON TABLE "public"."activity"', text)
         self.assertIn('GRANT SELECT ON TABLE "public"."v_deal_room_presence" TO "engine_business_reader"', statements)
         self.assertIn('GRANT SELECT ON TABLE "public"."v_capture_session_status" TO "engine_business_reader"', statements)
+        self.assertIn('GRANT SELECT ON TABLE "public"."v_capture_candidate_queue" TO "engine_business_reader"', statements)
         self.assertIn('GRANT EXECUTE ON FUNCTION public.carr_business_date(timestamp with time zone)', text)
         self.assertEqual(len([s for s in statements if 'FUNCTION' in s]), 1)
         self.assertNotIn('SEQUENCE', text)
@@ -138,6 +139,7 @@ class ReaderRolePostgresTests(unittest.TestCase):
             self.assertTrue(first['proof']['v_open_deal_room_board']['read'])
             self.assertTrue(first['proof']['v_deal_room_presence']['read'])
             self.assertTrue(first['proof']['v_capture_session_status']['read'])
+            self.assertTrue(first['proof']['v_capture_candidate_queue']['read'])
             final = root / 'engine-test-engine-business-reader.env'
             original = final.read_bytes()
             secret = original.decode().split('=', 1)[1].strip()
@@ -157,6 +159,7 @@ class ReaderRolePostgresTests(unittest.TestCase):
             self.assertTrue(second['proof']['v_open_deal_room_board']['read'])
             self.assertTrue(second['proof']['v_deal_room_presence']['read'])
             self.assertTrue(second['proof']['v_capture_session_status']['read'])
+            self.assertTrue(second['proof']['v_capture_candidate_queue']['read'])
             self.assertFalse(second['created'])
             self.assertFalse(second['password_changed'])
             self.assertEqual(final.read_bytes(), original)

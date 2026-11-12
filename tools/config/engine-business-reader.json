@@ -101,7 +101,8 @@
     "v_deal_room_document",
     "v_deal_room_current_lease",
     "v_deal_room_presence",
-    "v_capture_session_status"
+    "v_capture_session_status",
+    "v_capture_candidate_queue"
   ],
   "settings": {
     "default_transaction_read_only": "on",
