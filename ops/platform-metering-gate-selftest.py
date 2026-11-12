@@ -202,9 +202,8 @@ def main() -> int:
         "bin/restore-rehearse.sh",
         "ops/neon-persistent-branch.py",
     }
-    # A create through the provider's REST API (POST .../branches) is a branch
-    # create exactly as much as a neonctl call is, so it is discovered too.
-    api_branch_create = re.compile(r'["\x27]POST["\x27]\s*,\s*f?["\x27]/projects/\{[^}]+\}/branches["\x27]')
+    # Project creation also provisions a root branch and must stay inventoried.
+    api_branch_create = re.compile(r'["\x27]POST["\x27]\s*,\s*f?["\x27]/projects(?:/\{[^}]+\}/branches)?["\x27]')
     branch_patterns = (
         re.compile(r'["\x27]branches["\x27]\s*,\s*["\x27]create["\x27]'),
         re.compile(r'(?:\$NEONCTL|\bneon\b)[^\n]*\bbranches\s+create\b'),
@@ -217,7 +216,7 @@ def main() -> int:
                                                           errors="ignore"))
                for pattern in branch_patterns)
     }
-    check("every Neon branch-create implementation is inventoried",
+    check("every Neon project/branch-create implementation is inventoried",
           discovered_branch_sources == branch_sources)
     for relative in sorted(branch_sources):
         source = (REPO / relative).read_text(encoding="utf-8")
