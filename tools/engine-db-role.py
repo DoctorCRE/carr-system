@@ -28,7 +28,7 @@ ALLOWED_FUNCTIONS = frozenset({
     'carr_business_date(timestamp with time zone)', 'practice_address_key(text)',
 })
 CHECKS = (
-    'role_flags_match', 'no_memberships', 'no_ops_or_auth_usage', 'function_grants_match',
+    'column_grants_match', 'role_flags_match', 'no_memberships', 'no_ops_or_auth_usage', 'function_grants_match',
     'functions_executable', 'no_schema_create', 'no_database_create',
     'no_default_grants', 'no_sequence_rights', 'read_only_default', 'activity_whole_table_select',
     'ops_read_refused', 'insert_refused', 'update_refused', 'delete_refused',
@@ -53,6 +53,16 @@ def validate_spec(data):
         not re.fullmatch('[a-z_][a-z_0-9]*', name) for name in names
     ):
         raise Refusal('role spec contains duplicate or invalid relation names')
+    view_columns = data.get('view_columns', {})
+    if (not isinstance(view_columns, dict)
+            or any(name not in data['views'] for name in view_columns)):
+        raise Refusal('column grants must name allowlisted views')
+    for columns in view_columns.values():
+        if (not isinstance(columns, list) or not columns
+                or any(not isinstance(column, str) or not column or '\x00' in column
+                       or len(column.encode('utf-8')) > 63 for column in columns)
+                or len(columns) != len(set(columns))):
+            raise Refusal('view columns must be nonempty, unique PostgreSQL identifiers')
     if data['settings'] != {
         'default_transaction_read_only': 'on', 'timezone': 'UTC',
         'search_path': 'pg_catalog, public',
@@ -81,7 +91,11 @@ def attribute_options(observed):
 
 def grant_statements(data):
     return [f'GRANT SELECT ON TABLE "public"."{name}" TO "{ROLE}"'
-            for name in data['tables'] + data['views']] + [
+            for name in data['tables'] + data['views'] if name not in data.get('view_columns', {})] + [
+                sql.SQL('GRANT SELECT ({}) ON TABLE {} TO {}').format(
+                    sql.SQL(', ').join(map(sql.Identifier, columns)),
+                    sql.Identifier('public', name), sql.Identifier(ROLE)).as_string()
+                for name, columns in data.get('view_columns', {}).items()] + [
                 f'GRANT EXECUTE ON FUNCTION public.{name} TO "{ROLE}"'
                 for name in data['functions']]
 
@@ -188,15 +202,29 @@ def reconcile(conn, data, password=None):
         FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace,
         aclexplode(c.relacl) a JOIN pg_roles r ON r.oid=a.grantee WHERE r.rolname=%s""",
         (ROLE,)).fetchall())
-    expected = {('public', name, 'SELECT', False) for name in data['tables'] + data['views']}
+    expected = {('public', name, 'SELECT', False) for name in data['tables'] + data['views']
+                if name not in data.get('view_columns', {})}
     if actual != expected:
         raise Refusal('direct relation grants differ from the role spec')
+    if not column_grants_match(conn, data):
+        raise Refusal('direct column grants differ from the role spec')
     if not function_grants_match(conn, data):
         raise Refusal('direct function grants differ from the role spec')
     if conn.execute("""SELECT EXISTS(SELECT FROM pg_type t,aclexplode(t.typacl) a
         JOIN pg_roles r ON r.oid=a.grantee WHERE r.rolname=%s)""", (ROLE,)).fetchone()[0]:
         raise Refusal('unsupported direct type grants; transaction rolled back')
     return not exists
+
+
+def column_grants_match(conn, data):
+    actual = set(conn.execute("""SELECT n.nspname,c.relname,att.attname,
+        a.privilege_type,a.is_grantable
+        FROM pg_attribute att JOIN pg_class c ON c.oid=att.attrelid
+        JOIN pg_namespace n ON n.oid=c.relnamespace,aclexplode(att.attacl) a
+        WHERE a.grantee=(SELECT oid FROM pg_roles WHERE rolname=%s)""", (ROLE,)).fetchall())
+    expected = {('public', name, column, 'SELECT', False)
+                for name, columns in data.get('view_columns', {}).items() for column in columns}
+    return actual == expected
 
 
 def function_grants_match(conn, data):
@@ -219,6 +247,7 @@ def proof(uri, data):
         result['no_ops_or_auth_usage'] = conn.execute("""SELECT NOT (
             has_schema_privilege(current_user,'ops','USAGE') OR
             has_schema_privilege(current_user,'neon_auth','USAGE'))""").fetchone()[0]
+        result['column_grants_match'] = column_grants_match(conn, data)
         result['function_grants_match'] = function_grants_match(conn, data)
         result['functions_executable'] = all([conn.execute(
             "SELECT has_function_privilege(current_user,%s,'EXECUTE')",

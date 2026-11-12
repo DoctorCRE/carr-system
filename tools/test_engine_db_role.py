@@ -53,11 +53,92 @@ class ReaderRoleTests(unittest.TestCase):
     def test_role_spec(self):
         data = role.load_spec()
         self.assertEqual(data['role'], 'engine_business_reader')
-        self.assertEqual(len(data['tables']), 72)
+        self.assertEqual(len(data['tables']), 73)
         self.assertIn('activity', data['tables'])
         self.assertIn('v_deal_room_current_lease', data['views'])
         self.assertEqual(data['settings']['timezone'], 'UTC')
-        self.assertEqual(len(set(data['tables'] + data['views'])), 113)
+        self.assertEqual(len(set(data['tables'] + data['views'])), 117)
+
+    def test_page_frame_grants_pin_audited_columns(self):
+        data = role.load_spec()
+        statements = role.grant_statements(data)
+        self.assertIn('board_snapshot', data['tables'])
+        self.assertIn('GRANT SELECT ON TABLE "public"."board_snapshot" TO "engine_business_reader"', statements)
+        expected = {
+            'v_export_clients': ['Client ID', 'Name', 'Practice / Entity', 'Owner', 'Status',
+                                 'Specialty / Type', 'Market / Location', 'Deal Type',
+                                 'Referral Source', 'Contact', 'Phone', 'Email',
+                                 'Possible Duplicate Of', 'Detail File', 'Notes'],
+            'v_export_deals': ['id', 'name', 'salesforce_id', 'deal_type', 'phase', 'segment',
+                               'outcome', 'closed_on', 'notes_path', 'client_ref', 'client_name',
+                               'owner', 'PLACEHOLDER_sf_commission_never_sum',
+                               'PLACEHOLDER_sf_close_date_never_forecast', 'source_row', 'city', 'lane'],
+            'v_today_triage': ['item_kind', 'id', 'subject_type', 'subject_id', 'owner', 'what',
+                               'due_on', 'subject_name', 'subject_ref', 'business_days_overdue'],
+        }
+        self.assertEqual(data['view_columns'], expected)
+        for name, columns in expected.items():
+            with self.subTest(view=name):
+                quoted = ', '.join('"' + column + '"' for column in columns)
+                self.assertIn(f'GRANT SELECT ({quoted}) ON TABLE "public"."{name}" TO "engine_business_reader"', statements)
+                self.assertNotIn(f'GRANT SELECT ON TABLE "public"."{name}" TO "engine_business_reader"', statements)
+        self.assertNotIn('tool_call', data['tables'] + data['views'])
+
+    def test_column_grant_spec_rejects_invalid_shapes(self):
+        for columns in [None, [], {'activity': ['id']}, {'missing_view': ['id']},
+                        {'v_export_clients': []}, {'v_export_clients': 'Name'},
+                        {'v_export_clients': ['Name', 'Name']},
+                        {'v_export_clients': [None]}, {'v_export_clients': ['']},
+                        {'v_export_clients': ['x' * 64]}, {'v_export_clients': ['a\x00b']}]:
+            with self.subTest(columns=columns):
+                with self.assertRaises(role.Refusal):
+                    role.validate_spec(role.load_spec() | {'view_columns': columns})
+
+    def test_column_identifiers_are_quoted(self):
+        data = role.load_spec() | {'view_columns': {'v_export_clients': ['a"b']}}
+        role.validate_spec(data)
+        self.assertIn('GRANT SELECT ("a""b") ON TABLE "public"."v_export_clients" TO "engine_business_reader"',
+                      role.grant_statements(data))
+
+    def test_column_acl_proof_refuses_extra_or_missing_privileges(self):
+        data = role.load_spec()
+        expected = [('public', name, column, 'SELECT', False)
+                    for name, columns in data['view_columns'].items() for column in columns]
+        for actual in [expected, expected[:-1], expected + [('public', 'activity', 'id', 'UPDATE', False)]]:
+            conn = MagicMock()
+            conn.execute.return_value.fetchall.return_value = actual
+            self.assertEqual(role.column_grants_match(conn, data), actual == expected)
+
+    def test_reconcile_checks_relation_and_column_acls(self):
+        data = role.load_spec()
+        expected = [('public', name, 'SELECT', False)
+                    for name in data['tables'] + data['views'] if name not in data['view_columns']]
+        for table_grant, column_match in [(False, True), (True, True), (False, False)]:
+            conn = MagicMock()
+            conn.info.dbname = 'synthetic'
+            def execute(statement, params=None):
+                query = str(statement)
+                cursor = MagicMock()
+                cursor.fetchone.return_value = (False,)
+                if 'SELECT relkind' in query:
+                    cursor.fetchone.return_value = ('r' if params[0][7:] in data['tables'] else 'v',)
+                if 'to_regprocedure' in query:
+                    cursor.fetchone.return_value = (1,)
+                if 'SELECT rolsuper' in query:
+                    cursor.fetchone.return_value = (False, False, False)
+                if 'aclexplode(c.relacl)' in query:
+                    cursor.fetchall.return_value = expected + ([('public', 'v_export_clients', 'SELECT', False)]
+                                                               if table_grant else [])
+                return cursor
+            conn.execute.side_effect = execute
+            with patch.object(role, 'revocations', return_value=[]), patch.object(
+                role, 'column_grants_match', return_value=column_match
+            ), patch.object(role, 'function_grants_match', return_value=True):
+                if table_grant or not column_match:
+                    with self.assertRaises(role.Refusal):
+                        role.reconcile(conn, data)
+                else:
+                    self.assertTrue(role.reconcile(conn, data))
 
     def test_spec_rejects_role_or_identifier_expansion(self):
         data = role.load_spec()
@@ -69,7 +150,7 @@ class ReaderRoleTests(unittest.TestCase):
         with self.assertRaises(role.Refusal):
             role.validate_spec(data)
 
-    def test_grants_are_whole_table_select_only(self):
+    def test_grants_preserve_existing_select_and_execute_contract(self):
         statements = role.grant_statements(role.load_spec())
         text = '\n'.join(statements)
         self.assertIn('GRANT SELECT ON TABLE "public"."activity"', text)
@@ -186,7 +267,10 @@ class ReaderRolePostgresTests(unittest.TestCase):
                          'LANGUAGE sql IMMUTABLE STRICT AS $$ SELECT lower($1) $$')
             conn.execute('REVOKE ALL ON FUNCTION public.practice_address_key(text) FROM PUBLIC')
             for name in data['views']:
-                conn.execute(role.sql.SQL('CREATE VIEW public.{} AS SELECT 1 AS id').format(role.sql.Identifier(name)))
+                columns = data.get('view_columns', {}).get(name, ['id'])
+                conn.execute(role.sql.SQL('CREATE VIEW public.{} AS SELECT {}').format(
+                    role.sql.Identifier(name), role.sql.SQL(', ').join(
+                        role.sql.SQL('1 AS {}').format(role.sql.Identifier(column)) for column in columns)))
             conn.execute('CREATE OR REPLACE VIEW public.v_open_deal_room_board AS '
                          'SELECT extract(day FROM public.carr_business_date(current_timestamp))::int AS id')
             conn.execute('CREATE TABLE public.extra(id int)')
@@ -215,6 +299,9 @@ class ReaderRolePostgresTests(unittest.TestCase):
             self.assertTrue(first['proof']['idle_timeout_30s'])
             for key in ['ops_read_refused', 'insert_refused', 'update_refused', 'delete_refused']:
                 self.assertTrue(first['proof'][key], key)
+            self.assertTrue(first['proof']['column_grants_match'])
+            for name in data['view_columns']:
+                self.assertTrue(first['proof'][name]['read'], name)
             self.assertTrue(first['proof']['function_grants_match'])
             self.assertTrue(first['proof']['functions_executable'])
             self.assertTrue(first['proof']['no_schema_create'])
@@ -242,18 +329,23 @@ class ReaderRolePostgresTests(unittest.TestCase):
             generated_password = unquote(urlsplit(secret).password)
             self.assertNotIn(generated_password, output)
             self.assertNotIn(secret, output)
-            table_probe = data | {'views': data['views'] + ['practice_origination_event', 'practice_origination_feed']}
+            table_probe = data | {'views': data['views'] + ['practice_origination_event', 'practice_origination_feed', 'board_snapshot']}
             provision_reads = role.proof(secret, table_probe)
             self.assertTrue(provision_reads['practice_origination_event']['read'])
             self.assertTrue(provision_reads['practice_origination_feed']['read'])
+            self.assertTrue(provision_reads['board_snapshot']['read'])
             with role.connect(owner) as conn:
                 conn.execute('GRANT extra_bundle TO engine_business_reader')
                 conn.execute('GRANT EXECUTE ON FUNCTION public.extra_fn() TO engine_business_reader')
                 conn.execute('GRANT SELECT,INSERT ON public.extra TO engine_business_reader')
                 conn.execute('GRANT UPDATE(id) ON public.activity TO engine_business_reader')
+                conn.execute('GRANT SELECT ON public.v_export_clients TO engine_business_reader')
                 conn.execute('GRANT USAGE ON SCHEMA ops TO engine_business_reader')
                 conn.execute('ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO engine_business_reader')
             second = role.provision(owner, data, 'engine-test', False, root)
+            self.assertTrue(second['proof']['column_grants_match'])
+            for name in data['view_columns']:
+                self.assertTrue(second['proof'][name]['read'], name)
             self.assertTrue(second['proof']['function_grants_match'])
             self.assertTrue(second['proof']['v_open_deal_room_board']['read'])
             self.assertTrue(second['proof']['v_deal_room_presence']['read'])

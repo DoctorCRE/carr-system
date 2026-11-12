@@ -10,6 +10,7 @@
     "availability",
     "building",
     "building_ownership",
+    "board_snapshot",
     "cadence_rule",
     "client",
     "client_status",
@@ -116,7 +117,10 @@
     "v_record_flag_subject",
     "v_lead_workspace_correspondence",
     "v_lead_workspace_stage_history",
-    "v_subject_timeline"
+    "v_subject_timeline",
+    "v_export_clients",
+    "v_export_deals",
+    "v_today_triage"
   ],
   "settings": {
     "default_transaction_read_only": "on",
@@ -128,5 +132,55 @@
   "functions": [
     "carr_business_date(timestamp with time zone)",
     "practice_address_key(text)"
-  ]
+  ],
+  "view_columns": {
+    "v_export_clients": [
+      "Client ID",
+      "Name",
+      "Practice / Entity",
+      "Owner",
+      "Status",
+      "Specialty / Type",
+      "Market / Location",
+      "Deal Type",
+      "Referral Source",
+      "Contact",
+      "Phone",
+      "Email",
+      "Possible Duplicate Of",
+      "Detail File",
+      "Notes"
+    ],
+    "v_export_deals": [
+      "id",
+      "name",
+      "salesforce_id",
+      "deal_type",
+      "phase",
+      "segment",
+      "outcome",
+      "closed_on",
+      "notes_path",
+      "client_ref",
+      "client_name",
+      "owner",
+      "PLACEHOLDER_sf_commission_never_sum",
+      "PLACEHOLDER_sf_close_date_never_forecast",
+      "source_row",
+      "city",
+      "lane"
+    ],
+    "v_today_triage": [
+      "item_kind",
+      "id",
+      "subject_type",
+      "subject_id",
+      "owner",
+      "what",
+      "due_on",
+      "subject_name",
+      "subject_ref",
+      "business_days_overdue"
+    ]
+  }
 }
