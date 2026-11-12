@@ -28,6 +28,18 @@ def check(label: str, condition: bool, detail: str = "") -> None:
 
 
 def run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    if len(args) > 1 and args[1] == "tools/health-check.py" and "--fixture" in args:
+        # A fixture must be the complete input, even on a desk with live credentials.
+        args = (args[0], "-c", """
+import runpy, sys
+sys.path.insert(0, 'tools')
+import health_store
+def refuse_store(sql):
+    raise SystemExit('fixture attempted a live store query')
+health_store.query = refuse_store
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name='__main__')
+""", *args[1:])
     return subprocess.run(args, cwd=ROOT, text=True, capture_output=True,
                           env=env, timeout=90)
 
