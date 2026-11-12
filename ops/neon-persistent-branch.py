@@ -117,7 +117,7 @@ def _project_inventory(api, org_id):
             raise MeteringRefusal('project inventory is incomplete')
         projects.extend(page['projects'])
         cursor = pagination.get('cursor')
-        if not cursor:
+        if not page['projects'] or not cursor:
             return projects
         if not isinstance(cursor, str) or cursor in seen:
             raise MeteringRefusal('project pagination invalid or repeated')
@@ -149,7 +149,8 @@ def postgres_environment(uri, options):
     env.update({names[key]: value for key, value in parameters.items()})
     env.setdefault('PGPORT', '5432')
     env.setdefault('PGSSLMODE', 'require')
-    env.update(PGOPTIONS=options, PGCONNECT_TIMEOUT='20')
+    env.update(PGOPTIONS=' '.join(filter(None, (parameters.get('options'), options))),
+               PGCONNECT_TIMEOUT='20')
     return env
 
 
@@ -186,6 +187,14 @@ def create_registered_project(name, policy, costs, api, intent, now, *, initiali
                'organization_spending_limit_usd': cents / 100,
                'meter_month': now.strftime('%Y-%m')}
     decision = authorize_metered_execution(policy, GATE, request, today=now.date())
+
+    def connection_uri(project_id, branch_id, identity):
+        query = urllib.parse.urlencode({'branch_id': branch_id, 'database_name': identity['database_name'],
+                                        'role_name': identity['role_name'], 'pooled': 'false'})
+        return api('GET', f'/projects/{project_id}/connection_uri?' + query)['uri']
+
+    source_uri = connection_uri(project, source['branch_id'], source)
+    postgres_environment(source_uri, '-c default_transaction_read_only=on -c statement_timeout=120000')
     payload = {'project': {'name': name, 'org_id': registration['org_id'],
                'region_id': source_project['region_id'], 'pg_version': source_project['pg_version'],
                'branch': {'name': name, 'database_name': target['database_name'],
@@ -212,6 +221,13 @@ def create_registered_project(name, policy, costs, api, intent, now, *, initiali
         raise
     destination = result['project']
     branch, endpoints = result['branch'], result['endpoints']
+    # Neon v2 spec, components.schemas.Endpoint.suspend_timeout_seconds:
+    # 0 means the plan default applies (registered here as 300 seconds).
+    # https://neon.com/api_spec/release/v2.json#/components/schemas/Endpoint
+    endpoint = dict(endpoints[0]) if len(endpoints) == 1 else {}
+    timeout = endpoint.get('suspend_timeout_seconds')
+    if type(timeout) is int and timeout == 0:
+        endpoint['suspend_timeout_seconds'] = registration['endpoint']['suspend_timeout_seconds']
     if (destination.get('name') != name
             or destination.get('org_id') != registration['org_id']
             or not isinstance(destination.get('id'), str) or not destination['id']
@@ -221,7 +237,8 @@ def create_registered_project(name, policy, costs, api, intent, now, *, initiali
             or branch.get('parent_id') is not None
             or branch.get('project_id') != destination['id'] or branch.get('default') is not True or len(endpoints) != 1
             or endpoints[0]['branch_id'] != branch['id']
-            or any(endpoints[0].get(k) != v for k, v in registration['endpoint'].items())):
+            or type(timeout) is not int
+            or any(endpoint.get(k) != v for k, v in registration['endpoint'].items())):
         raise MeteringRefusal('provider result differs from registration; reconcile creation intent')
     with intent.open('w') as handle:
         json.dump({'registration': name, 'requested_at': now.isoformat(),
@@ -229,17 +246,14 @@ def create_registered_project(name, policy, costs, api, intent, now, *, initiali
         handle.flush()
         os.fsync(handle.fileno())
 
-    def connection_uri(project_id, branch_id, identity):
-        query = urllib.parse.urlencode({'branch_id': branch_id, 'database_name': identity['database_name'],
-                                        'role_name': identity['role_name'], 'pooled': 'false'})
-        return api('GET', f'/projects/{project_id}/connection_uri?' + query)['uri']
-    proof = (initialize or initialize_schema)(connection_uri(project, source['branch_id'], source),
+    proof = (initialize or initialize_schema)(source_uri,
               connection_uri(destination['id'], branch['id'], target),
               Path(registration['initialization']['dump_path']))
     if proof.get('schema_parity') is not True or proof.get('zero_rows') is not True:
         raise MeteringRefusal('schema initialization proof failed; reconcile creation intent')
     return {'gate': decision['gate'], 'project_id': destination['id'], 'branch_id': branch['id'],
             'endpoint_id': endpoints[0]['id'], 'schema_proof': proof, 'name': name,
+            'owner': registration['owner'], 'suspend_timeout_seconds': endpoint['suspend_timeout_seconds'],
             'monthly_cost_ceiling_usd': registration['monthly_cost_ceiling_usd'],
             'monthly_spend_usd': monthly['mtd_usd'],
             'monthly_projection_usd': request['monthly_projection_usd'], 'creation_confirmed': True}
@@ -285,22 +299,28 @@ def initialize_schema(source_uri, destination_uri, path):
         raise MeteringRefusal('production schema catalog is empty')
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     # Exclusive creation prevents overwriting an earlier private evidence artifact.
-    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as dump:
-        env = postgres_environment(source_uri,
-               '-c default_transaction_read_only=on -c statement_timeout=120000')
-        subprocess.run(['pg_dump', '--schema-only', '--no-owner', '--no-privileges',
-                        '--no-policies', '--no-subscriptions', '--no-security-labels',
-                        '--lock-wait-timeout=10s', '--no-password'],
-                       env=env, stdout=dump, stderr=subprocess.PIPE, check=True, timeout=300)
-        dump.flush()
-        os.fsync(dump.fileno())
-    with path.open() as dump:
-        subprocess.run(['psql', '-X', '--no-password', '--set=ON_ERROR_STOP=1',
-                        '--single-transaction'],
-                       env=postgres_environment(destination_uri,
-                            '-c statement_timeout=120000 -c lock_timeout=10000'),
-                       stdin=dump, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                       check=True, timeout=300)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, 'w') as dump:
+            env = postgres_environment(source_uri,
+                   '-c default_transaction_read_only=on -c statement_timeout=120000')
+            subprocess.run(['pg_dump', '--schema-only', '--no-owner', '--no-privileges',
+                            '--no-policies', '--no-subscriptions', '--no-security-labels',
+                            '--lock-wait-timeout=10s', '--no-password'],
+                           env=env, stdout=dump, stderr=subprocess.PIPE, check=True, timeout=300)
+            dump.flush()
+            os.fsync(dump.fileno())
+        with path.open() as dump:
+            subprocess.run(['psql', '-X', '--no-password', '--set=ON_ERROR_STOP=1',
+                            '--single-transaction'],
+                           env=postgres_environment(destination_uri,
+                                '-c statement_timeout=120000 -c lock_timeout=10000'),
+                           stdin=dump, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                           check=True, timeout=300)
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise MeteringRefusal('schema dump or restore failed; partial dump removed; '
+                              'reconcile creation intent and destination project before retrying') from None
     actual = catalog(destination_uri)
     if expected != actual:
         raise MeteringRefusal('restored schema object counts differ from production')

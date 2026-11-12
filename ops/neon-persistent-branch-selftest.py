@@ -23,6 +23,9 @@ sys.path.insert(0, str(ROOT))
 from lib.platform_metering import MeteringRefusal, authorize_metered_execution
 
 POLICY = json.loads((ROOT / 'ops/config/platform-metering.v1.json').read_text())
+SOURCE_URI = 'postgresql://' + 'source:pw@127.0.0.1:1/source?sslmode=require'
+DESTINATION_URI = 'postgresql://' + 'destination:pw@127.0.0.1:1/destination?sslmode=require'
+
 REGISTRATION = {
     'name': 'engine-test',
     'source': {'branch_name': 'production', 'branch_id': 'br-summer-breeze-aw7jh2m5',
@@ -114,8 +117,19 @@ class CreatorTests(unittest.TestCase):
         self.limit = 4000
         self.projects = []
         self.initializations = []
+        # Neon v2 Endpoint example and required fields; synthetic IDs and host.
         self.reply = {'project': {'id': 'fresh-project', 'name': 'engine-test', 'org_id': REGISTRATION['org_id']}, 'branch': {'id': 'br-test', 'name': 'engine-test', 'project_id': 'fresh-project', 'default': True, 'parent_id': None},
-                      'endpoints': [{'id': 'ep-test', 'branch_id': 'br-test', **REGISTRATION['endpoint']}],
+                      'endpoints': [{'id': 'ep-test', 'branch_id': 'br-test',
+                                    'project_id': 'fresh-project', 'host': 'ep-test.example.invalid',
+                                    'region_id': 'aws-us-east-1', 'type': 'read_write',
+                                    'autoscaling_limit_min_cu': 0.25, 'autoscaling_limit_max_cu': 0.25,
+                                    'suspend_timeout_seconds': 0, 'current_state': 'init',
+                                    'settings': {'pg_settings': {}}, 'pooler_enabled': False,
+                                    'pooler_mode': 'transaction', 'disabled': False,
+                                    'passwordless_access': False, 'creation_source': 'api',
+                                    'created_at': '2026-11-11T00:00:00Z',
+                                    'updated_at': '2026-11-11T00:00:00Z',
+                                    'proxy_host': 'example.invalid', 'provisioner': 'k8s-neonvm'}],
                       'connection_uris': [{'connection_uri': 'secret-response-must-not-escape'}]}
 
     def api(self, method, path, payload=None):
@@ -132,7 +146,7 @@ class CreatorTests(unittest.TestCase):
         if path.startswith('/projects?'):
             return {'projects': self.projects}
         if '/connection_uri?' in path:
-            return {'uri': 'synthetic-source' if REGISTRATION['source']['project_id'] in path else 'synthetic-destination'}
+            return {'uri': SOURCE_URI if REGISTRATION['source']['project_id'] in path else DESTINATION_URI}
         if '/consumption_history/' in path:
             self.assertIn('granularity=monthly', path)
             return self.consumption
@@ -153,7 +167,7 @@ class CreatorTests(unittest.TestCase):
     def test_fresh_project_identity_and_proof(self):
         receipt = self.create()
         self.assertEqual(receipt['project_id'], 'fresh-project')
-        self.assertEqual(self.initializations, [('synthetic-source', 'synthetic-destination',
+        self.assertEqual(self.initializations, [(SOURCE_URI, DESTINATION_URI,
             Path('/Users/booko/engine-facts/full-schema.sql'))])
         self.assertEqual(receipt['schema_proof'], {'schema_parity': True, 'zero_rows': True})
 
@@ -183,8 +197,7 @@ class CreatorTests(unittest.TestCase):
 
     def test_incomplete_or_malformed_projects_refuse(self):
         normal = self.api
-        for inventory in ({'projects': [], 'pagination': {'cursor': 'next'}},
-                          {'projects': [{}]}, {'projects': None}):
+        for inventory in ({'projects': [{}]}, {'projects': None}):
             self.api = lambda method, path, payload=None: (inventory if path.startswith('/projects?')
                                                           else normal(method, path, payload))
             with self.assertRaises(MeteringRefusal):
@@ -249,7 +262,7 @@ class CreatorTests(unittest.TestCase):
             calls = []
             def endless(method, path, payload=None):
                 calls.append(path)
-                return {'projects': [], 'pagination': {'cursor': 'a' if repeated else str(len(calls))}}
+                return {'projects': [{'name': 'other'}], 'pagination': {'cursor': 'a' if repeated else str(len(calls))}}
             with self.assertRaises(MeteringRefusal):
                 creator._project_inventory(endless, REGISTRATION['org_id'])
             self.assertEqual(len(calls), 2 if repeated else 100)
@@ -453,11 +466,47 @@ class CreatorTests(unittest.TestCase):
         with self.assertRaises(MeteringRefusal):
             self.create()
 
+    def test_default_suspend_readback(self):
+        receipt = self.create()
+        self.assertEqual(receipt['suspend_timeout_seconds'], 300)
+        self.assertEqual(len(self.initializations), 1)
+
+    def test_registered_owner_in_receipt(self):
+        self.assertEqual(self.create()['owner'], REGISTRATION['owner'])
+
     def test_invalid_provider_result_keeps_intent(self):
-        self.reply['endpoints'][0]['suspend_timeout_seconds'] = 0
-        with self.assertRaises(MeteringRefusal):
-            self.create()
-        self.assertTrue(self.intent.exists())
+        for timeout in (60, -1, 301, None, False, '0'):
+            with self.subTest(timeout=timeout):
+                self.intent.unlink(missing_ok=True)
+                self.reply['endpoints'][0]['suspend_timeout_seconds'] = timeout
+                with self.assertRaises(MeteringRefusal):
+                    self.create()
+                self.assertTrue(self.intent.exists())
+                self.assertEqual(self.initializations, [])
+
+    def test_source_parameters_refuse_before_creation(self):
+        import psycopg
+        normal = self.api
+        for uri in (SOURCE_URI + '&application_name=unsupported', 'invalid uri'):
+            with self.subTest(uri=uri):
+                self.calls.clear()
+                def invalid(method, path, payload=None):
+                    if '/connection_uri?' in path:
+                        return {'uri': uri}
+                    return normal(method, path, payload)
+                self.api = invalid
+                with self.assertRaises((MeteringRefusal, psycopg.ProgrammingError)):
+                    self.create()
+                self.assert_no_post()
+                self.assertFalse(self.intent.exists())
+
+    def test_empty_terminal_project_pages(self):
+        for pagination in ({}, {'cursor': 'a'}):
+            with self.subTest(pagination=pagination):
+                pages = iter([{'projects': [{'name': 'other'}], 'pagination': {'cursor': 'a'}},
+                              {'projects': [], 'pagination': pagination}])
+                self.assertEqual(creator._project_inventory(lambda *args: next(pages),
+                    REGISTRATION['org_id']), [{'name': 'other'}])
 
     def test_read_error_stops_before_intent(self):
         def failing(*args):
@@ -513,7 +562,7 @@ class CreatorTests(unittest.TestCase):
                         if outcome == 'present':
                             return {'projects': [{'name': 'engine-test', 'id': 'existing'}]}
                         if outcome == 'incomplete':
-                            return {'projects': [], 'pagination': {'cursor': 'next'}}
+                            return {'projects': [], 'unavailable_project_ids': ['unknown']}
                         return {'projects': []}
                     return normal(method, path, payload)
                 self.api = failing
@@ -587,12 +636,17 @@ class SchemaInitializationTests(unittest.TestCase):
                 self.assertEqual(env['PGDATABASE'], 'synthetic')
                 self.assertEqual(env['PGSSLMODE'], 'require')
 
+    def test_connection_options_are_preserved_with_required_settings_last(self):
+        env = creator.postgres_environment(SOURCE_URI + '&options=-c%20search_path%3Dpublic',
+                                           '-c default_transaction_read_only=on')
+        self.assertEqual(env['PGOPTIONS'], '-c search_path=public -c default_transaction_read_only=on')
+
     def test_schema_only_restore_proof_and_failures(self):
         from unittest.mock import MagicMock
         import psycopg
         source_uri = 'postgresql://' + 'source:pw@127.0.0.1:1/source?sslmode=require'
         destination_uri = 'postgresql://' + 'destination:pw@127.0.0.1:1/destination?sslmode=require'
-        for failure in (None, 'parity', 'rows', 'dump', 'restore', 'foreign'):
+        for failure in (None, 'parity', 'rows', 'dump', 'dump-empty', 'restore', 'timeout', 'foreign'):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
                 path = Path(tmp) / 'full-schema.sql'
                 source, destination, check = MagicMock(), MagicMock(), MagicMock()
@@ -614,7 +668,10 @@ class SchemaInitializationTests(unittest.TestCase):
                 def run(args, **kwargs):
                     commands.append(args)
                     self.assertNotIn('pw', ' '.join(args))
-                    self.assertNotIn('pw', ' '.join(args))
+                    if args[0] == 'pg_dump' and failure == 'dump-empty':
+                        raise creator.subprocess.CalledProcessError(1, args)
+                    if args[0] == 'pg_dump' and failure == 'timeout':
+                        raise creator.subprocess.TimeoutExpired(args, 300)
                     if args[0] == 'pg_dump':
                         self.assertIn('--schema-only', args)
                         for flag in ('--no-owner', '--no-privileges', '--no-policies', '--no-subscriptions'):
@@ -630,8 +687,14 @@ class SchemaInitializationTests(unittest.TestCase):
                 with patch.object(psycopg, 'connect', side_effect=connect), \
                         patch.object(creator.subprocess, 'run', side_effect=run):
                     if failure:
-                        with self.assertRaises((MeteringRefusal, creator.subprocess.CalledProcessError)):
+                        with self.assertRaises(MeteringRefusal) as caught:
                             creator.initialize_schema(source_uri, destination_uri, path)
+                        if failure in ('dump', 'dump-empty', 'restore', 'timeout'):
+                            self.assertFalse(path.exists())
+                            self.assertIn('reconcile creation intent', str(caught.exception))
+                            self.assertIn('destination project', str(caught.exception))
+                            self.assertIn('dump removed', str(caught.exception))
+                            creator.validate_dump_path(path)
                     else:
                         proof = creator.initialize_schema(source_uri, destination_uri, path)
                         self.assertTrue(proof['zero_rows'])
