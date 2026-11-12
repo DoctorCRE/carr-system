@@ -278,13 +278,24 @@ class CreatorTests(unittest.TestCase):
                                        io.BytesIO(json.dumps(body).encode()))
         with patch.object(creator.urllib.request, 'build_opener') as opener:
             opener.return_value.open.side_effect = error
-            with self.assertRaises(creator.ProviderError) as caught:
+            with self.assertRaises(MeteringRefusal) as caught:
                 creator._provider('synthetic-token')('POST', '/projects/test/branches', {})
         receipt = caught.exception.receipt()
         self.assertEqual(receipt['http_status'], 400)
         self.assertIn('invalid suspend timeout', receipt['provider_message'])
         for secret in ('synthetic-token', 'password', 'secret-header', 'secret-response'):
             self.assertNotIn(secret, json.dumps(receipt))
+
+    def test_provider_error_body_variants(self):
+        for body in (b'not JSON', b'[]', b'{"message": null}'):
+            error = creator._provider_error(503, body, 'synthetic-token')
+            self.assertEqual(error.status, 503)
+            self.assertEqual(error.message, 'provider returned no JSON error message')
+        error = creator._provider_error(400, json.dumps({
+            'message': 'bad token=synthetic-value password=synthetic-password'}).encode(),
+            'synthetic-token')
+        self.assertNotIn('synthetic-value', error.message)
+        self.assertNotIn('synthetic-password', error.message)
 
     def test_provider_rejection_reconciles_intent(self):
         for status, outcome in ((400, 'absent'), (409, 'present'), (422, 'incomplete'),

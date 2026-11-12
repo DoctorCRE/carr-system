@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 import fcntl
 import json
 import os
+import re
+import urllib.error
 from pathlib import Path
 import sys
 import urllib.parse
@@ -21,6 +23,35 @@ from tools.system_costs import normalize, summarize
 
 API = 'https://console.neon.tech/api/v2'
 GATE = 'neon-persistent-branch'
+
+
+class ProviderError(MeteringRefusal):
+    """Only sanitized provider details may cross the CLI interface."""
+
+    def __init__(self, status, message):
+        self.status = status
+        self.message = message
+        self.creation_outcome = 'unknown'
+        super().__init__(f'Neon HTTP {status}: {message}')
+
+    def receipt(self):
+        return {'creation_confirmed': False, 'http_status': self.status,
+                'provider_message': self.message, 'creation_outcome': self.creation_outcome}
+
+
+def _provider_error(status, body, token):
+    try:
+        message = json.loads(body).get('message')
+    except (ValueError, AttributeError):
+        message = None
+    if not isinstance(message, str):
+        message = 'provider returned no JSON error message'
+    message = message.replace(token, '[redacted]') if token else message
+    message = re.sub(r'(?i)\b(?:postgres(?:ql)?|https?)://[^\s"\']+', '[redacted URI]', message)
+    message = re.sub(r'(?i)\bBearer\s+\S+', 'Bearer [redacted]', message)
+    message = re.sub(r'(?i)\b(password|token|secret|api[_-]?key)\s*[:=]\s*\S+',
+                     r'\1=[redacted]', message)
+    return ProviderError(status, ' '.join(message.split())[:1000])
 
 
 def _monthly_costs(api, costs, now, project_id):
@@ -94,14 +125,30 @@ def create_registered_branch(name, policy, costs, api, intent, now):
                'organization_spending_limit_usd': cents / 100,
                'meter_month': now.strftime('%Y-%m')}
     decision = authorize_metered_execution(policy, GATE, request, today=now.date())
+    # Launch's default encodes the registered five-minute suspension as zero.
     payload = {'branch': {k: registration[k] for k in ('name', 'parent_id', 'init_source')},
-               'endpoints': [registration['endpoint']]}
+               'endpoints': [{**registration['endpoint'], 'suspend_timeout_seconds': 0}]}
     # Keep the intent even on timeout: POST may have succeeded without a reply.
     with intent.open('x') as handle:
         json.dump({'registration': name, 'requested_at': now.isoformat()}, handle)
         handle.flush()
         os.fsync(handle.fileno())
-    result = api('POST', f'/projects/{project}/branches', payload)
+    try:
+        result = api('POST', f'/projects/{project}/branches', payload)
+    except ProviderError as exc:
+        if 400 <= exc.status < 500 and exc.status != 408:
+            try:
+                inventory = api('GET', project_path + '/branches')
+                absent = (not inventory.get('pagination', {}).get('cursor')
+                          and isinstance(inventory.get('branches'), list)
+                          and all(isinstance(b, dict) and isinstance(b.get('name'), str)
+                                  and b['name'] != name for b in inventory['branches']))
+            except Exception:
+                absent = False
+            if absent:
+                intent.unlink()
+                exc.creation_outcome = 'not_created'
+        raise
     branch, endpoints = result['branch'], result['endpoints']
     if (not isinstance(branch.get('id'), str) or not branch['id']
             or branch['id'] == registration['parent_id'] or branch['name'] != name
@@ -124,14 +171,22 @@ def _provider(token):
         if method == 'GET':
             reply = read(API + path, headers=headers, timeout=20, max_bytes=4_000_000)
             if reply.status != 200 or len(reply.body) > 4_000_000:
-                raise MeteringRefusal('Neon read failed; no creation admitted')
+                raise _provider_error(reply.status, reply.body, token)
             return json.loads(reply.body)
         request = urllib.request.Request(API + path, method=method, headers=headers,
                                          data=json.dumps(payload).encode())
-        with opener.open(request, timeout=30) as response:
-            if response.status != 201:
-                raise MeteringRefusal('Neon create did not confirm success')
-            return json.load(response)
+        try:
+            with opener.open(request, timeout=30) as response:
+                if response.status != 201:
+                    raise _provider_error(response.status, response.read(64_000), token)
+                return json.load(response)
+        except urllib.error.HTTPError as exc:
+            with exc:
+                try:
+                    body = exc.read(64_000)
+                except OSError:
+                    body = b''
+            raise _provider_error(exc.code, body, token) from None
     return api
 
 
@@ -155,6 +210,8 @@ def main():
         return 0
     except Exception as exc:
         # Provider exceptions and responses can contain credentials and connection URIs.
+        if isinstance(exc, ProviderError):
+            print(json.dumps(exc.receipt(), sort_keys=True))
         detail = str(exc) if isinstance(exc, MeteringRefusal) else type(exc).__name__
         print('persistent branch creation refused: ' + detail, file=sys.stderr)
         return 77
