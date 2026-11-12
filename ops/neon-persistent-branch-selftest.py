@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import io
+import urllib.error
 import importlib.util
 import json
 from pathlib import Path
@@ -101,7 +103,7 @@ class CreatorTests(unittest.TestCase):
             self.assertTrue(self.intent.exists())
             self.assertEqual(payload, {'branch': {'name': 'engine-test',
                 'parent_id': REGISTRATION['parent_id'], 'init_source': 'schema-only'},
-                'endpoints': [REGISTRATION['endpoint']]})
+                'endpoints': [{**REGISTRATION['endpoint'], 'suspend_timeout_seconds': 0}]})
             return self.reply
         if '/consumption_history/' in path:
             self.assertIn('granularity=monthly', path)
@@ -266,6 +268,82 @@ class CreatorTests(unittest.TestCase):
         with self.assertRaises(ConnectionError):
             self.create()
         self.assertFalse(self.intent.exists())
+
+    def test_http_error_message_is_safe_and_structured(self):
+        body = {'message': 'invalid suspend timeout; Bearer synthetic-token ' +
+                           ('postgresql://' + 'user:password@host/db'),
+                'connection_uri': 'secret-response-must-not-escape'}
+        error = urllib.error.HTTPError(creator.API, 400, 'bad',
+                                       {'Authorization': 'secret-header'},
+                                       io.BytesIO(json.dumps(body).encode()))
+        with patch.object(creator.urllib.request, 'build_opener') as opener:
+            opener.return_value.open.side_effect = error
+            with self.assertRaises(MeteringRefusal) as caught:
+                creator._provider('synthetic-token')('POST', '/projects/test/branches', {})
+        receipt = caught.exception.receipt()
+        self.assertEqual(receipt['http_status'], 400)
+        self.assertIn('invalid suspend timeout', receipt['provider_message'])
+        for secret in ('synthetic-token', 'password', 'secret-header', 'secret-response'):
+            self.assertNotIn(secret, json.dumps(receipt))
+
+    def test_provider_error_body_variants(self):
+        for body in (b'not JSON', b'[]', b'{"message": null}'):
+            error = creator._provider_error(503, body, 'synthetic-token')
+            self.assertEqual(error.status, 503)
+            self.assertEqual(error.message, 'provider returned no JSON error message')
+        error = creator._provider_error(400, json.dumps({
+            'message': 'bad token=synthetic-value password=synthetic-password'}).encode(),
+            'synthetic-token')
+        self.assertNotIn('synthetic-value', error.message)
+        self.assertNotIn('synthetic-password', error.message)
+
+    def test_provider_rejection_reconciles_intent(self):
+        for status, outcome in ((400, 'absent'), (409, 'present'), (422, 'incomplete'),
+                                (403, 'unavailable'), (408, 'absent'), (500, 'absent')):
+            with self.subTest(status=status, outcome=outcome):
+                self.setUp()
+                normal = CreatorTests.api.__get__(self)
+                posted = False
+                def failing(method, path, payload=None):
+                    nonlocal posted
+                    if method == 'POST':
+                        posted = True
+                        raise creator.ProviderError(status, 'invalid suspend timeout')
+                    if posted and path.endswith('/branches'):
+                        if outcome == 'unavailable':
+                            raise TimeoutError('readback unavailable')
+                        if outcome == 'present':
+                            return {'branches': [{'name': 'engine-test', 'id': 'br-existing'}]}
+                        if outcome == 'incomplete':
+                            return {'branches': [], 'pagination': {'cursor': 'next'}}
+                        return {'branches': []}
+                    return normal(method, path, payload)
+                self.api = failing
+                with self.assertRaises(creator.ProviderError) as caught:
+                    self.create()
+                cleared = status == 400
+                self.assertEqual(self.intent.exists(), not cleared)
+                self.assertEqual(caught.exception.receipt()['creation_outcome'],
+                                 'not_created' if cleared else 'unknown')
+                if cleared:
+                    self.api = normal
+                    self.assertTrue(self.create()['creation_confirmed'])
+                else:
+                    with self.assertRaises(MeteringRefusal):
+                        self.create()
+
+    def test_provider_refusal_cli_receipt(self):
+        output, errors = io.StringIO(), io.StringIO()
+        with patch.object(sys, 'argv', ['creator', 'engine-test']), \
+                patch.dict('os.environ', {'NEON_API_KEY': 'synthetic-token'}), \
+                patch.object(creator.Path, 'home', return_value=Path(self.tmp.name)), \
+                patch.object(creator, 'create_registered_branch',
+                             side_effect=creator.ProviderError(422, 'invalid suspend timeout')), \
+                patch('sys.stdout', output), patch('sys.stderr', errors):
+            self.assertEqual(creator.main(), 77)
+        self.assertEqual(json.loads(output.getvalue())['http_status'], 422)
+        self.assertIn('422', errors.getvalue())
+        self.assertIn('invalid suspend timeout', errors.getvalue())
 
     def test_cli_pass_and_refusal(self):
         import io
