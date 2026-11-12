@@ -181,6 +181,32 @@
         "requested_lifetime_minutes": 120,
         "active_nondefault_branches": 2
       }
+    },
+    "neon-persistent-branch": {
+      "platform": "neon",
+      "installed": true,
+      "installed_enforcement_ref": "ops/neon-persistent-branch.py gathers live inventory and consumption before lib/platform_metering.py admission; existing organization spending limit bounds ongoing spend",
+      "registration": {
+        "name": "engine-test",
+        "parent_name": "production",
+        "parent_id": "br-summer-breeze-aw7jh2m5",
+        "project_id": "steep-field-48688294",
+        "org_id": "org-dry-dew-75906281",
+        "init_source": "schema-only",
+        "owner": "DoctorCRE engine",
+        "endpoint": {
+          "type": "read_write",
+          "autoscaling_limit_min_cu": 0.25,
+          "autoscaling_limit_max_cu": 0.25,
+          "suspend_timeout_seconds": 300
+        },
+        "monthly_cost_ceiling_usd": 10
+      },
+      "required_true": [],
+      "required_nonempty": [],
+      "maximums": {
+        "existing_registered_branches": 0
+      }
     }
   },
   "control_scope": {
