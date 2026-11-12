@@ -14,7 +14,7 @@
       "label": "Neon",
       "plan": "Launch",
       "monthly_usd": 0,
-      "budget_usd": 10
+      "budget_usd": 40
     },
     "claude": {
       "label": "Claude",
