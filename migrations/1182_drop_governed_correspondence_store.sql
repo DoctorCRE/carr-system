@@ -66,7 +66,7 @@ begin
   end if;
   execute format('CREATE OR REPLACE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb '
     'LANGUAGE sql IMMUTABLE SET search_path=pg_catalog AS %L',
-    'SELECT '||quote_literal(jsonb_set(original,'{retired_secdef_execute}',
+    'select '||quote_literal(jsonb_set(original,'{retired_secdef_execute}',
       coalesce(original->'retired_secdef_execute','[]'::jsonb)||retired)::text)||'::jsonb');
 end $retire_correspondence_grants$;
 
