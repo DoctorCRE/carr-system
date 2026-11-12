@@ -53,11 +53,11 @@ class ReaderRoleTests(unittest.TestCase):
     def test_role_spec(self):
         data = role.load_spec()
         self.assertEqual(data['role'], 'engine_business_reader')
-        self.assertEqual(len(data['tables']), 70)
+        self.assertEqual(len(data['tables']), 72)
         self.assertIn('activity', data['tables'])
         self.assertIn('v_deal_room_current_lease', data['views'])
         self.assertEqual(data['settings']['timezone'], 'UTC')
-        self.assertEqual(len(set(data['tables'] + data['views'])), 107)
+        self.assertEqual(len(set(data['tables'] + data['views'])), 113)
 
     def test_spec_rejects_role_or_identifier_expansion(self):
         data = role.load_spec()
@@ -87,11 +87,13 @@ class ReaderRoleTests(unittest.TestCase):
                       statements)
         self.assertIn('GRANT EXECUTE ON FUNCTION public.carr_business_date(timestamp with time zone)', text)
         self.assertEqual(len([s for s in statements if 'FUNCTION' in s]), 1)
-        for name in ['tool_call', 'practice_origination_event', 'practice_origination_feed',
-                     'v_record_flag_subject',
-                     'v_lead_workspace_correspondence', 'v_lead_workspace_stage_history',
-                     'v_subject_timeline']:
-            self.assertNotIn(f'GRANT SELECT ON TABLE "public"."{name}" TO "engine_business_reader"', statements)
+        self.assertIn('GRANT SELECT ON TABLE "public"."practice_origination_event" TO "engine_business_reader"', statements)
+        self.assertIn('GRANT SELECT ON TABLE "public"."practice_origination_feed" TO "engine_business_reader"', statements)
+        self.assertIn('GRANT SELECT ON TABLE "public"."v_record_flag_subject" TO "engine_business_reader"', statements)
+        self.assertIn('GRANT SELECT ON TABLE "public"."v_lead_workspace_correspondence" TO "engine_business_reader"', statements)
+        self.assertIn('GRANT SELECT ON TABLE "public"."v_lead_workspace_stage_history" TO "engine_business_reader"', statements)
+        self.assertIn('GRANT SELECT ON TABLE "public"."v_subject_timeline" TO "engine_business_reader"', statements)
+        self.assertNotIn('GRANT SELECT ON TABLE "public"."tool_call" TO "engine_business_reader"', statements)
         self.assertNotIn('practice_address_key', text)
         self.assertNotIn('SEQUENCE', text)
         self.assertNotIn('DEFAULT PRIVILEGES', text)
@@ -162,6 +164,10 @@ class ReaderRolePostgresTests(unittest.TestCase):
             self.assertTrue(first['proof']['v_practice_origination_party_address']['read'])
             self.assertTrue(first['proof']['v_vendor_assignment_context']['read'])
             self.assertTrue(first['proof']['v_calendar_capture_receipt']['read'])
+            self.assertTrue(first['proof']['v_record_flag_subject']['read'])
+            self.assertTrue(first['proof']['v_lead_workspace_correspondence']['read'])
+            self.assertTrue(first['proof']['v_lead_workspace_stage_history']['read'])
+            self.assertTrue(first['proof']['v_subject_timeline']['read'])
             self.assertEqual(first['proof']['v_invoice_tracker'], {'read': True, 'has_rows': True})
             final = root / 'engine-test-engine-business-reader.env'
             original = final.read_bytes()
@@ -170,6 +176,10 @@ class ReaderRolePostgresTests(unittest.TestCase):
             generated_password = unquote(urlsplit(secret).password)
             self.assertNotIn(generated_password, output)
             self.assertNotIn(secret, output)
+            table_probe = data | {'views': data['views'] + ['practice_origination_event', 'practice_origination_feed']}
+            provision_reads = role.proof(secret, table_probe)
+            self.assertTrue(provision_reads['practice_origination_event']['read'])
+            self.assertTrue(provision_reads['practice_origination_feed']['read'])
             with role.connect(owner) as conn:
                 conn.execute('GRANT extra_bundle TO engine_business_reader')
                 conn.execute('GRANT EXECUTE ON FUNCTION public.extra_fn() TO engine_business_reader')
@@ -190,7 +200,14 @@ class ReaderRolePostgresTests(unittest.TestCase):
             self.assertTrue(second['proof']['v_practice_origination_party_address']['read'])
             self.assertTrue(second['proof']['v_vendor_assignment_context']['read'])
             self.assertTrue(second['proof']['v_calendar_capture_receipt']['read'])
+            self.assertTrue(second['proof']['v_record_flag_subject']['read'])
+            self.assertTrue(second['proof']['v_lead_workspace_correspondence']['read'])
+            self.assertTrue(second['proof']['v_lead_workspace_stage_history']['read'])
+            self.assertTrue(second['proof']['v_subject_timeline']['read'])
             self.assertEqual(second['proof']['v_invoice_tracker'], {'read': True, 'has_rows': True})
+            reconcile_reads = role.proof(secret, table_probe)
+            self.assertTrue(reconcile_reads['practice_origination_event']['read'])
+            self.assertTrue(reconcile_reads['practice_origination_feed']['read'])
             self.assertFalse(second['created'])
             self.assertFalse(second['password_changed'])
             self.assertEqual(final.read_bytes(), original)

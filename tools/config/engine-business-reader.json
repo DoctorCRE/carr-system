@@ -71,7 +71,9 @@
     "vendor_relationship_level",
     "vendor_stage",
     "capture_post_call_action",
-    "doctrine_section"
+    "doctrine_section",
+    "practice_origination_event",
+    "practice_origination_feed"
   ],
   "views": [
     "v_open_deal_room_board",
@@ -110,7 +112,11 @@
     "v_lead_workspace",
     "v_practice_origination_party_address",
     "v_vendor_assignment_context",
-    "v_calendar_capture_receipt"
+    "v_calendar_capture_receipt",
+    "v_record_flag_subject",
+    "v_lead_workspace_correspondence",
+    "v_lead_workspace_stage_history",
+    "v_subject_timeline"
   ],
   "settings": {
     "default_transaction_read_only": "on",
