@@ -183,8 +183,19 @@ class CreatorTests(unittest.TestCase):
 
     def test_sparse_monthly_consumption_and_inactive_projects(self):
         frame = self.consumption['projects'][0]['periods'][0]['consumption'][0]
-        frame['metrics'] = [m for m in frame['metrics'] if m['value']]
-        self.consumption['projects'].append({'project_id': 'inactive-project', 'periods': []})
+        frame['metrics'] = [m for m in frame['metrics'] if m['metric_name'] not in
+                            ('private_network_transfer_bytes', 'snapshot_storage_bytes_month')]
+        shapes = [('compute_unit_seconds', 'root_branch_bytes_month',
+                   'instant_restore_bytes_month', 'public_network_transfer_bytes')]
+        shapes += [('root_branch_bytes_month',)] * 6
+        for index, names in enumerate(shapes):
+            other = copy.deepcopy(self.consumption['projects'][0])
+            other['project_id'] = f'fixture-project-{index}'
+            other['periods'][0]['consumption'][0]['metrics'] = [
+                {'metric_name': name, 'value': 0} for name in names]
+            self.consumption['projects'].append(other)
+        for index in range(2):
+            self.consumption['projects'].append({'project_id': f'inactive-{index}', 'periods': []})
         receipt = self.create()
         self.assertAlmostEqual(receipt['monthly_spend_usd'], 0.212)
         self.assertAlmostEqual(receipt['monthly_projection_usd'], 0.578182)
