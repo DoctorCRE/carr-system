@@ -185,7 +185,7 @@
     "neon-persistent-branch": {
       "platform": "neon",
       "installed": true,
-      "installed_enforcement_ref": "ops/neon-persistent-branch.py gathers live inventory and consumption before lib/platform_metering.py admission; existing organization spending limit bounds ongoing spend",
+      "installed_enforcement_ref": "ops/neon-persistent-branch.py gathers live inventory and consumption before lib/platform_metering.py admission; budget threshold is enforced at creation only; organization spending limit is alert-only",
       "registration": {
         "name": "engine-test",
         "parent_name": "production",
