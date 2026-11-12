@@ -181,6 +181,53 @@ class CreatorTests(unittest.TestCase):
         self.assert_no_post()
         self.assertFalse(self.intent.exists())
 
+    def test_sparse_monthly_consumption_and_inactive_projects(self):
+        frame = self.consumption['projects'][0]['periods'][0]['consumption'][0]
+        frame['metrics'] = [m for m in frame['metrics'] if m['metric_name'] not in
+                            ('private_network_transfer_bytes', 'snapshot_storage_bytes_month')]
+        shapes = [('compute_unit_seconds', 'root_branch_bytes_month',
+                   'instant_restore_bytes_month', 'public_network_transfer_bytes')]
+        shapes += [('root_branch_bytes_month',)] * 6
+        for index, names in enumerate(shapes):
+            other = copy.deepcopy(self.consumption['projects'][0])
+            other['project_id'] = f'fixture-project-{index}'
+            other['periods'][0]['consumption'][0]['metrics'] = [
+                {'metric_name': name, 'value': 0} for name in names]
+            self.consumption['projects'].append(other)
+        for index in range(2):
+            self.consumption['projects'].append({'project_id': f'inactive-{index}', 'periods': []})
+        receipt = self.create()
+        self.assertAlmostEqual(receipt['monthly_spend_usd'], 0.212)
+        self.assertAlmostEqual(receipt['monthly_projection_usd'], 0.578182)
+
+    def test_invalid_monthly_evidence_refuses_before_intent(self):
+        original = copy.deepcopy(self.consumption)
+        for mutation in ('missing_target_periods', 'missing_consumption', 'empty_metrics',
+                         'stale_start', 'partial_end', 'duplicate_metric', 'unknown_metric'):
+            with self.subTest(mutation=mutation):
+                self.consumption = copy.deepcopy(original)
+                project = self.consumption['projects'][0]
+                period = project['periods'][0]
+                frame = period['consumption'][0]
+                if mutation == 'missing_target_periods':
+                    project['periods'] = []
+                elif mutation == 'missing_consumption':
+                    period['consumption'] = []
+                elif mutation == 'empty_metrics':
+                    frame['metrics'] = []
+                elif mutation == 'stale_start':
+                    frame['timeframe_start'] = '2026-10-01T00:00:00Z'
+                elif mutation == 'partial_end':
+                    frame['timeframe_end'] = '2026-11-02T00:00:00Z'
+                elif mutation == 'duplicate_metric':
+                    frame['metrics'].append(copy.deepcopy(frame['metrics'][0]))
+                else:
+                    frame['metrics'].append({'metric_name': 'unpriced_metric', 'value': 1})
+                with self.assertRaises(MeteringRefusal):
+                    self.create()
+                self.assert_no_post()
+                self.assertFalse(self.intent.exists())
+
     def test_target_missing_from_consumption_refuses(self):
         self.consumption['projects'][0]['project_id'] = 'other-project'
         with self.assertRaises(MeteringRefusal):

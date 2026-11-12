@@ -47,16 +47,19 @@ def _monthly_costs(api, costs, now, project_id):
             or len({p['project_id'] for p in projects}) != len(projects)):
         raise MeteringRefusal('missing or repeated consumption projects')
     for project in projects:
-        if not project['periods']:
+        if project['project_id'] == project_id and not project['periods']:
             raise MeteringRefusal('missing consumption periods')
         for period in project['periods']:
             if period['period_plan'] != config['plan'] or not period['consumption']:
                 raise MeteringRefusal('unknown plan or missing consumption')
             for frame in period['consumption']:
                 metrics = frame['metrics']
-                if (frame['timeframe_start'][:10] != first.isoformat()
-                        or {m['metric_name'] for m in metrics} != set(config['rates'])
-                        or len(metrics) != len(config['rates'])):
+                names = [m['metric_name'] for m in metrics]
+                # Neon omits zero-valued metrics from otherwise complete timeframes.
+                if (frame['timeframe_start'] != query['from']
+                        or frame['timeframe_end'] != query['to']
+                        or not names or not set(names) <= set(config['rates'])
+                        or len(names) != len(set(names))):
                     raise MeteringRefusal('incomplete current monthly consumption')
     source = normalize('neon', {'projects': projects}, config['rates'])
     report = summarize(costs, {'neon': source}, now.date())
