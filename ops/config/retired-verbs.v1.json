@@ -176,6 +176,16 @@
       "verbs": [
         "email-proposal-quality"
       ]
+    },
+    {
+      "reference": "https://github.com/DoctorCRE/carr-system/pull/3209",
+      "reason": "Joe approved purging the governed correspondence store.",
+      "verbs": [
+        "correspondence-readiness",
+        "read-correspondence-thread",
+        "record-correspondence-adapter-consent",
+        "revoke-correspondence-adapter-consent"
+      ]
     }
   ]
 }
