@@ -112,6 +112,67 @@ int openat(int fd, const char *name, int flags, ...) {
 """.replace('SIDECAR_FAULT', action).replace('FAULT_NAME', name))
         self.build(str(race))
 
+    def test_interrupted_sidecar_open_retries_without_losing_snapshot(self):
+        self.sidecar_open_fault('static int interrupted = 0; if (!interrupted++) { errno = EINTR; return -1; }')
+        result = self.copy()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.work / 'store.hxd').read_bytes(), b'synthetic-store')
+        self.assertEqual((self.work / 'Files/S0/845/EFMData/7.dat').read_bytes(), b'synthetic-body')
+
+    def test_interrupted_directory_read_retries_without_losing_sidecars(self):
+        fault = self.root / 'interrupt-readdir.c'
+        fault.write_text("""
+#define _DARWIN_C_SOURCE
+#define _GNU_SOURCE
+#include <dirent.h>
+#include <dlfcn.h>
+#include <errno.h>
+struct dirent *readdir(DIR *directory) {
+    static int interrupted = 0;
+    if (!interrupted++) { errno = EINTR; return 0; }
+    struct dirent *(*real_readdir)(DIR *) = dlsym(RTLD_NEXT, "readdir");
+    return real_readdir(directory);
+}
+""")
+        self.build(str(fault))
+        result = self.copy()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.work / 'Files/S0/845/EFMData/7.dat').read_bytes(), b'synthetic-body')
+
+    def test_interrupted_writer_close_handles_open_and_released_descriptors(self):
+        for released in (False, True):
+            with self.subTest(released=released):
+                fault = self.root / 'interrupt-close.c'
+                fault.write_text("""
+#define _DARWIN_C_SOURCE
+#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
+#ifdef __APPLE__
+#include <sys/clonefile.h>
+int fclonefileat(int source, int target, const char *name, unsigned int flags) {
+    (void)source; (void)target; (void)name; (void)flags;
+    errno = ENOTSUP; return -1;
+}
+#endif
+int close(int fd) {
+    int (*real_close)(int) = dlsym(RTLD_NEXT, "close");
+    static int interrupted = 0;
+    if ((fcntl(fd, F_GETFL) & O_ACCMODE) == O_WRONLY && !interrupted++) {
+        RELEASE_DESCRIPTOR;
+        errno = EINTR; return -1;
+    }
+    return real_close(fd);
+}
+""".replace('RELEASE_DESCRIPTOR', 'real_close(fd)' if released else '(void)fd'))
+                self.build(str(fault))
+                work = Path(tempfile.mkdtemp(prefix='work-', dir=self.out))
+                result = self.copy(cwd=work)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual((work / 'Files/S0/845/EFMData/7.dat').read_bytes(), b'synthetic-body')
+
     def test_sidecar_disappearing_at_open_does_not_fail_snapshot(self):
         self.sidecar_open_fault('unlinkat(fd, name, 0)')
         result = self.copy()
