@@ -57,7 +57,7 @@ class ReaderRoleTests(unittest.TestCase):
         self.assertIn('activity', data['tables'])
         self.assertIn('v_deal_room_current_lease', data['views'])
         self.assertEqual(data['settings']['timezone'], 'UTC')
-        self.assertEqual(len(set(data['tables'] + data['views'])), 102)
+        self.assertEqual(len(set(data['tables'] + data['views'])), 103)
 
     def test_spec_rejects_role_or_identifier_expansion(self):
         data = role.load_spec()
@@ -78,6 +78,7 @@ class ReaderRoleTests(unittest.TestCase):
         self.assertIn('GRANT SELECT ON TABLE "public"."v_capture_candidate_queue" TO "engine_business_reader"', statements)
         self.assertIn('GRANT SELECT ON TABLE "public"."v_party_graph" TO "engine_business_reader"', statements)
         self.assertIn('GRANT SELECT ON TABLE "public"."v_lead_client_best" TO "engine_business_reader"', statements)
+        self.assertIn('GRANT SELECT ON TABLE "public"."v_lead_prospect_engagement" TO "engine_business_reader"', statements)
         self.assertIn('GRANT SELECT ON TABLE "public"."v_invoice_tracker" TO "engine_business_reader"',
                       statements)
         self.assertIn('GRANT EXECUTE ON FUNCTION public.carr_business_date(timestamp with time zone)', text)
@@ -146,6 +147,7 @@ class ReaderRolePostgresTests(unittest.TestCase):
             self.assertTrue(first['proof']['v_capture_candidate_queue']['read'])
             self.assertTrue(first['proof']['v_party_graph']['read'])
             self.assertTrue(first['proof']['v_lead_client_best']['read'])
+            self.assertTrue(first['proof']['v_lead_prospect_engagement']['read'])
             self.assertEqual(first['proof']['v_invoice_tracker'], {'read': True, 'has_rows': True})
             final = root / 'engine-test-engine-business-reader.env'
             original = final.read_bytes()
@@ -169,6 +171,7 @@ class ReaderRolePostgresTests(unittest.TestCase):
             self.assertTrue(second['proof']['v_capture_candidate_queue']['read'])
             self.assertTrue(second['proof']['v_party_graph']['read'])
             self.assertTrue(second['proof']['v_lead_client_best']['read'])
+            self.assertTrue(second['proof']['v_lead_prospect_engagement']['read'])
             self.assertEqual(second['proof']['v_invoice_tracker'], {'read': True, 'has_rows': True})
             self.assertFalse(second['created'])
             self.assertFalse(second['password_changed'])
