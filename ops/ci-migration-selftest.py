@@ -34,7 +34,6 @@ PROOFS = [
     "mcp-server/test/fact-review-installed-postgres.test.mjs",
     "mcp-server/test/find-rule-supersedes.test.mjs",
     "mcp-server/test/foundation-assurance-minimum-postgres.sql",
-    "mcp-server/test/governed-correspondence-store-postgres.sql",
     "mcp-server/test/invoice-tracker-postgres.sql",
     "mcp-server/test/invoice-tracker-transaction.test.mjs",
     "mcp-server/test/local-deals-postgres.sql",
@@ -58,7 +57,6 @@ PROOFS = [
     "mcp-server/test/notifications.test.mjs",
     "mcp-server/test/session-identity.test.mjs",
     "mcp-server/test/dispatch-spine.test.mjs",
-    "mcp-server/test/governed-correspondence-thread-postgres.test.mjs",
     "mcp-server/test/meeting-mode.test.mjs",
     "mcp-server/test/amend-closed-loop-postgres.test.mjs",
     "mcp-server/test/independent-review-cycle-postgres.test.mjs",
@@ -279,11 +277,11 @@ BASELINES = {
     "equivalence": "b09903454648438b634b50e5d500f37151daa0f3a0a01d6f94f9aa485d00e29f",
     "shadow": "e152e1e9ff1e9f217bb289391326d3608a9a6296a39fc1c68c1177b79a3f3971",
     "fixtures": "cc6996dc077062e8bc3edcf3fb613c556c140d75eef7d27a61c90845678249e8",
-    "proofs": "7c222316b63eb12a96ca6b8f2ff6e8b41e0299ce54331fbb080924c58be7c80b",
+    "proofs": "6590bd036e8a6e318ee25a21b3ca7609f2a86d79442007b1f65e9db25040cda1",
     "gates": "b56db7dc88a6190a2817d79c4c07e0fac9ca964a615adefb9346f1e6c749665e",
     "acceptance": "f1f0bc65eb63af0eb97d47de87885c239df12bd7c35d6f6edec4ba76c9044cf0",
-    "core": "872730cafe3c4bf1b1595bb0633cea28a89dc5afafc8ac3143d63be381b744b8",
-    "all": "a4a072464557765aa47ca242e880f6e1bec0bc8a61145af78c37703c1be5188c",
+    "core": "2700eb0682e31e7a355b3c73e2c35047d72fbb4b439406cc0690e756a2069496",
+    "all": "8634a0265818709eb856673664cb0ba28eddc9d24f3ff5e00d62398df096a5b7",
 }
 
 if __name__ == "__main__":

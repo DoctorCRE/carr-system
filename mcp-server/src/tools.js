@@ -128,7 +128,6 @@ import { salesforceReadRunStoreTools } from "./salesforce-read-run-store-rw02.v5
 // seam below (shadow until Joe approves enforcement), and their read projection.
 import { V5BoundaryDoorRefusal, globalBoundariesDoorTools, passBoundaryDoor } from
   "./global-boundaries-door.v5.js";
-import { governedCorrespondenceStoreTools } from "./governed-correspondence-store.v5.js";
 import { assuranceHealthStoreTools } from "./assurance-health-store.v5.ts";
 import { ruleContextRuntimeTools } from "./rule-context-runtime.v5.js";
 import { systemWorkTools } from "./system-work-census.v5.js";
@@ -9037,7 +9036,6 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "salesforce-reconciliation-rw02": "mcp-server/src/salesforce-reconciliation-store-rw02.v5.js",
   "salesforce-read-run-rw02": "mcp-server/src/salesforce-read-run-store-rw02.v5.js",
   "global-boundaries-door": "mcp-server/src/global-boundaries-door.v5.js",
-  "governed-correspondence-store": "mcp-server/src/governed-correspondence-store.v5.js",
   "assurance-health-store": "mcp-server/src/assurance-health-store.v5.ts",
   "rule-context-runtime": "mcp-server/src/rule-context-runtime.v5.js",
   "system-work-census": "mcp-server/src/system-work-census.v5.js",
@@ -10812,15 +10810,6 @@ registerTools(recordSourceAuthorityStoreTools({ withEnvelope, ToolError }),
 // V5-S01: read-only projection of the settled global boundaries and the
 // dispatch door's mode and shadow counters. No database access.
 registerTools(globalBoundariesDoorTools({ ToolError }), "global-boundaries-door");
-// DoctorCRE V5-J103: the governed correspondence store. Two reads
-// (correspondence-readiness, read-correspondence-thread) and the humanOnly
-// consent pair, each partner only for their own carr.us mailbox. There is no
-// send verb and no draft verb: a draft can never dispatch from here, and sends
-// go through Joe's own accounts when he asks (decision 41906a30). Reads
-// answer unavailable until the F10 local-store adapter lands with a reviewed
-// grant for the read-receipt writer.
-registerTools(governedCorrespondenceStoreTools({ withEnvelope, writeEvent, ToolError }),
-  "governed-correspondence-store");
 registerTools(assuranceHealthStoreTools({ withEnvelope, ToolError }), "assurance-health-store");
 // DoctorCRE V5-F05: authenticated, actor-scoped rule-universe read plus the
 // Joe-authority typed-contract binder. The read uses the writer connection only

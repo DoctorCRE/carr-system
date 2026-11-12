@@ -1041,6 +1041,24 @@
       "sha256": "990d9324e7263b479524b2549d8833a403f0ae44b8e1e990ea29a827ac53e12d",
       "rule": "pii-phone",
       "reason": "WR591.S18.J30 historical source contains public PostgreSQL integer boundary constants, not contact data. Exact path and blob identity only. Current source groups those constants with numeric separators."
+    },
+    {
+      "path": "db/schema.sql",
+      "sha256": "dd731bba56524da53355336e2bcda3a2a1af7050667332be4e07cfabe50399d4",
+      "rule": "pii-email",
+      "reason": "WR622.S13.J334 regenerated schema snapshot retains the existing Dell staff actor email from migration 1014. No client rows or new contact values. Exact snapshot bytes only."
+    },
+    {
+      "path": "db/schema.sql",
+      "sha256": "5532d2ae3b6e9a4bf2c0c72eab7ad096279363086021c0a7a6976974caf4b64a",
+      "rule": "pii-email",
+      "reason": "WR622.S13.J334 regenerated schema snapshot retains the existing Dell staff actor email from migration 1014. No client rows or new contact values. Exact snapshot bytes only."
+    },
+    {
+      "path": "db/schema.sql",
+      "sha256": "eada8d5d419393212ae4cdb69ed216603c01c9eafa0f838d6dc66ecbf6419f84",
+      "rule": "pii-email",
+      "reason": "WR622.S13.J334 regenerated schema snapshot retains the existing Dell staff actor email from migration 1014. No client rows or new contact values. Exact snapshot bytes only."
     }
   ]
 }
