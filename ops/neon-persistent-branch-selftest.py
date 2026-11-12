@@ -32,7 +32,7 @@ REGISTRATION = {
 class AdmissionTests(unittest.TestCase):
     def setUp(self):
         self.request = {'registration': copy.deepcopy(REGISTRATION),
-                        'existing_registered_branches': 0, 'monthly_spend_usd': 1,
+                        'existing_registered_branches': 0, 'monthly_projection_usd': 1,
                         'organization_spending_limit_usd': 10, 'meter_month': '2026-11'}
 
     def admit(self):
@@ -56,10 +56,10 @@ class AdmissionTests(unittest.TestCase):
                     self.admit()
 
     def test_second_branch_and_invalid_budget_evidence(self):
-        for field, value in [('existing_registered_branches', 1), ('monthly_spend_usd', 10),
-                             ('monthly_spend_usd', 11), ('monthly_spend_usd', float('nan')),
-                             ('monthly_spend_usd', float('inf')), ('monthly_spend_usd', -1),
-                             ('monthly_spend_usd', True), ('monthly_spend_usd', None),
+        for field, value in [('existing_registered_branches', 1), ('monthly_projection_usd', 10),
+                             ('monthly_projection_usd', 11), ('monthly_projection_usd', float('nan')),
+                             ('monthly_projection_usd', float('inf')), ('monthly_projection_usd', -1),
+                             ('monthly_projection_usd', True), ('monthly_projection_usd', None),
                              ('organization_spending_limit_usd', 11),
                              ('organization_spending_limit_usd', None), ('meter_month', '2026-10')]:
             with self.subTest(field=field, value=value):
@@ -81,14 +81,14 @@ class CreatorTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.intent = Path(self.tmp.name) / 'intent.json'
         self.now = datetime(2026, 11, 11, tzinfo=timezone.utc)
-        self.costs = json.loads((ROOT / 'ops/config/system-costs.v1.json').read_text())['neon']
+        self.costs = json.loads((ROOT / 'ops/config/system-costs.v1.json').read_text())
         self.calls = []
         self.branches = [{'id': REGISTRATION['parent_id'], 'name': 'production', 'default': True}]
         self.consumption = json.loads((ROOT / 'tools/fixtures/system-costs/neon.json').read_text())
         self.consumption['projects'][0]['project_id'] = REGISTRATION['project_id']
         frame = self.consumption['projects'][0]['periods'][0]['consumption'][0]
         frame.update(timeframe_start='2026-11-01T00:00:00Z', timeframe_end='2026-12-01T00:00:00Z')
-        frame['metrics'] = [{'metric_name': name, 'value': 0} for name in self.costs['rates']]
+        frame['metrics'] = [{'metric_name': name, 'value': 0} for name in self.costs['neon']['rates']]
         frame['metrics'][0]['value'] = 7200
         self.limit = 1000
         self.reply = {'branch': {'id': 'br-test', 'name': 'engine-test', 'init_source': 'schema-only'},
@@ -123,6 +123,7 @@ class CreatorTests(unittest.TestCase):
         receipt = self.create()
         self.assertEqual(receipt['branch_id'], 'br-test')
         self.assertAlmostEqual(receipt['monthly_spend_usd'], 0.212)
+        self.assertAlmostEqual(receipt['monthly_projection_usd'], 0.578182)
         self.assertNotIn('secret-response', json.dumps(receipt))
         self.calls.clear()
         with self.assertRaises(MeteringRefusal):

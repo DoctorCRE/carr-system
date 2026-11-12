@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
-from decimal import Decimal
 import fcntl
 import json
 import os
@@ -18,13 +17,14 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'tools'))
 from lib.platform_metering import MeteringRefusal, authorize_metered_execution
 from lib.release_reader import NoRedirect, read
-from tools.system_costs import normalize
+from tools.system_costs import normalize, summarize
 
 API = 'https://console.neon.tech/api/v2'
 GATE = 'neon-persistent-branch'
 
 
-def _monthly_spend(api, config, now, project_id):
+def _monthly_costs(api, costs, now, project_id):
+    config = costs['neon']
     first = now.date().replace(day=1)
     end = first.replace(year=first.year + 1, month=1) if first.month == 12 else first.replace(month=first.month + 1)
     query = {'org_id': config['org_id'], 'from': first.isoformat() + 'T00:00:00Z',
@@ -58,13 +58,14 @@ def _monthly_spend(api, config, now, project_id):
                         or {m['metric_name'] for m in metrics} != set(config['rates'])
                         or len(metrics) != len(config['rates'])):
                     raise MeteringRefusal('incomplete current monthly consumption')
-    rows = normalize('neon', {'projects': projects}, config['rates'])['rows']
-    return float(sum((Decimal(str(row['usd'])) for row in rows), Decimal(0)))
+    source = normalize('neon', {'projects': projects}, config['rates'])
+    report = summarize(costs, {'neon': source}, now.date())
+    return next(provider for provider in report['providers'] if provider['provider'] == 'neon')
 
 
 def create_registered_branch(name, policy, costs, api, intent, now):
     registration = policy['execution_gates'][GATE]['registration']
-    if name != registration['name'] or costs['org_id'] != registration['org_id']:
+    if name != registration['name'] or costs['neon']['org_id'] != registration['org_id']:
         raise MeteringRefusal('unknown persistent registration or billing organization')
     if intent.exists():
         raise MeteringRefusal('creation intent exists; reconcile provider state before recovery')
@@ -84,8 +85,9 @@ def create_registered_branch(name, policy, costs, api, intent, now):
     cents = spending['spending_limit_cents']
     if isinstance(cents, bool) or not isinstance(cents, int) or cents < 0:
         raise MeteringRefusal('organization spending limit is not configured')
+    monthly = _monthly_costs(api, costs, now, project)
     request = {'registration': registration, 'existing_registered_branches': existing,
-               'monthly_spend_usd': _monthly_spend(api, costs, now, project),
+               'monthly_projection_usd': monthly['projection_usd'],
                'organization_spending_limit_usd': cents / 100,
                'meter_month': now.strftime('%Y-%m')}
     decision = authorize_metered_execution(policy, GATE, request, today=now.date())
@@ -106,7 +108,8 @@ def create_registered_branch(name, policy, costs, api, intent, now):
         raise MeteringRefusal('provider result differs from registration; reconcile creation intent')
     return {'gate': decision['gate'], 'branch_id': branch['id'], 'name': name,
             'monthly_cost_ceiling_usd': registration['monthly_cost_ceiling_usd'],
-            'monthly_spend_usd': request['monthly_spend_usd'], 'creation_confirmed': True}
+            'monthly_spend_usd': monthly['mtd_usd'],
+            'monthly_projection_usd': request['monthly_projection_usd'], 'creation_confirmed': True}
 
 
 def _provider(token):
@@ -135,7 +138,7 @@ def main():
     args = parser.parse_args()
     try:
         policy = json.loads((ROOT / 'ops/config/platform-metering.v1.json').read_text())
-        costs = json.loads((ROOT / 'ops/config/system-costs.v1.json').read_text())['neon']
+        costs = json.loads((ROOT / 'ops/config/system-costs.v1.json').read_text())
         token = os.environ.get('NEON_API_KEY')
         if not token:
             raise MeteringRefusal('NEON_API_KEY must be supplied by the credential broker')

@@ -86,8 +86,8 @@ def authorize_metered_execution(policy: dict[str, Any], gate_key: str,
         if request.get("registration") != registration:
             raise MeteringRefusal("request must match the persistent registration exactly")
         ceiling = registration["monthly_cost_ceiling_usd"]
-        _bounded_number(request, "monthly_spend_usd", ceiling)
-        if request["monthly_spend_usd"] >= ceiling:
+        _bounded_number(request, "monthly_projection_usd", ceiling)
+        if request["monthly_projection_usd"] >= ceiling:
             raise MeteringRefusal("monthly cost ceiling exhausted")
         _bounded_number(request, "organization_spending_limit_usd", ceiling)
         if request.get("meter_month") != (today or date.today()).strftime("%Y-%m"):
