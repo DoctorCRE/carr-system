@@ -172,6 +172,14 @@ class CreatorTests(unittest.TestCase):
             self.create()
         self.assert_no_post()
 
+    def test_monthly_projection_refuses_before_creation(self):
+        self.now = datetime(2026, 11, 2, tzinfo=timezone.utc)
+        self.consumption['projects'][0]['periods'][0]['consumption'][0]['metrics'][0]['value'] = 36000
+        with self.assertRaises(MeteringRefusal):
+            self.create()
+        self.assert_no_post()
+        self.assertFalse(self.intent.exists())
+
     def test_target_missing_from_consumption_refuses(self):
         self.consumption['projects'][0]['project_id'] = 'other-project'
         with self.assertRaises(MeteringRefusal):
