@@ -22,6 +22,7 @@ import time
 import unittest
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 import urllib.error
 from email.message import Message
 from pathlib import Path
@@ -440,8 +441,11 @@ class CallModeTests(unittest.TestCase):
     def test_new_failure_receipt_does_not_reorder_recorded_calls(self) -> None:
         older = self.session("older-call")
         newer = self.session("newer-call")
-        post_call.write_private(older / call_mode.CONTEXT_FILE, {"started_at": "2026-10-29T10:00:00Z"})
-        post_call.write_private(newer / call_mode.CONTEXT_FILE, {"started_at": "2026-10-29T11:00:00Z"})
+        now = time.time()
+        older_start = datetime.fromtimestamp(now - 7200, timezone.utc).isoformat()
+        newer_start = datetime.fromtimestamp(now - 3600, timezone.utc).isoformat()
+        post_call.write_private(older / call_mode.CONTEXT_FILE, {"started_at": older_start})
+        post_call.write_private(newer / call_mode.CONTEXT_FILE, {"started_at": newer_start})
         (older / "meta.json").write_text("{}")
         (newer / "transcript.json").write_text("{}")
         post_call.write_private(older / post_call.STATUS_FILE, {"state": "needs_attention"})
