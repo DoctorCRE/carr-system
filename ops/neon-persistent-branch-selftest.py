@@ -25,7 +25,7 @@ REGISTRATION = {
     'owner': 'DoctorCRE engine',
     'endpoint': {'type': 'read_write', 'autoscaling_limit_min_cu': 0.25,
                  'autoscaling_limit_max_cu': 0.25, 'suspend_timeout_seconds': 300},
-    'monthly_cost_ceiling_usd': 10,
+    'monthly_cost_ceiling_usd': 40,
 }
 
 
@@ -33,7 +33,7 @@ class AdmissionTests(unittest.TestCase):
     def setUp(self):
         self.request = {'registration': copy.deepcopy(REGISTRATION),
                         'existing_registered_branches': 0, 'monthly_projection_usd': 1,
-                        'organization_spending_limit_usd': 10, 'meter_month': '2026-11'}
+                        'organization_spending_limit_usd': 40, 'meter_month': '2026-11'}
 
     def admit(self):
         return authorize_metered_execution(POLICY, 'neon-persistent-branch', self.request,
@@ -46,7 +46,7 @@ class AdmissionTests(unittest.TestCase):
         for field, value in [('name', 'another'), ('parent_name', 'staging'),
                              ('parent_id', 'other'), ('project_id', 'other'),
                              ('org_id', 'other'), ('init_source', 'parent-data'),
-                             ('owner', 'other'), ('monthly_cost_ceiling_usd', 11),
+                             ('owner', 'other'), ('monthly_cost_ceiling_usd', 41),
                              ('endpoint', {**REGISTRATION['endpoint'], 'autoscaling_limit_max_cu': 0.5}),
                              ('endpoint', {**REGISTRATION['endpoint'], 'suspend_timeout_seconds': 0})]:
             with self.subTest(field=field, value=value):
@@ -56,11 +56,11 @@ class AdmissionTests(unittest.TestCase):
                     self.admit()
 
     def test_second_branch_and_invalid_budget_evidence(self):
-        for field, value in [('existing_registered_branches', 1), ('monthly_projection_usd', 10),
-                             ('monthly_projection_usd', 11), ('monthly_projection_usd', float('nan')),
+        for field, value in [('existing_registered_branches', 1), ('monthly_projection_usd', 40),
+                             ('monthly_projection_usd', 41), ('monthly_projection_usd', float('nan')),
                              ('monthly_projection_usd', float('inf')), ('monthly_projection_usd', -1),
                              ('monthly_projection_usd', True), ('monthly_projection_usd', None),
-                             ('organization_spending_limit_usd', 11),
+                             ('organization_spending_limit_usd', 41),
                              ('organization_spending_limit_usd', None), ('meter_month', '2026-10')]:
             with self.subTest(field=field, value=value):
                 self.setUp()
@@ -90,7 +90,7 @@ class CreatorTests(unittest.TestCase):
         frame.update(timeframe_start='2026-11-01T00:00:00Z', timeframe_end='2026-12-01T00:00:00Z')
         frame['metrics'] = [{'metric_name': name, 'value': 0} for name in self.costs['neon']['rates']]
         frame['metrics'][0]['value'] = 7200
-        self.limit = 1000
+        self.limit = 4000
         self.reply = {'branch': {'id': 'br-test', 'name': 'engine-test', 'init_source': 'schema-only'},
                       'endpoints': [{'id': 'ep-test', 'branch_id': 'br-test', **REGISTRATION['endpoint']}],
                       'connection_uris': [{'connection_uri': 'secret-response-must-not-escape'}]}
@@ -154,7 +154,7 @@ class CreatorTests(unittest.TestCase):
         self.assert_no_post()
 
     def test_over_vendor_limit_refuses(self):
-        self.limit = 1001
+        self.limit = 4001
         with self.assertRaises(MeteringRefusal):
             self.create()
         self.assert_no_post()
@@ -168,14 +168,14 @@ class CreatorTests(unittest.TestCase):
             self.assert_no_post()
 
     def test_meter_ceiling_refuses(self):
-        self.consumption['projects'][0]['periods'][0]['consumption'][0]['metrics'][0]['value'] = 360000
+        self.consumption['projects'][0]['periods'][0]['consumption'][0]['metrics'][0]['value'] = 1800000
         with self.assertRaises(MeteringRefusal):
             self.create()
         self.assert_no_post()
 
     def test_monthly_projection_refuses_before_creation(self):
         self.now = datetime(2026, 11, 2, tzinfo=timezone.utc)
-        self.consumption['projects'][0]['periods'][0]['consumption'][0]['metrics'][0]['value'] = 36000
+        self.consumption['projects'][0]['periods'][0]['consumption'][0]['metrics'][0]['value'] = 180000
         with self.assertRaises(MeteringRefusal):
             self.create()
         self.assert_no_post()
