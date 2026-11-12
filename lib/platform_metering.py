@@ -8,6 +8,7 @@ an audited policy/authority change; there is no environment-variable bypass.
 from __future__ import annotations
 
 from datetime import date
+import math
 from typing import Any
 
 
@@ -28,7 +29,8 @@ def _required_nonempty(request: dict[str, Any], field: str) -> None:
 
 def _bounded_number(request: dict[str, Any], field: str, maximum: float) -> None:
     value = request.get(field)
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or not math.isfinite(value) or value < 0):
         raise MeteringRefusal(f"{field} must be a non-negative number")
     if float(value) > maximum:
         raise MeteringRefusal(f"{field}={value} exceeds registered cap {maximum}")
@@ -78,6 +80,18 @@ def authorize_metered_execution(policy: dict[str, Any], gate_key: str,
         if isinstance(maximum, bool) or not isinstance(maximum, (int, float)):
             raise MeteringRefusal(f"invalid registered maximum for {field}")
         _bounded_number(request, str(field), float(maximum))
+
+    registration = gate.get("registration")
+    if registration is not None:
+        if request.get("registration") != registration:
+            raise MeteringRefusal("request must match the persistent registration exactly")
+        ceiling = registration["monthly_cost_ceiling_usd"]
+        _bounded_number(request, "monthly_projection_usd", ceiling)
+        if request["monthly_projection_usd"] >= ceiling:
+            raise MeteringRefusal("monthly cost ceiling exhausted")
+        _bounded_number(request, "organization_spending_limit_usd", ceiling)
+        if request.get("meter_month") != (today or date.today()).strftime("%Y-%m"):
+            raise MeteringRefusal("current monthly consumption evidence is required")
 
     # SHA identity is a finite contract, not a free-form assertion.
     if "candidate_sha" in request:
