@@ -3,7 +3,8 @@
 
 Use --environment production, optionally with --branch for a named Neon branch.
 The reader CLI keeps its existing private credential-file protocol.
-Writer callers use load_spec("writer") and reconcile in-process with Cloudflare-only custody.
+Writer callers use load_spec("writer") and publish_credential with in-memory custody.
+Reader --rotate publishes to Hyperdrive without writing a credential file.
 The --rotate flag is the only way to reset an existing login's password.
 """
 import argparse
@@ -13,6 +14,7 @@ import os
 import pathlib
 import re
 import shutil
+import secrets
 import sys
 from urllib.parse import urlsplit
 
@@ -227,10 +229,6 @@ def reconcile(conn, data, password=None):
                    if key == 'search_path' else sql.Literal(value))
         conn.execute(sql.SQL('ALTER ROLE {} SET {} = {}').format(
             sql.Identifier(role_name), sql.Identifier(key), setting))
-    if password is not None:
-        verifier = conn.pgconn.encrypt_password(password.encode(), role_name.encode(), b'scram-sha-256').decode()
-        conn.execute(sql.SQL('ALTER ROLE {} PASSWORD {}').format(
-            sql.Identifier(role_name), sql.Literal(verifier)))
     for statement in revocations(conn, role_name):
         conn.execute(statement)
     conn.execute(sql.SQL('GRANT CONNECT ON DATABASE {} TO {}').format(
@@ -258,7 +256,76 @@ def reconcile(conn, data, password=None):
         raise Refusal('direct column grants differ from the role spec')
     if data.get('columns') and not effective_relation_grants_match(conn, data):
         raise Refusal('effective relation privileges exceed or miss the role spec')
+    if password is not None:
+        set_password(conn, role_name, password)
     return not exists
+
+
+LOGGING_GUARDS = {
+    'log_statement': 'none', 'log_min_error_statement': 'panic',
+    'log_min_duration_statement': '-1', 'log_parameter_max_length': '0',
+}
+
+
+def set_password(conn, role_name, password):
+    """Neon forwards plaintext at commit; suppress every controllable SQL log."""
+    if role_name not in (ROLE, 'engine_business_writer'):
+        raise Refusal('password target exceeds the engine role contract')
+    if not isinstance(password, str) or not password or '\x00' in password:
+        raise Refusal('invalid password input')
+    for key, value in LOGGING_GUARDS.items():
+        try:
+            with conn.transaction():
+                conn.execute(sql.SQL('SET LOCAL {} = {}').format(sql.Identifier(key), sql.Literal(value)))
+        except psycopg.errors.InsufficientPrivilege:
+            pass
+    # Refuse predictable statement failures before sending any secret.
+    state = conn.execute("""SELECT r.rolsuper,r.rolcanlogin,
+        current_setting('transaction_read_only')='off'
+        FROM pg_roles r WHERE r.rolname=%s""", (role_name,)).fetchone()
+    if not state or state[0] or not state[1] or not state[2]:
+        raise Refusal('password target must be an existing nonsuperuser login in a writable transaction')
+    # Successful non-secret ALTER proves role administration before password SQL.
+    conn.execute(sql.SQL('ALTER ROLE {} LOGIN').format(sql.Identifier(role_name)))
+    try:
+        conn.execute(sql.SQL('ALTER ROLE {} PASSWORD {}').format(
+            sql.Identifier(role_name), sql.Literal(password)))
+    except Exception:
+        raise Refusal('password statement failed; transaction must roll back') from None
+
+
+def publish_credential(owner, data, publish, *, rotate=False):
+    """Commit, authenticate, publish once; invalidate on failed or ambiguous publication.
+
+    publish accepts an in-memory password and returns no secret-bearing metadata.
+    Its caller must check the Hyperdrive name/target before invoking this function.
+    Writer creation refuses an existing role. Reader rotation requires an existing role.
+    """
+    password = secrets.token_urlsafe(48)
+    try:
+        with connect(owner) as conn:
+            conn.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', (data['role'],))
+            exists = conn.execute('SELECT EXISTS(SELECT FROM pg_roles WHERE rolname=%s)',
+                                  (data['role'],)).fetchone()[0]
+            if exists != rotate:
+                raise Refusal('creation requires an absent role; rotation requires an existing role')
+            created = reconcile(conn, data, password)
+    except Exception:
+        raise Refusal('credential reconciliation or commit failed') from None
+    try:
+        uri = credentials.build_role_uri(owner, data['role'], password)
+        if not authenticated(uri, data['role']):
+            raise Refusal('post-commit login failed')
+        publish(password)
+    except BaseException:
+        try:
+            with connect(owner) as conn:
+                conn.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', (data['role'],))
+                set_password(conn, data['role'], secrets.token_urlsafe(48))
+        except BaseException:
+            raise Refusal('credential publication failed; INVALIDATION FAILED, recovery required') from None
+        raise Refusal('credential publication failed; credential invalidated; inspect Hyperdrive before retry') from None
+    return {'created': created is True, 'password_changed': True}
 
 
 def function_grants_match(conn, data):
@@ -364,16 +431,65 @@ def proof(uri, data):
     return result
 
 
-def provision(owner, data, environment, rotate, root):
+def hyperdrive_publisher(owner, data, account, config_id=None):
+    """Preflight metadata before SQL; publish once after the fresh login."""
+    import urllib.request
+    from lib.release_reader import read, NoRedirect
+    from lib.token_store import read as token
+    if not re.fullmatch('[a-f0-9]{32}', account) or (config_id is not None
+            and not re.fullmatch('[a-f0-9]{32}', config_id)):
+        raise Refusal('invalid Hyperdrive account or config ID')
+    parsed = urlsplit(owner)
+    if parsed.username != 'neondb_owner' or parsed.path != '/neondb' or '-pooler.' in (parsed.hostname or ''):
+        raise Refusal('direct owner origin required')
+    name = 'doctorcre-engine-db-' + ('reader' if data['role'] == ROLE else 'writer')
+    base = 'https://api.cloudflare.com/client/v4/accounts/' + account + '/hyperdrive/configs'
+    headers = {'Authorization': 'Bearer ' + token('CLOUDFLARE_API_TOKEN'),
+               'Content-Type': 'application/json'}
+    try:
+        reply = read(base + ('/' + config_id if config_id else ''), headers=headers)
+        response = json.loads(reply.body)
+        if reply.status != 200 or not response.get('success'):
+            raise Refusal('Hyperdrive metadata unavailable')
+        metadata = response['result']
+        if config_id:
+            if (metadata['origin']['host'] != parsed.hostname
+                    or metadata['origin']['database'] != 'neondb'
+                    or metadata['origin']['user'] != data['role']):
+                raise Refusal('Hyperdrive target differs from requested role')
+            name = metadata['name']
+        elif response.get('result_info', {}).get('total_pages', 1) > 1 or any(
+                item['name'] == name for item in metadata):
+            raise Refusal('Hyperdrive name exists or absence is unproven')
+    except Exception:
+        raise Refusal('Hyperdrive preflight failed') from None
+
+    def publish(password):
+        payload = {'name': name, 'origin': {'scheme': 'postgres', 'host': parsed.hostname,
+            'port': parsed.port or 5432, 'database': 'neondb', 'user': data['role'],
+            'password': password}, 'caching': {'disabled': True}, 'origin_connection_limit': 10}
+        request = urllib.request.Request(base + ('/' + config_id if config_id else ''),
+            method='PUT' if config_id else 'POST', headers=headers, data=json.dumps(payload).encode())
+        try:
+            with urllib.request.build_opener(NoRedirect).open(request, timeout=30) as reply:
+                if not json.load(reply).get('success'):
+                    raise Refusal('Hyperdrive publication refused')
+        except Exception:
+            raise Refusal('Hyperdrive publication failed or outcome unknown') from None
+    return publish
+
+
+def provision(owner, data, environment, rotate, root, publish=None):
     if data['role'] != ROLE:
         raise Refusal('writer credentials must stay in memory and Cloudflare; use reconcile directly')
+    if rotate:
+        if publish is None:
+            raise Refusal('rotation requires an in-memory credential publisher')
+        return publish_credential(owner, data, publish, rotate=True)
     parsed = urlsplit(owner)
     key = 'CARR_DB_' + environment.upper().replace('-', '_') + '_ENGINE_BUSINESS_READER_URL'
     final = root / (environment + '-engine-business-reader.env')
     paths = credentials.CredentialPaths(final, pathlib.Path(str(final) + '.pending'))
-    if rotate:
-        paths = credentials.CredentialPaths(pathlib.Path(str(final) + '.rotate'),
-                                            pathlib.Path(str(final) + '.rotate.pending'))
     params = dict(key=key, role_name=ROLE, owner_uri=owner,
                   expected_endpoint=parsed.hostname, expected_port=parsed.port or 5432,
                   expected_database=parsed.path.lstrip('/'))
@@ -389,11 +505,7 @@ def provision(owner, data, environment, rotate, root):
             created = reconcile(conn, data, stored.password if change else None)
         if not authenticated(stored.value):
             raise Refusal('post-commit authentication failed; pending secret retained')
-        if rotate:
-            if paths.pending.exists():
-                os.replace(paths.pending, final)
-                credentials._fsync_directory(root)
-        elif stored.state == 'pending':
+        if stored.state == 'pending':
             credentials.promote_pending(paths, key=key, expected_value=stored.value)
         result = proof(stored.value, data)
     return dict(environment=environment, created=created is True,
@@ -413,6 +525,8 @@ def main():
     parser.add_argument('--environment', choices=['production'], required=True)
     parser.add_argument('--branch', help='named Neon branch in the production project')
     parser.add_argument('--rotate', action='store_true')
+    parser.add_argument('--hyperdrive-account')
+    parser.add_argument('--hyperdrive-config')
     args = parser.parse_args()
     if args.branch and not re.fullmatch('[a-z][a-z0-9-]*', args.branch):
         raise Refusal('branch must be a lowercase Neon branch name')
@@ -433,8 +547,16 @@ def main():
     if urlsplit(expected).hostname != urlsplit(owner).hostname or urlsplit(expected).path != urlsplit(owner).path:
         raise Refusal('db-tap target differs from the selected environment')
     target = args.environment if args.branch in (None, 'production') else 'branch-' + args.branch
+    publisher = None
+    if args.rotate:
+        if not args.hyperdrive_account or not args.hyperdrive_config:
+            raise Refusal('rotation requires --hyperdrive-account and --hyperdrive-config')
+        publisher = hyperdrive_publisher(owner, data, args.hyperdrive_account, args.hyperdrive_config)
     output = provision(owner, data, target, args.rotate,
-                       pathlib.Path.home() / '.config/carr')
+                       pathlib.Path.home() / '.config/carr', publish=publisher)
+    if args.rotate:
+        print_result(output)
+        return 0
     result = output['proof']
     print_result(output)
     return 0 if (all(result[k] for k in CHECKS)
