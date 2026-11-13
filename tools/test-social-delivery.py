@@ -157,9 +157,10 @@ class DeliveryTests(unittest.TestCase):
         for response, expected in [({'status': 'failed', 'errorMessage': 'account expired'}, 'failed'),
                                    ({'status': 'scheduled'}, 'unresolved'),
                                    ({'status': 'in-progress'}, 'unresolved'),
-                                   ((200, b'[]'), 'unresolved'), ((404, b'{}'), 'unresolved'),
+                                   ((200, b'[]'), 'unresolved'), ((404, b'{}'), 'cancelled'),
                                    ({'status': 'cancelled'}, 'cancelled')]:
             with self.subTest(response=response):
+                (self.out / delivery.RECEIPT).unlink(missing_ok=True)
                 self.responses['old'] = response
                 post = next(iter(self.run_check()['posts'].values()))
                 self.assertEqual(post['status'], expected)
@@ -192,7 +193,7 @@ class DeliveryTests(unittest.TestCase):
         self.responses['old'] = (429, b'{}')
         result = self.run_check()
         self.assertEqual(len(self.calls), 1)
-        self.assertEqual(len(result['deferred']), 1)
+        self.assertEqual(len(result['deferred']), 2)
         self.run_check()
         self.assertEqual(len(self.calls), 1)
         self.clock += 61
@@ -233,7 +234,7 @@ class DeliveryTests(unittest.TestCase):
         self.responses['old'] = (503, b'{}')
         result = self.run_check()
         self.assertEqual((result['requests'], result['stop_reason']), (3, 'transport_failures'))
-        self.assertEqual(len(result['deferred']), 3)
+        self.assertEqual(len(result['deferred']), 4)
         original = self.send
         def slow(*args):
             self.clock += 60

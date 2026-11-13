@@ -352,6 +352,10 @@ def social_delivery_findings(root, now=None):
             found.append(finding('deferred', 'Social delivery checks deferred: ' +
                                  (receipt['stop_reason'] or 'request budget') + '.'))
         for key, post in receipt['posts'].items():
+            if post.get('visibility') == 'cannot_verify':
+                found.append(finding(key + ':visibility',
+                                     f"Social delivery cannot verify public link: {post['platform']} "
+                                     f"{post['topic']} ({post['submission_id']}): {post['publicUrl']}"))
             if post['status'] in ('failed', 'unresolved'):
                 found.append(finding(key, f"Social delivery {post['status']}: {post['platform']} "
                                      f"{post['topic']} ({post['submission_id'] or 'missing submission ID'}): "

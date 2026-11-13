@@ -23,5 +23,8 @@ schedule, edit, retry, cancel, move or delete a post. Never call social_batch.su
 Do not change credentials or send a separate alert. The existing job watchdog ingests receipt findings,
 deduplicates unchanged delivery alerts, and reports missing or stale observer coverage.
 Exit 1 means coverage, throttling, authentication or deferred reads need attention; it never authorizes
-retrying publication. Keep missing IDs, 404s, ambiguous responses and blocked URLs unverified.
+retrying publication. A publisher 404 is terminal cancellation, with no alert or daily recheck.
+Missing IDs and ambiguous responses remain unresolved. Rate limits defer reads without a malformed-status alert.
+Read overdue nonterminal statuses before any public-link check. Attempt each returned public link at most
+twice, then retain a final cannot-verify verdict and one deduplicated digest finding.
 Engine seat h owns database measurement. This receipt is an interface handoff only.

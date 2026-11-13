@@ -418,6 +418,25 @@
       ]
     },
     {
+      "key": "social-delivery-check",
+      "name": "Daily social delivery observation",
+      "purpose": "Observe scheduled social delivery and expose receipt findings through the existing watchdog digest.",
+      "family": "Studio edge",
+      "criticality": "medium",
+      "owner_actor": "joe",
+      "repo_path": "/Users/booko/.claude/scheduled-tasks/social-delivery-check/SKILL.md",
+      "runtime": "claude-code-scheduled-task",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "Claude Code scheduled task (native), cron 0 6 * * *",
+          "expected_cadence_seconds": 86400,
+          "cadence_grace_seconds": 3600,
+          "notes": "Daily 06:00 America/Chicago. Declaration only; coordinator registers and enables after merge. Observation only; never publish, schedule, retry, cancel or edit Blotato posts."
+        }
+      ]
+    },
+    {
       "key": "npi-sweep-weekly",
       "name": "Weekly NPI new-provider sweep",
       "purpose": "NPPES weekly file to territory lead digest and hot-leads dashboard.",

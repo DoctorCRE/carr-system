@@ -20,6 +20,7 @@ from social_batch import ACCOUNTS, API, Blotato, Stop, http_transport, ledger_ro
 from datetime import datetime, timezone
 
 INTERVAL_SECONDS = 86400
+MAX_VISIBILITY_ATTEMPTS = 2
 RECEIPT = 'delivery.json'
 PUBLIC_HOSTS = {'linkedin.com', 'www.linkedin.com', 'x.com', 'www.x.com',
                 'twitter.com', 'www.twitter.com', 'facebook.com', 'www.facebook.com',
@@ -126,28 +127,41 @@ def check(out, transport, *, accounts, now=time.time, sleep=time.sleep,
             failures = failures + 1 if status >= 500 else 0
             if failures >= 3:
                 stop_reason = 'transport_failures'
+            if stop_reason:
+                raise Deferred()
             return status, raw
 
         api = Blotato(send)
         deferred = []
 
         def visibility(post, key):
+            if post.get('visibility') in ('verified', 'cannot_verify'):
+                return
             if not public_url(post.get('publicUrl')):
                 return
+            if post.get('visibility_attempts', 0) >= MAX_VISIBILITY_ATTEMPTS:
+                post['visibility'] = 'cannot_verify'
+                return
+            before = requests
             try:
                 code, _ = send('HEAD', post['publicUrl'], {}, None)
-                post['visibility'] = 'verified' if code == 200 else 'unverified'
+                post['visibility_attempts'] = post.get('visibility_attempts', 0) + 1
+                post['visibility'] = ('verified' if code == 200 else 'cannot_verify'
+                                      if post['visibility_attempts'] >= MAX_VISIBILITY_ATTEMPTS else 'unverified')
             except Deferred:
-                deferred.append(key + ':visibility')
+                if requests > before:
+                    post['visibility_attempts'] = post.get('visibility_attempts', 0) + 1
+                    if post['visibility_attempts'] >= MAX_VISIBILITY_ATTEMPTS:
+                        post['visibility'] = 'cannot_verify'
+                if post.get('visibility') != 'cannot_verify':
+                    deferred.append(key + ':visibility')
 
-        for key in sorted(source, key=lambda k: posts.get(k, {}).get('observed_at') or ''):
+        for key in sorted(source, key=lambda k: posts.get(k, {}).get('last_status_attempt_at') or posts.get(k, {}).get('observed_at') or ''):
             base = source[key]
             previous = posts.get(key, {})
             if previous.get('submission_id') != base['submission_id']:
                 previous = {}
             if previous.get('status') in ('published', 'cancelled'):
-                if previous['status'] == 'published' and previous.get('visibility') != 'verified':
-                    visibility(previous, key)
                 continue
             post = {**base, 'current_fire_time': previous.get('current_fire_time', base['original_fire_time']),
                     'observed_at': previous.get('observed_at'), 'status': 'not_due',
@@ -161,12 +175,15 @@ def check(out, transport, *, accounts, now=time.time, sleep=time.sleep,
                 post['observed_at'] = stamp(datetime.fromtimestamp(now(), timezone.utc))
                 post['errorMessage'] = 'missing submission ID or account; delivery cannot be verified'
             else:
+                before = requests
                 try:
                     if not isinstance(base['submission_id'], str) or not re.fullmatch(r'[A-Za-z0-9_-]+', base['submission_id']):
                         raise ValueError('invalid submission ID')
                     value = api.status(base['submission_id'])
                     post['observed_at'] = stamp(datetime.fromtimestamp(now(), timezone.utc))
                     post['publisher_status'] = value.get('status') if value else None
+                    if value is None:
+                        post['status'] = 'cancelled'
                     if value:
                         post['publicUrl'] = value.get('publicUrl')
                         post['errorMessage'] = value.get('errorMessage')
@@ -180,15 +197,19 @@ def check(out, transport, *, accounts, now=time.time, sleep=time.sleep,
                                 post['status'] = 'moved'
                     if post['status'] == 'unresolved':
                         post['errorMessage'] = post['errorMessage'] or 'missing or ambiguous publisher outcome'
-                    if post['status'] == 'published':
-                        visibility(post, key)
                 except Deferred:
                     deferred.append(key)
-                    post = previous or {**post, 'errorMessage': 'deferred by request budget or circuit breaker'}
+                    post = dict(previous) if previous else {**post, 'status': 'deferred', 'errorMessage': None}
                 except (Stop, ValueError, TypeError):
                     post['observed_at'] = stamp(datetime.fromtimestamp(now(), timezone.utc))
                     post['errorMessage'] = 'publisher status unavailable or malformed'
+                if requests > before:
+                    post['last_status_attempt_at'] = stamp(datetime.fromtimestamp(now(), timezone.utc))
             posts[key] = post
+        for key in source:
+            post = posts.get(key, {})
+            if post.get('status') == 'published':
+                visibility(post, key)
         result = {'schema': 'carr-social-delivery/v1', 'observed_at': started,
                   'interval_seconds': interval_seconds, 'coverage': 'unknown' if errors else 'observed',
                   'errors': errors, 'posts': posts, 'deferred': deferred, 'requests': requests,
