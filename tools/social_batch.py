@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import copy
 import dataclasses
+import fcntl
 import hashlib
 import http.server
 import importlib.util
@@ -129,6 +131,20 @@ def target_week(now: datetime) -> date:
     """The first Monday strictly after the run date, in America/Chicago."""
     today = now.astimezone(ZONE).date()
     return today + timedelta(days=7 - today.weekday())
+
+
+def effective_cadence(cadence: dict, week: date) -> dict:
+    """Resolve the dated treatment against the batch's Central-time Monday key."""
+    effective = copy.deepcopy(cadence)
+    effective['x_every_day'] = True
+    effective['active_override'] = None
+    for override in cadence.get('overrides', []):
+        start = date.fromisoformat(override['start_week'])
+        if start <= week < start + timedelta(weeks=override['weeks']):
+            effective['active_override'] = override
+            effective['lanes']['one_liner'].update(override['one_liner'])
+            effective['x_every_day'] = override['x_every_day']
+    return effective
 
 
 def bounds(week: date) -> tuple[datetime, datetime]:
@@ -283,8 +299,8 @@ def spec_check(ctx: Context) -> None:
 
 def plan(ctx: Context, own: frozenset[tuple[str, str]] = frozenset()) -> dict:
     spec_check(ctx)
-    cadence, accounts = ctx.cadence, ctx.accounts
     week = target_week(ctx.now)
+    cadence, accounts = effective_cadence(ctx.cadence, week), ctx.accounts
     start, end = bounds(week)
     api = Blotato(ctx.transport)
     logged = [r for r in ledger_rows(ctx.out) if r.get('event') == 'posted']
@@ -296,7 +312,7 @@ def plan(ctx: Context, own: frozenset[tuple[str, str]] = frozenset()) -> dict:
         if (value['state']['type'] == 'failed' or key in own or platform not in accounts
                 or str(value['account']['id']) != str(accounts[platform]['accountId'])):
             continue
-        held[key] = {'platform': platform, 'utc': key[1], 'source': 'listing', 'lane': _lane(platform, by_minute.get(key))}
+        held[key] = {'platform': platform, 'utc': key[1] + ':00Z', 'source': 'listing', 'lane': _lane(platform, by_minute.get(key))}
     # The default listing reaches about 7 days back; every post this script logged for
     # the week is also read back by submission id, so no listing horizon can hide it.
     # Keyed by Blotato's current time, so a post Joe moved is not counted twice.
@@ -309,7 +325,7 @@ def plan(ctx: Context, own: frozenset[tuple[str, str]] = frozenset()) -> dict:
         when = status.get('scheduledTime') or row['utc']
         key = (row['platform'], minute(when))
         if key not in held and key not in own and start <= parse_utc(when) < end:
-            held[key] = {'platform': row['platform'], 'utc': key[1], 'source': 'log', 'lane': _lane(row['platform'], row)}
+            held[key] = {'platform': row['platform'], 'utc': key[1] + ':00Z', 'source': 'log', 'lane': _lane(row['platform'], row)}
     warnings = []
     if not api.listing(*bounds(week - timedelta(days=7))):
         warnings.append('control_week_empty: the previous week lists no posts; planning from the spec cadence')
@@ -332,7 +348,7 @@ def plan(ctx: Context, own: frozenset[tuple[str, str]] = frozenset()) -> dict:
         'week_start': week.isoformat(), 'window_utc': [stamp(start), stamp(end)],
         'days': [{'date': day.isoformat(), 'utc_offset': datetime.combine(day, time(12), ZONE).isoformat()[-6:]}
                  for day in (week + timedelta(days=i) for i in range(7))],
-        'lanes': lanes, 'x_total': x_total,
+        'lanes': lanes, 'x_total': x_total, 'effective_cadence': cadence,
         'held_posts': sorted(held.values(), key=lambda h: h['utc']),
         'recent_x_visual_formats': [r['format'] for r in earlier if r['platform'] == 'twitter' and r.get('visual')]
         [:cadence['x_visual']['no_repeat_last']],
@@ -342,7 +358,7 @@ def plan(ctx: Context, own: frozenset[tuple[str, str]] = frozenset()) -> dict:
     }
     result['plan_digest'] = hashlib.sha256(json.dumps(
         {k: result[k] for k in ('week_start', 'lanes', 'x_total', 'held_posts', 'recent_x_visual_formats',
-                                'animated_last_week')} | {'pins': cadence['pins']}, sort_keys=True).encode()).hexdigest()
+                                'animated_last_week')} | {'effective_cadence': cadence}, sort_keys=True).encode()).hexdigest()
     if covered:
         _artifact(ctx, {'summary': f'SOCIAL_BATCH_WEEK_COVERED week={week}', 'week_start': week.isoformat()})
     return result
@@ -381,7 +397,8 @@ def media_kind(path: Path) -> tuple[str, int | None, int | None] | None:
 
 def check(drafts: dict, current: dict, ctx: Context) -> list[dict]:
     """Every fixed rule. An empty list is the only passing answer."""
-    cadence, accounts = ctx.cadence, ctx.accounts
+    cadence = effective_cadence(ctx.cadence, date.fromisoformat(current['week_start']))
+    accounts = ctx.accounts
     findings: list[dict] = []
 
     def find(draft, rule, detail):
@@ -527,7 +544,7 @@ def _batch_rules(valid, current, cadence, skipped, find) -> None:
     days = held_days | {w.date() for _, w in x}
     week = date.fromisoformat(current['week_start'])
     missing = [week + timedelta(days=i) for i in range(7) if week + timedelta(days=i) not in days]
-    if missing and 'x_every_day' not in skipped:
+    if cadence['x_every_day'] and missing and 'x_every_day' not in skipped:
         find(None, 'x_every_day', 'no X post on ' + ', '.join(d.strftime('%a %m/%d') for d in missing))
     clock: dict[str, str] = {}
     for d, w in x:
@@ -553,6 +570,25 @@ def _batch_rules(valid, current, cadence, skipped, find) -> None:
 
 # ---------------------------------------------------------------- submit
 def submit(drafts: dict, ctx: Context) -> dict:
+    # A top-up must reserve capacity through readback, before another run re-plans.
+    week = target_week(ctx.now)
+    if effective_cadence(ctx.cadence, week)['active_override'] is None:
+        return _submit(drafts, ctx)
+    folder = ctx.out / week.isoformat()
+    folder.mkdir(parents=True, exist_ok=True)
+    with (folder / 'cadence.lock').open('a') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return {'ok': False, 'status': 'run_in_progress', 'findings': [
+                {'draft': None, 'rule': 'run_in_progress', 'detail': 'another top-up holds this week; re-plan after it finishes'}]}
+        try:
+            return _submit(drafts, ctx)
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def _submit(drafts: dict, ctx: Context) -> dict:
     own = own_keys(ctx, drafts)
     current = plan(ctx, own)
     if current['status'] == 'week_covered':
@@ -632,7 +668,8 @@ def _finish(drafts, current, ctx, api, ledger, posted, media_urls, window) -> di
     folder = ledger.parent
     (folder / 'batch.json').write_text(json.dumps({
         'schema': 'carr-social-batch-log/v1', 'week_start': current['week_start'], 'summary': summary,
-        'posts': posts, 'run_notes': drafts['run_notes'], 'plan_warnings': current['warnings']},
+        'posts': posts, 'run_notes': drafts['run_notes'], 'plan_warnings': current['warnings'],
+        'effective_cadence': current['effective_cadence']},
         indent=1, sort_keys=True) + '\n')
     if verified != len(posts):
         return {'ok': False, 'status': 'unverified', 'summary': summary,

@@ -19,7 +19,7 @@ import sys
 import tempfile
 import unittest
 import zlib
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
@@ -255,6 +255,151 @@ class SocialBatchTest(unittest.TestCase):
 
     def rules(self, batch):
         return {(f['draft'], f['rule']) for f in sb.check(batch, sb.plan(self.ctx), self.ctx)}
+
+    def treatment_batch(self, week='2026-11-23'):
+        monday = date.fromisoformat(week)
+        self.ctx.now = datetime.combine(monday - timedelta(days=3), datetime.min.time(), sb.ZONE)
+        current = sb.plan(self.ctx)
+        batch = self.drafts(current)
+        batch['week_start'] = week
+        for draft in batch['drafts']:
+            when = datetime.fromisoformat(draft['local_time']) + (monday - date(2026, 11, 2))
+            draft['local_time'] = when.isoformat(timespec='minutes')
+        batch['drafts'] = [d for d in batch['drafts'] if d['id'] not in ('o3', 'o4')]
+        return batch, current
+
+    def test_treatment_calendar_and_expiry_preserve_other_mix(self):
+        for week in ('2026-11-16', '2026-11-23', '2026-11-30', '2026-12-07', '2026-12-14', '2026-12-21'):
+            with self.subTest(week=week):
+                _, current = self.treatment_batch(week)
+                inside = '2026-11-23' <= week < '2026-12-21'
+                self.assertEqual((current['lanes']['one_liner']['min'], current['lanes']['one_liner']['max']),
+                                 (2, 2) if inside else (3, 7))
+                for lane in ('standalone', *sb.CARR_PLATFORMS):
+                    self.assertEqual(current['lanes'][lane]['max'], CADENCE['lanes'][lane]['max'])
+
+    def test_treatment_start_and_end_use_central_run_date(self):
+        for instant, week, maximum in (
+            ('2026-11-23T05:59:00+00:00', '2026-11-23', 2),
+            ('2026-11-23T06:00:00+00:00', '2026-11-30', 2),
+            ('2026-12-14T05:59:00+00:00', '2026-12-14', 2),
+            ('2026-12-14T06:00:00+00:00', '2026-12-21', 7)):
+            with self.subTest(instant=instant):
+                self.ctx.now = datetime.fromisoformat(instant)
+                current = sb.plan(self.ctx)
+                self.assertEqual(current['week_start'], week)
+                self.assertEqual(current['lanes']['one_liner']['max'], maximum)
+
+    def test_treatment_allows_missing_days_but_refuses_third_one_liner(self):
+        batch, current = self.treatment_batch()
+        self.assertEqual(sb.check(batch, current, self.ctx), [])
+
+    def test_treatment_refuses_third_one_liner(self):
+        batch, current = self.treatment_batch()
+        third = copy.deepcopy(self.draft(batch, 'o2'))
+        third.update(id='third', local_time='2026-11-28T16:22')
+        batch['drafts'].append(third)
+        self.assertIn('lane_over', {f['rule'] for f in sb.check(batch, current, self.ctx)})
+
+    def test_outside_treatment_still_requires_daily_coverage_and_baseline_minimum(self):
+        for week in ('2026-11-16', '2026-12-21'):
+            batch, current = self.treatment_batch(week)
+            rules = {f['rule'] for f in sb.check(batch, current, self.ctx)}
+            self.assertIn('x_every_day', rules)
+            self.assertIn('lane_under', rules)
+
+    def test_treatment_quality_skip_is_required_and_logged(self):
+        batch, current = self.treatment_batch()
+        batch['drafts'] = [d for d in batch['drafts'] if d['id'] != 'o2']
+        self.assertIn('lane_under', {f['rule'] for f in sb.check(batch, current, self.ctx)})
+        batch['run_notes']['skipped_slots'] = [{'lane': 'one_liner', 'reason': 'no cleared quality fuel'}]
+        self.assertEqual(sb.check(batch, current, self.ctx), [])
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+        logged = json.loads((self.ctx.out / '2026-11-23/batch.json').read_text())
+        self.assertEqual(logged['run_notes']['skipped_slots'], batch['run_notes']['skipped_slots'])
+
+    def test_effective_daily_rule_invalidates_digest(self):
+        batch, current = self.treatment_batch()
+        config = copy.deepcopy(CADENCE)
+        config['overrides'] = [{'start_week': '2026-11-23', 'weeks': 4,
+                                'one_liner': {'min': 2, 'max': 2}, 'x_every_day': True}]
+        path = Path(self.tmp.name) / 'cadence.json'
+        path.write_text(json.dumps(config))
+        self.ctx.cadence_path = path
+        newer = sb.plan(self.ctx)
+        self.assertNotEqual(current['plan_digest'], newer['plan_digest'])
+        self.assertIn('plan_stale', {f['rule'] for f in sb.check(batch, newer, self.ctx)})
+
+    def test_treatment_topup_counts_held_one_liner_and_rejects_stale_digest(self):
+        batch, empty = self.treatment_batch()
+        held = self.draft(batch, 'o1')
+        utc = sb.local_to_utc(held['local_time'])
+        self.fake.items.append(item('twitter', utc))
+        sb.append(self.ctx.out / batch['week_start'] / 'ledger.jsonl',
+                  {'event': 'posted', 'draft': 'earlier', 'platform': 'twitter', 'lane': 'one_liner', 'utc': utc})
+        current = sb.plan(self.ctx)
+        self.assertEqual(current['lanes']['one_liner'], {'min': 2, 'max': 2, 'held': 1, 'open': 1})
+        self.assertNotEqual(empty['plan_digest'], current['plan_digest'])
+        self.assertIn('plan_stale', {f['rule'] for f in sb.check(batch, current, self.ctx)})
+        batch['drafts'].remove(held)
+        batch['plan_digest'] = current['plan_digest']
+        self.assertEqual(sb.check(batch, current, self.ctx), [])
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+        self.assertEqual(sb.plan(self.ctx)['lanes']['one_liner']['open'], 0)
+
+    def test_treatment_lock_releases_after_failed_run(self):
+        batch, _ = self.treatment_batch()
+        with patch.object(sb, 'check', side_effect=ValueError('synthetic failure')):
+            with self.assertRaisesRegex(ValueError, 'synthetic failure'):
+                sb.submit(batch, self.ctx)
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+
+    def test_concurrent_treatment_topups_cannot_each_add_two(self):
+        config = copy.deepcopy(CADENCE)
+        config['lanes']['one_liner'].update(min=2, max=2)
+        path = Path(self.tmp.name) / 'cadence.json'
+        path.write_text(json.dumps(config))
+        self.ctx.cadence_path = path
+        batch, _ = self.treatment_batch()
+        batch['drafts'] = [d for d in batch['drafts'] if d['lane'] == 'one_liner']
+        batch['run_notes']['skipped_slots'] = [{'lane': lane, 'reason': 'no cleared quality fuel'}
+                                              for lane in sb.WAIVABLE if lane != 'one_liner']
+        other = copy.deepcopy(batch)
+        for d in other['drafts']:
+            d['id'] += '-other'
+            d['local_time'] = (datetime.fromisoformat(d['local_time']) + timedelta(minutes=1)).isoformat(timespec='minutes')
+        entered, release = threading.Event(), threading.Event()
+        results, errors = [], []
+        real_check = sb.check
+
+        def paused_check(*args):
+            entered.set()
+            release.wait(3)
+            return real_check(*args)
+
+        def run(value):
+            try:
+                results.append(sb.submit(value, self.ctx))
+            except BaseException as exc:
+                errors.append(exc)
+
+        with patch.object(sb, 'check', side_effect=paused_check):
+            first = threading.Thread(target=run, args=(batch,))
+            second = threading.Thread(target=run, args=(other,))
+            first.start()
+            self.assertTrue(entered.wait(3))
+            second.start()
+            second.join(0.2)
+            release.set()
+            first.join(5)
+            second.join(5)
+        self.assertFalse(first.is_alive() or second.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(self.fake.created, 2, results)
+        self.assertEqual(sum(r['ok'] for r in results), 1, results)
+        current = sb.plan(self.ctx)
+        self.assertEqual(current['lanes']['one_liner']['open'], 0)
+        self.assertNotEqual(current['plan_digest'], batch['plan_digest'])
 
     # -- the valid batch passes -------------------------------------------------
     def test_valid_batch_has_no_findings(self):

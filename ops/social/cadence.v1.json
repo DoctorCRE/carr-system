@@ -16,6 +16,9 @@
      "section_id": "122c8d4e-d94c-43ba-b5d7-3d23c0c13905",
      "content_hash": "c53adf32b9d59e38a39207721a701b48d575501261fcc7514b385bd9af2d3d2b"}
   ],
+  "overrides": [
+    {"start_week": "2026-11-23", "weeks": 4, "one_liner": {"min": 2, "max": 2}, "x_every_day": false}
+  ],
   "lanes": {
     "standalone": {"platform": "twitter", "min": 3, "max": 4},
     "one_liner": {"platform": "twitter", "min": 3, "max": 7},
