@@ -17,6 +17,49 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class HookTests(unittest.TestCase):
+    def test_social_delivery_digest_dedupes_across_restart_and_clears(self):
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = root / 'out/social-batch'
+            folder.mkdir(parents=True)
+            receipt = {'schema': 'carr-social-delivery/v1', 'observed_at': 1000,
+                       'interval_seconds': 86400, 'coverage': 'observed',
+                       'deferred': [], 'stop_reason': None,
+                       'posts': {'week/draft': {'status': 'failed', 'platform': 'linkedin',
+                                              'topic': 'Synthetic topic', 'submission_id': 'fixture-id',
+                                              'errorMessage': 'Account expired'}}}
+            path = folder / 'delivery.json'
+            path.write_text(json.dumps(receipt))
+            inbox = root / config['paths']['orchestrator_inbox']
+            with patch.object(watchdog.time, 'time', return_value=1000):
+                self.assertIn('linkedin Synthetic topic (fixture-id): Account expired', watchdog.digest(root, config))
+                watchdog.deliver_findings(root, config, 1000)
+                first = inbox.read_bytes()
+                receipt['observed_at'] = 200000
+                path.write_text(json.dumps(receipt))
+                watchdog.deliver_findings(root, config, 200000)
+                self.assertEqual(inbox.read_bytes(), first)
+                receipt['posts']['week/draft']['status'] = 'published'
+                path.write_text(json.dumps(receipt))
+                watchdog.deliver_findings(root, config, 200001)
+                self.assertEqual(inbox.read_text(), '')
+
+    def test_social_delivery_missing_stale_and_unknown_coverage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = root / 'out/social-batch'
+            folder.mkdir(parents=True)
+            self.assertIn('unknown', watchdog.social_delivery_findings(root, 1000)[0]['reason'])
+            receipt = {'schema': 'carr-social-delivery/v1', 'observed_at': 1000,
+                       'interval_seconds': 86400, 'coverage': 'unknown',
+                       'deferred': ['fixture'], 'stop_reason': 'authentication', 'posts': {}}
+            (folder / 'delivery.json').write_text(json.dumps(receipt))
+            found = watchdog.social_delivery_findings(root, 91001)
+            self.assertEqual(len(found), 3)
+            self.assertTrue(any('overdue' in row['reason'] for row in found))
+            self.assertTrue(any('authentication' in row['reason'] for row in found))
+
     def test_findings_reach_inbox_once_until_content_changes_or_reminder_is_due(self):
         config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
         with tempfile.TemporaryDirectory() as directory:
