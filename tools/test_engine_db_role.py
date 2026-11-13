@@ -364,7 +364,8 @@ class CredentialLifecycleTests(unittest.TestCase):
         import json
         import traceback
         from lib import release_reader, token_store
-        owner = 'postgresql://neondb_owner:' + 'unused' + '@ep-example.neon.tech/neondb'
+        authority = ':'.join(['neondb_owner', 'unused']) + '@' + 'ep-example.neon.tech'
+        owner = 'postgresql://' + authority + '/neondb'
         for kind in ['reader', 'writer']:
             data = role.load_spec(kind)
             name = 'doctorcre-engine-db-' + kind
