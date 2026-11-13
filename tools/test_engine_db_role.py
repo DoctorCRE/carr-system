@@ -399,6 +399,28 @@ class CredentialLifecycleTests(unittest.TestCase):
                 ), self.assertRaises(role.Refusal):
                     role.hyperdrive_publisher(owner, data, 'a' * 32)
 
+    def test_reader_rotation_proves_role_before_publishing(self):
+        data = role.load_spec()
+        for passed in [True, False]:
+            checks = {k: True for k in role.CHECKS}
+            checks |= {name: {'read': True} for name in ['activity'] + data['views']}
+            checks['no_schema_create'] = passed
+            publisher = MagicMock()
+            def lifecycle(owner, spec, publish, rotate):
+                self.assertTrue(rotate)
+                publish('synthetic-test-value')
+                return {'created': False, 'password_changed': True}
+            with patch.object(role, 'publish_credential', side_effect=lifecycle), patch.object(
+                role, 'proof', return_value=checks
+            ), patch.object(role.credentials, 'build_role_uri', return_value='in-memory'):
+                if passed:
+                    role.provision('owner', data, 'production', True, pathlib.Path('unused'), publish=publisher)
+                    publisher.assert_called_once_with('synthetic-test-value')
+                else:
+                    with self.assertRaises(role.Refusal):
+                        role.provision('owner', data, 'production', True, pathlib.Path('unused'), publish=publisher)
+                    publisher.assert_not_called()
+
     def test_writer_existing_and_reader_absent_refuse_before_secret_sql(self):
         for kind, rotate in [('writer', False), ('reader', True)]:
             conn = MagicMock()

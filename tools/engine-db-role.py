@@ -486,7 +486,13 @@ def provision(owner, data, environment, rotate, root, publish=None):
     if rotate:
         if publish is None:
             raise Refusal('rotation requires an in-memory credential publisher')
-        return publish_credential(owner, data, publish, rotate=True)
+        def checked_publish(password):
+            result = proof(credentials.build_role_uri(owner, data['role'], password), data)
+            if not (all(result[k] for k in CHECKS)
+                    and all(result[n]['read'] for n in ['activity'] + data['views'])):
+                raise Refusal('post-commit role proof failed')
+            publish(password)
+        return publish_credential(owner, data, checked_publish, rotate=True)
     parsed = urlsplit(owner)
     key = 'CARR_DB_' + environment.upper().replace('-', '_') + '_ENGINE_BUSINESS_READER_URL'
     final = root / (environment + '-engine-business-reader.env')
