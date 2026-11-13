@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise delivery observation with synthetic transport and persisted receipts."""
 import json
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -33,6 +34,17 @@ class DeliveryTests(unittest.TestCase):
     def send(self, method, url, headers, data):
         self.assertIn(method, ('GET', 'HEAD'))
         self.assertIsNone(data)
+        if method == 'GET':
+            self.assertIsNotNone(re.fullmatch(re.escape(delivery.API) + r'/posts/[A-Za-z0-9_-]+', url))
+        else:
+            links = {value.get('publicUrl') for value in self.responses.values()
+                     if isinstance(value, dict) and isinstance(value.get('publicUrl'), str)}
+            receipt = self.out / delivery.RECEIPT
+            if receipt.exists():
+                links.update(post['publicUrl'] for post in json.loads(receipt.read_text())['posts'].values()
+                             if isinstance(post.get('publicUrl'), str))
+            self.assertIn(url, links)
+            self.assertTrue(delivery.public_url(url))
         self.calls.append((method, url, self.clock))
         value = self.responses.get(url.rsplit('/', 1)[-1], {'status': 'in-progress'})
         return value if isinstance(value, tuple) else (200, json.dumps(value).encode())
@@ -42,6 +54,52 @@ class DeliveryTests(unittest.TestCase):
             self.clock += seconds
         return delivery.check(self.out, self.send, accounts=RECORDED['accounts'],
                               now=lambda: self.clock, sleep=sleep, **kwargs)
+
+    def test_fake_rejects_unexpected_endpoints_and_unrelated_links(self):
+        for method, url in [('GET', delivery.API + '/posts'),
+                            ('GET', delivery.API + '/posts/old/extra'),
+                            ('GET', delivery.API + '/posts/old\n'),
+                            ('HEAD', 'https://x.com/unrelated'),
+                            ('HEAD', delivery.API + '/posts/old')]:
+            with self.subTest(method=method, url=url), self.assertRaises(AssertionError):
+                self.send(method, url, {}, None)
+
+    def test_public_refusals_do_not_trip_publisher_breaker(self):
+        import job_watchdog as watchdog
+        for status in (401, 403, 429, 500, 503, 999):
+            with self.subTest(status=status):
+                (self.out / delivery.RECEIPT).unlink(missing_ok=True)
+                for name in ('old', 'second', 'third'):
+                    if name != 'old':
+                        self.post(name, '2026-11-02', name)
+                    self.responses[name] = {'status': 'published', 'publicUrl': 'https://www.linkedin.com/' + name}
+                original = self.send
+                def blocked(method, url, headers, data):
+                    response = original(method, url, headers, data)
+                    return (status, b'') if method == 'HEAD' else response
+                self.send = blocked
+                try:
+                    first = self.run_check()
+                    self.assertIsNone(first['stop_reason'])
+                    self.assertEqual(first['deferred'], [])
+                    result = self.run_check()
+                finally:
+                    self.send = original
+                self.assertIsNone(result['stop_reason'])
+                self.assertEqual(result['deferred'], [])
+                self.assertTrue(all(p['visibility'] == 'cannot_verify' for p in result['posts'].values()))
+                self.assertFalse(any('transport_failures' in f['reason'] for f in
+                                     watchdog.social_delivery_findings(self.out.parents[1], self.clock)))
+
+    def test_non_string_public_urls_write_cannot_verify_receipt(self):
+        for url in (12, None, {'url': 'https://x.com/post'}, ['https://x.com/post']):
+            with self.subTest(url=url):
+                (self.out / delivery.RECEIPT).unlink(missing_ok=True)
+                self.responses['old'] = {'status': 'published', 'publicUrl': url}
+                result = self.run_check()
+                post = result['posts']['2026-10-26/first']
+                self.assertEqual((post['status'], post['visibility']), ('published', 'cannot_verify'))
+                self.assertEqual(json.loads((self.out / delivery.RECEIPT).read_text())['posts'], result['posts'])
 
     def test_due_failure_precedes_10_and_45_unreachable_links(self):
         import job_watchdog as watchdog
@@ -177,7 +235,7 @@ class DeliveryTests(unittest.TestCase):
         self.clock += 8 * 86400
         self.responses['old'] = {'status': 'published'}
         post = next(iter(self.run_check()['posts'].values()))
-        self.assertEqual((post['status'], post['visibility']), ('published', 'unverified'))
+        self.assertEqual((post['status'], post['visibility']), ('published', 'cannot_verify'))
 
     def test_cross_week_adopted_and_future(self):
         self.post(None, '2026-11-02', 'adopted')

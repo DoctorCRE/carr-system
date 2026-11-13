@@ -424,11 +424,30 @@ def digest(root, config):
     if not active:
         return ""
     lines = [f"Orchestrator watchdog: {len(active)} open finding(s)."]
-    limit = 4 if len(active) <= 4 else 3
-    for finding in active[:limit]:
-        lines.append("- " + " ".join(finding["reason"].split())[:300])
-    if len(active) > limit:
-        lines.append(f"- {len(active) - limit} more; see {config['paths']['findings']}")
+    visibility = [f for f in active if f.get('source') == 'social-delivery'
+                  and f['key'].endswith(':visibility')]
+    visibility_keys = {f['key'] for f in visibility}
+    actionable = [f for f in active if f['key'] not in visibility_keys]
+    # Keep main's non-social key order; rank only inside the social group.
+    social = [f for f in actionable if f.get('source') == 'social-delivery']
+    social.sort(key=lambda f: f['key'], reverse=True)
+    social.sort(key=lambda f: 0 if f['key'] == 'social-delivery:freshness' else
+                1 if '/' in f['key'] else 2)
+    actionable = [f for f in actionable if f.get('source') != 'social-delivery'] + social
+    entries = [" ".join(f['reason'].split())[:300] for f in actionable]
+    if visibility:
+        entries.append(f"{len(visibility)} public links cannot be verified; see out/social-batch/delivery.json")
+    limit = 4 if len(entries) <= 4 else 3
+    lines.extend('- ' + entry for entry in entries[:limit])
+    if len(entries) > limit:
+        hidden = actionable[limit:]
+        paths = []
+        if any(f.get('source') != 'social-delivery' for f in hidden):
+            paths.append(config['paths']['findings'])
+        if visibility or any(f.get('source') == 'social-delivery' for f in hidden):
+            paths.append('out/social-batch/delivery.json')
+        count = f"; {len(visibility)} public links cannot be verified" if visibility else ''
+        lines.append(f"- {len(actionable) - limit} more{count}; see {', '.join(paths)}")
     return "\n".join(lines)
 
 

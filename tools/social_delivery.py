@@ -28,6 +28,8 @@ PUBLIC_HOSTS = {'linkedin.com', 'www.linkedin.com', 'x.com', 'www.x.com',
 
 
 def public_url(url):
+    if not isinstance(url, str):
+        return False
     try:
         parsed = urllib.parse.urlsplit(url)
         return (parsed.scheme == 'https' and parsed.hostname in PUBLIC_HOSTS
@@ -120,11 +122,12 @@ def check(out, transport, *, accounts, now=time.time, sleep=time.sleep,
                 status, raw = transport(method, url, headers, data)
             except (Stop, OSError, TimeoutError):
                 status, raw = 503, b'{}'
-            if status == 429:
+            if status == 429 and url.startswith(API + '/'):
                 stop_reason, backoff = 'rate_limited', now() + 60
             elif status in (401, 403) and url.startswith(API + '/'):
                 stop_reason = 'authentication'
-            failures = failures + 1 if status >= 500 else 0
+            if url.startswith(API + '/'):
+                failures = failures + 1 if status >= 500 else 0
             if failures >= 3:
                 stop_reason = 'transport_failures'
             if stop_reason:
@@ -138,6 +141,7 @@ def check(out, transport, *, accounts, now=time.time, sleep=time.sleep,
             if post.get('visibility') in ('verified', 'cannot_verify'):
                 return
             if not public_url(post.get('publicUrl')):
+                post['visibility'] = 'cannot_verify'
                 return
             if post.get('visibility_attempts', 0) >= MAX_VISIBILITY_ATTEMPTS:
                 post['visibility'] = 'cannot_verify'
