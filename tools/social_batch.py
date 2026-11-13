@@ -8,7 +8,7 @@
 
 Design: docs/social/headless-batch-design.md (WR-000561). The model writes drafts.json;
 this script owns every fixed rule. The only Blotato writes are a media upload and a
-post with a future scheduledTime, so nothing publishes before Joe reviews it.
+post with a future scheduledTime. Scheduled posts publish unless cancelled before that time.
 Week boundaries are America/Chicago. Prints one JSON object; never prints the key.
 """
 from __future__ import annotations
@@ -60,8 +60,8 @@ ROUTES = {'webfetch', 'curl', 'grok_only', 'bank'}
 WAIVABLE = {'standalone', 'one_liner', *CARR_PLATFORMS, 'x_visual', 'x_series', 'story_time', 'x_every_day'}
 TOP_KEYS = {'schema', 'week_start', 'plan_digest', 'drafts', 'run_notes'}
 DRAFT_KEYS = {'id', 'platform', 'lane', 'kind', 'format', 'local_time', 'text', 'media', 'visual', 'sources',
-              'lint_review_clearances', 'bank_angles', 'alt_text'}
-DRAFT_REQUIRED = {'id', 'platform', 'lane', 'format', 'local_time', 'text'}
+              'lint_review_clearances', 'bank_angles', 'alt_text', 'idea_key'}
+DRAFT_REQUIRED = {'id', 'platform', 'lane', 'format', 'local_time', 'text', 'idea_key', 'bank_angles'}
 NOTE_KEYS = {'grok', 'claims_review', 'improved', 'not_improved', 'skipped_slots', 'bank_corrections'}
 MEDIA_TYPES = {'.png': 'image/png', '.gif': 'image/gif', '.mp4': 'video/mp4'}
 STORY_FLAG = re.compile(r'\b(made[ -]up|invented|composite|hypothetical|fictional|not a real)\b', re.I)
@@ -296,7 +296,9 @@ def plan(ctx: Context, own: frozenset[tuple[str, str]] = frozenset()) -> dict:
         if (value['state']['type'] == 'failed' or key in own or platform not in accounts
                 or str(value['account']['id']) != str(accounts[platform]['accountId'])):
             continue
-        held[key] = {'platform': platform, 'utc': key[1], 'source': 'listing', 'lane': _lane(platform, by_minute.get(key))}
+        held[key] = {'platform': platform, 'utc': stamp(parse_utc(value['postTime'])), 'source': 'log' if key in by_minute else 'manual',
+                     'lane': _lane(platform, by_minute.get(key)),
+                     **_content_evidence(by_minute.get(key) or value)}
     # The default listing reaches about 7 days back; every post this script logged for
     # the week is also read back by submission id, so no listing horizon can hide it.
     # Keyed by Blotato's current time, so a post Joe moved is not counted twice.
@@ -308,9 +310,16 @@ def plan(ctx: Context, own: frozenset[tuple[str, str]] = frozenset()) -> dict:
             continue
         when = status.get('scheduledTime') or row['utc']
         key = (row['platform'], minute(when))
-        if key not in held and key not in own and start <= parse_utc(when) < end:
-            held[key] = {'platform': row['platform'], 'utc': key[1], 'source': 'log', 'lane': _lane(row['platform'], row)}
+        if key not in own and start <= parse_utc(when) < end:
+            held[key] = {'platform': row['platform'], 'utc': stamp(parse_utc(when)), 'source': 'log', 'lane': _lane(row['platform'], row),
+                         **_content_evidence(row)}
     warnings = []
+    if any(h['source'] != 'manual' and not _complete_evidence(h) for h in held.values()):
+        warnings.append('content_coverage_incomplete: held posts lack idea or media evidence; automatic refill stopped')
+    for h in held.values():
+        if h['source'] == 'manual' and not _complete_evidence(h):
+            warnings.append(f"manual_content_unknown: {h['platform']} {h['utc']} occupies a slot; "
+                            'idea or media coverage is unknown; continuing the batch')
     if not api.listing(*bounds(week - timedelta(days=7))):
         warnings.append('control_week_empty: the previous week lists no posts; planning from the spec cadence')
     unknown_x = sum(1 for h in held.values() if h['lane'] == 'unknown')
@@ -346,6 +355,36 @@ def plan(ctx: Context, own: frozenset[tuple[str, str]] = frozenset()) -> dict:
     if covered:
         _artifact(ctx, {'summary': f'SOCIAL_BATCH_WEEK_COVERED week={week}', 'week_start': week.isoformat()})
     return result
+
+
+def _content_evidence(row: dict) -> dict:
+    return {key: row[key] for key in ('idea_key', 'media_sha256', 'bank_angles', 'sources') if key in row}
+
+
+def _complete_evidence(row: dict) -> bool:
+    return (isinstance(row.get('idea_key'), str) and bool(row['idea_key'].strip())
+            and isinstance(row.get('media_sha256'), list)
+            and all(isinstance(h, str) and re.fullmatch(r'[0-9a-f]{64}', h) for h in row['media_sha256']))
+
+
+def _content_rules(posts: list[dict], find) -> None:
+    ideas: dict[str, set[str]] = {}
+    images: dict[str, set[str]] = {}
+    for post in posts:
+        if post.get('source') != 'manual' and not _complete_evidence(post):
+            find(post.get('id'), 'content_coverage_incomplete',
+                 'held content lacks idea or media evidence; stop automatic refill')
+            continue
+        if isinstance(post.get('idea_key'), str) and post['idea_key'].strip():
+            platforms = ideas.setdefault(post['idea_key'], set())
+            platforms.add(post['platform'])
+            if len(platforms) > 2:
+                find(post.get('id'), 'idea_platform_limit', f"{post['idea_key']}: at most two platforms per Central week")
+        for digest in post.get('media_sha256') or []:
+            platforms = images.setdefault(digest, set())
+            platforms.add(post['platform'])
+            if len(platforms) > 1:
+                find(post.get('id'), 'cross_platform_media', 'each platform needs its own media bytes, including every slide')
 
 
 def _lane(platform: str, logged: dict | None) -> str:
@@ -413,11 +452,18 @@ def check(drafts: dict, current: dict, ctx: Context) -> list[dict]:
     start, end = bounds(date.fromisoformat(current['week_start']))
     lint = _lint()
     seen, valid = set(), []
+    content = list(current['held_posts'])
     for draft in items:
         draft_id = draft.get('id') if isinstance(draft, dict) else None
         if not isinstance(draft, dict) or set(draft) - DRAFT_KEYS or DRAFT_REQUIRED - set(draft):
             find(draft_id, 'schema', f'draft keys must include {sorted(DRAFT_REQUIRED)} and stay within {sorted(DRAFT_KEYS)}')
             continue
+        if not isinstance(draft['idea_key'], str) or not re.fullmatch(r'[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*', draft['idea_key']):
+            find(draft_id, 'idea_key', 'idea_key must be bank-item:actual-angle, stable across platform adaptations')
+            continue
+        if not isinstance(draft['bank_angles'], list) or not draft['bank_angles'] or any(
+                not isinstance(a, str) or not a.strip() for a in draft['bank_angles']):
+            find(draft_id, 'bank_angles', 'retain the bank item and actual angle as evidence')
         if draft_id in seen:
             find(draft_id, 'duplicate_id', 'draft ids must be unique')
         seen.add(draft_id)
@@ -463,6 +509,7 @@ def check(drafts: dict, current: dict, ctx: Context) -> list[dict]:
             find(draft_id, 'carousel_media', 'a carousel needs at least two slides')
         if draft.get('visual') and not media:
             find(draft_id, 'visual_media', 'a visual post needs media')
+        digests = []
         texts = [text]
         for entry in media:
             if not isinstance(entry, dict) or set(entry) != {'path', 'card_text'}:
@@ -477,6 +524,8 @@ def check(drafts: dict, current: dict, ctx: Context) -> list[dict]:
                 find(draft_id, 'media_type', 'no video on X')
             elif platform == 'instagram' and kind[1] and kind[2] and not 0.8 <= kind[1] / kind[2] <= 1.91:
                 find(draft_id, 'media_dims', f'{path.name}: Instagram images run 4:5 to 1.91:1')
+            if kind is not None:
+                digests.append(hashlib.sha256(path.read_bytes()).hexdigest())
             if platform == 'twitter' and 'CARR' in entry['card_text'].upper().split():
                 find(draft_id, 'x_carr_branding', 'X visuals carry no CARR branding')
         for source in draft.get('sources') or []:
@@ -492,7 +541,9 @@ def check(drafts: dict, current: dict, ctx: Context) -> list[dict]:
                     find(draft_id, 'lint_hard', f'{rule}: {quote}')
                 elif severity == 'REVIEW' and rule not in cleared:
                     find(draft_id, 'lint_review_uncleared', f'{rule}: {quote}')
+        content.append({**draft, 'media_sha256': digests})
         valid.append((draft, when))
+    _content_rules(content, find)
     _batch_rules(valid, current, cadence, skipped, find)
     return findings
 
@@ -574,7 +625,9 @@ def submit(drafts: dict, ctx: Context) -> dict:
             continue
         utc = local_to_utc(draft['local_time'])
         base = {'draft': draft['id'], 'platform': draft['platform'], 'lane': draft['lane'], 'kind': draft.get('kind'),
-                'format': draft['format'], 'visual': bool(draft.get('visual')), 'utc': utc}
+                'format': draft['format'], 'visual': bool(draft.get('visual')), 'utc': utc,
+                'idea_key': draft['idea_key'], 'bank_angles': draft['bank_angles'], 'sources': draft.get('sources', []),
+                'media_sha256': [hashlib.sha256(Path(m['path']).read_bytes()).hexdigest() for m in draft.get('media') or []]}
         if draft['id'] in intents:
             # A crash between POST and the posted row: adopt the post if the queue holds it.
             match = [i for i in api.listing(*window) if i['platform'] == draft['platform'] and minute(i['postTime']) == utc[:16]]
@@ -626,7 +679,7 @@ def _finish(drafts, current, ctx, api, ledger, posted, media_urls, window) -> di
                       'format': row['format'], 'utc': row['utc'], 'local_time': draft['local_time'],
                       'submission_id': row.get('submission_id'), 'readback': 'scheduled' if ok else 'unverified',
                       'media_sha256': digests, 'media_verified': all(d in media_urls for d in digests),
-                      'text': draft['text']})
+                      'text': draft['text'], **_content_evidence(row)})
     verified = sum(1 for p in posts if p['readback'] == 'scheduled' and p['media_verified'])
     summary = f'SOCIAL_BATCH_SCHEDULED n={len(posts)} verified={verified}'
     folder = ledger.parent
