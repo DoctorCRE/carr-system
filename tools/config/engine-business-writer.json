@@ -1,9 +1,27 @@
 {
   "role": "engine_business_writer",
   "extends": "reader",
-  "writes": {
-    "INSERT": ["deal_participant", "deal_note", "next_action", "event", "deal_conflict", "deal_presence_lease"],
-    "UPDATE": ["deal", "deal_participant", "next_action", "capture_post_call_action", "deal_conflict", "deal_presence_lease"]
+  "columns": {
+    "INSERT": {
+      "deal_participant": ["deal_id", "actor_id", "role", "set_by"],
+      "deal_note": ["deal_id", "kind", "text", "actor_id", "created_at"],
+      "next_action": ["subject_type", "subject_id", "owner_id", "due_on", "description", "created_by", "updated_by", "updated_at", "status"],
+      "event": ["occurred_at", "recorded_at", "actor_id", "verb", "subject_type", "subject_id", "field", "old_value", "new_value", "cause", "human_quote", "agent_rationale", "idempotency_key", "via", "client_id", "organization_tenant_id", "sponsoring_human_slug", "personal_scope", "authorization_class", "correlation_id"],
+      "tool_call": ["idempotency_key", "verb", "actor_id", "request_hash", "response", "via", "client_id", "organization_tenant_id", "sponsoring_human_slug", "personal_scope", "authorization_class", "correlation_id"],
+      "deal_conflict": ["deal_id", "field", "value_a", "actor_a", "event_a", "value_b", "actor_b"],
+      "deal_presence_lease": ["actor_id", "deal_id", "field", "expires_at"]
+    },
+    "UPDATE": {
+      "deal": ["phase", "owner", "attention", "next_date", "operating_state", "parking_reason", "parking_note", "parked_at", "parked_by", "updated_by"],
+      "deal_participant": ["to_at"],
+      "next_action": ["status", "updated_by", "updated_at"],
+      "capture_post_call_action": ["status", "updated_at", "completed_at"],
+      "deal_conflict": ["status", "resolved_by", "winner", "resolved_at"],
+      "deal_presence_lease": ["expires_at"]
+    },
+    "SELECT": {
+      "tool_call": ["idempotency_key", "request_hash", "response", "created_at"]
+    }
   },
-  "functions": ["carr_is_partner_actor(uuid)", "carr_is_partner_made(uuid,text)"]
+  "functions": ["carr_business_date(timestamp with time zone)", "carr_is_partner_actor(uuid)", "carr_is_partner_made(uuid,text)"]
 }

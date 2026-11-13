@@ -64,15 +64,23 @@ def validate_spec(data):
         'statement_timeout': '15s', 'idle_in_transaction_session_timeout': '30s',
     }:
         raise Refusal('role settings differ from the role contract')
-    writes = data.get('writes', {})
-    if (not isinstance(writes, dict) or (writes and not writer)
-            or set(writes) - {'INSERT', 'UPDATE'}):
-        raise Refusal('only the writer may grant INSERT and UPDATE')
-    for relations in writes.values():
-        if (not isinstance(relations, list) or any(not isinstance(n, str) for n in relations)
-                or len(relations) != len(set(relations))
-                or not set(relations) <= set(data['tables'])):
-            raise Refusal('writes must name duplicate-free allowlisted tables')
+    columns = data.get('columns', {})
+    if data.get('writes') or not isinstance(columns, dict) or (columns and not writer):
+        raise Refusal('only the writer may grant column privileges; table writes are forbidden')
+    if set(columns) - {'SELECT', 'INSERT', 'UPDATE'}:
+        raise Refusal('unsupported column privilege')
+    for privilege, relations in columns.items():
+        if not isinstance(relations, dict):
+            raise Refusal('column grants must map relations to columns')
+        for name, names in relations.items():
+            if (name not in data['tables'] and name != 'tool_call') or (
+                privilege == 'SELECT' and name != 'tool_call'
+            ) or (name == 'tool_call' and privilege == 'UPDATE'):
+                raise Refusal('column grant exceeds the writer relation contract')
+            if (not isinstance(names, list) or not names or any(
+                    not isinstance(n, str) or not re.fullmatch('[a-z_][a-z_0-9]*', n) for n in names)
+                    or len(names) != len(set(names))):
+                raise Refusal('column grants require duplicate-free column identifiers')
     return data
 
 
@@ -86,7 +94,7 @@ def load_spec(kind='reader'):
     if writer.pop('extends') != 'reader':
         raise Refusal('writer must extend the reader contract')
     return validate_spec(reader | writer | {
-        'functions': reader['functions'] + writer['functions'],
+        'functions': writer['functions'],
         'settings': reader['settings'] | {'default_transaction_read_only': 'off'},
     })
 
@@ -105,14 +113,20 @@ def attribute_options(observed):
 
 
 def relation_grants(data):
-    return {(name, 'SELECT') for name in data['tables'] + data['views']} | {
-        (name, privilege) for privilege, names in data.get('writes', {}).items() for name in names}
+    return {(name, 'SELECT') for name in data['tables'] + data['views']}
+
+
+def column_grants(data):
+    return {(name, column, privilege) for privilege, relations in data.get('columns', {}).items()
+            for name, columns in relations.items() for column in columns}
 
 
 def grant_statements(data):
     validate_spec(data)
     return [f'GRANT {privilege} ON TABLE "public"."{name}" TO "{data["role"]}"'
             for name, privilege in sorted(relation_grants(data))] + [
+                f'GRANT {privilege} ("{column}") ON TABLE "public"."{name}" TO "{data["role"]}"'
+                for name, column, privilege in sorted(column_grants(data))] + [
                 f'GRANT EXECUTE ON FUNCTION public.{name} TO "{data["role"]}"'
                 for name in data['functions']]
 
@@ -208,8 +222,9 @@ def reconcile(conn, data, password=None):
         conn.execute(sql.SQL('ALTER ROLE {} SET {} = {}').format(
             sql.Identifier(role_name), sql.Identifier(key), setting))
     if password is not None:
+        verifier = conn.pgconn.encrypt_password(password.encode(), role_name.encode(), b'scram-sha-256').decode()
         conn.execute(sql.SQL('ALTER ROLE {} PASSWORD {}').format(
-            sql.Identifier(role_name), sql.Literal(password)))
+            sql.Identifier(role_name), sql.Literal(verifier)))
     for statement in revocations(conn, role_name):
         conn.execute(statement)
     conn.execute(sql.SQL('GRANT CONNECT ON DATABASE {} TO {}').format(
@@ -229,7 +244,13 @@ def reconcile(conn, data, password=None):
     if conn.execute("""SELECT EXISTS(SELECT FROM pg_type t,aclexplode(t.typacl) a
         JOIN pg_roles r ON r.oid=a.grantee WHERE r.rolname=%s)""", (role_name,)).fetchone()[0]:
         raise Refusal('unsupported direct type grants; transaction rolled back')
-    if data.get('writes') and not effective_relation_grants_match(conn, data):
+    actual_columns = set(conn.execute("""SELECT n.nspname,c.relname,att.attname,a.privilege_type,a.is_grantable
+        FROM pg_attribute att JOIN pg_class c ON c.oid=att.attrelid
+        JOIN pg_namespace n ON n.oid=c.relnamespace, aclexplode(att.attacl) a
+        JOIN pg_roles r ON r.oid=a.grantee WHERE r.rolname=%s""", (role_name,)).fetchall())
+    if actual_columns != {('public', n, c, p, False) for n, c, p in column_grants(data)}:
+        raise Refusal('direct column grants differ from the role spec')
+    if data.get('columns') and not effective_relation_grants_match(conn, data):
         raise Refusal('effective relation privileges exceed or miss the role spec')
     return not exists
 
@@ -247,20 +268,30 @@ def effective_relation_grants_match(conn, data):
     expected = {('public', name, privilege) for name, privilege in relation_grants(data)}
     rows = conn.execute("""SELECT n.nspname,c.relname,p.privilege,
         has_table_privilege(%s,c.oid,p.privilege),
-        has_table_privilege(%s,c.oid,p.privilege || ' WITH GRANT OPTION'),
-        CASE WHEN p.privilege IN ('SELECT','INSERT','UPDATE','REFERENCES')
-          THEN has_any_column_privilege(%s,c.oid,p.privilege) ELSE false END
+        has_table_privilege(%s,c.oid,p.privilege || ' WITH GRANT OPTION')
         FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
         CROSS JOIN (VALUES ('SELECT'),('INSERT'),('UPDATE'),('DELETE'),('TRUNCATE'),
           ('REFERENCES'),('TRIGGER')) p(privilege)
         WHERE c.relkind IN ('r','p','v','m','f')
           AND n.nspname NOT IN ('pg_catalog','information_schema')
-          AND n.nspname !~ '^pg_toast'""", (data['role'],) * 3).fetchall()
-    actual = {(schema, name, privilege)
-              for schema, name, privilege, table, grantable, column in rows if table}
-    return actual == expected and all(
-        not grantable and (not column or (schema, name, privilege) in expected)
-        for schema, name, privilege, table, grantable, column in rows)
+          AND n.nspname !~ '^pg_toast'""", (data['role'],) * 2).fetchall()
+    actual = {(schema, name, privilege) for schema, name, privilege, table, grantable in rows if table}
+    if actual != expected or any(grantable for *_, grantable in rows):
+        return False
+    columns = conn.execute("""SELECT n.nspname,c.relname,att.attname,p.privilege,
+        has_column_privilege(%s,c.oid,att.attnum,p.privilege),
+        has_column_privilege(%s,c.oid,att.attnum,p.privilege || ' WITH GRANT OPTION')
+        FROM pg_attribute att JOIN pg_class c ON c.oid=att.attrelid
+        JOIN pg_namespace n ON n.oid=c.relnamespace
+        CROSS JOIN (VALUES ('SELECT'),('INSERT'),('UPDATE'),('REFERENCES')) p(privilege)
+        WHERE c.relkind IN ('r','p','v','m','f') AND att.attnum>0 AND NOT att.attisdropped
+          AND n.nspname NOT IN ('pg_catalog','information_schema')
+          AND n.nspname !~ '^pg_toast'""", (data['role'],) * 2).fetchall()
+    explicit = {('public', name, column, privilege) for name, column, privilege in column_grants(data)}
+    observed = {(schema, name, column, privilege)
+                for schema, name, column, privilege, allowed, grantable in columns
+                if allowed and (schema, name, privilege) not in expected}
+    return observed == explicit and all(not grantable for *_, grantable in columns)
 
 
 def proof(uri, data):
