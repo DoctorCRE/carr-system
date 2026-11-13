@@ -25,9 +25,10 @@ CARR_BREAK_GLASS=1 python3 tools/db-tap.py --reason "Recover interrupted engine 
 
 Recovery takes the same session advisory lock as publication and inspects the complete Hyperdrive list.
 An unavailable, paginated or mismatching response refuses before SQL mutation.
-If no matching Hyperdrive exists, recovery commits `ALTER ROLE ... NOLOGIN PASSWORD NULL` for an existing writer and clears its password statements from `pg_stat_statements`.
+If no matching Hyperdrive exists, recovery commits `ALTER ROLE ... NOLOGIN PASSWORD NULL` for an existing writer.
 An old password remains unusable even if LOGIN is later restored.
 Recovery returns `hyperdrive_exists=false` and `invalidated=true` for this orphan case. Rerun the initial creation command to reuse the disabled role with a fresh password through the normal ordered path.
+Every recovery that does not refuse clears the writer's password statements from `pg_stat_statements`, including when the writer is absent because its creation commit failed; that case returns `invalidated=false`.
 If the matching Hyperdrive exists, recovery returns `hyperdrive_exists=true` and leaves the role intact.
 Rotate that configuration through the reviewed command.
 

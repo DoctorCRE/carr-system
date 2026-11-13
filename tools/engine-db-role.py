@@ -349,15 +349,15 @@ def recover_credential(owner, data, inspect_hyperdrive):
             config_id = inspect_hyperdrive()
             exists = conn.execute('SELECT EXISTS(SELECT FROM pg_roles WHERE rolname=%s)',
                                   (data['role'],)).fetchone()[0]
-            if config_id:
-                if not exists:
-                    raise Refusal('Hyperdrive exists without its role; inspect before recovery')
-                return {'hyperdrive_exists': True, 'invalidated': False}
-            if exists:
+            if config_id and not exists:
+                raise Refusal('Hyperdrive exists without its role; inspect before recovery')
+            invalidated = exists and not config_id
+            if invalidated:
                 invalidate_credential(conn, data['role'])
                 conn.commit()
-                clear_password_statements(owner, data['role'])
-            return {'hyperdrive_exists': False, 'invalidated': bool(exists)}
+            # A failed commit leaves no role but can leave its password text in the statistics.
+            clear_password_statements(owner, data['role'])
+            return {'hyperdrive_exists': bool(config_id), 'invalidated': invalidated}
     except Refusal:
         raise
     except BaseException:
