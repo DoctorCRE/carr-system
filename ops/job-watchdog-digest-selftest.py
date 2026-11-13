@@ -176,7 +176,7 @@ class HookTests(unittest.TestCase):
             self.assertIn('out/social-batch/delivery.json', context)
             self.assertNotIn('see out/watchdog/findings.jsonl', context)
 
-    def test_digest_prefers_newer_social_failures_and_names_mixed_overflow_files(self):
+    def test_digest_ranks_newer_social_failures_after_other_findings(self):
         config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
         rows = [{'key': f'social-delivery:2026-10-{day}/post', 'kind': 'job_degraded',
                  'source': 'social-delivery', 'reason': f'old failure {day}'} for day in range(10, 16)]
@@ -186,9 +186,9 @@ class HookTests(unittest.TestCase):
         with patch.object(watchdog, 'active_findings', return_value=rows):
             context = watchdog.digest(ROOT, config)
         self.assertEqual(len(context.splitlines()), 5)
-        self.assertEqual(context.splitlines()[1], '- new failure')
+        self.assertEqual(context.splitlines()[1:3], ['- other actionable finding', '- new failure'])
         self.assertIn('out/social-batch/delivery.json', context.splitlines()[-1])
-        self.assertIn(config['paths']['findings'], context.splitlines()[-1])
+        self.assertNotIn(config['paths']['findings'], context.splitlines()[-1])
 
     def test_old_social_failures_do_not_hide_other_watchdog_findings(self):
         config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')

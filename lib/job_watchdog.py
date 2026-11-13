@@ -428,10 +428,12 @@ def digest(root, config):
                   and f['key'].endswith(':visibility')]
     visibility_keys = {f['key'] for f in visibility}
     actionable = [f for f in active if f['key'] not in visibility_keys]
-    actionable.sort(key=lambda f: f.get('first_seen') or f['key'], reverse=True)
-    actionable.sort(key=lambda f: 0 if f['key'] == 'social-delivery:freshness' else
-                    1 if f.get('kind') == 'job_failed' or
-                    (f.get('source') == 'social-delivery' and '/' in f['key']) else 2)
+    # Keep main's non-social key order; rank only inside the social group.
+    social = [f for f in actionable if f.get('source') == 'social-delivery']
+    social.sort(key=lambda f: f['key'], reverse=True)
+    social.sort(key=lambda f: 0 if f['key'] == 'social-delivery:freshness' else
+                1 if '/' in f['key'] else 2)
+    actionable = [f for f in actionable if f.get('source') != 'social-delivery'] + social
     entries = [" ".join(f['reason'].split())[:300] for f in actionable]
     if visibility:
         entries.append(f"{len(visibility)} public links cannot be verified; see out/social-batch/delivery.json")
