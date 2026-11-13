@@ -1,3 +1,5 @@
+// Register authenticated CARR verbs and dispatch their declared contracts.
+import { dealUpdateSummaryTools } from './deal-update-summary.ts';
 // Register MCP tools and their shared write envelope.
 import { FUTURE_WORK_WRITES, workRequestLinkSchema, linkFutureWork } from "./future-work.js";
 import { findExactPostCallAction, withPostCallActionComparisons } from "./post-call-action-match.ts";
@@ -9077,6 +9079,8 @@ function registerTools(additions, source) {
     throw new Error(`duplicate tool registration from ${source}: ${duplicates.join(",")}`);
   Object.assign(TOOLS, Object.fromEntries(Object.entries(additions).map(([name, tool]) => [name, bindToolSource(tool, source, name)])));
 }
+
+registerTools(dealUpdateSummaryTools(), "mcp-server/src/deal-update-summary.ts");
 
 registerTools(invoiceTrackerTools({ ToolError, withEnvelope, writeEvent }), "invoice-tracker");
 

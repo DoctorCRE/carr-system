@@ -1,0 +1,5 @@
+{
+  "worker": ["src/deal-update-summary.ts"],
+  "node": ["test/deal-update-summary.test.ts", "test/deal-update-summary-postgres.test.ts"],
+  "entry": ["test/deal-update-summary.test.ts", "test/deal-update-summary-postgres.test.ts"]
+}
