@@ -19,7 +19,7 @@ import sys
 import tempfile
 import unittest
 import zlib
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
@@ -257,6 +257,395 @@ class SocialBatchTest(unittest.TestCase):
 
     def rules(self, batch):
         return {(f['draft'], f['rule']) for f in sb.check(batch, sb.plan(self.ctx), self.ctx)}
+
+    def treatment_batch(self, week='2026-12-07'):
+        monday = date.fromisoformat(week)
+        self.ctx.now = datetime.combine(monday - timedelta(days=3), datetime.min.time(), sb.ZONE)
+        baseline = monday - timedelta(weeks=2)
+        original = self.drafts()
+        rows = []
+        for d in original['drafts']:
+            when = datetime.fromisoformat(d['local_time']) + (baseline - date(2026, 11, 2))
+            rows.append({**d, 'utc': sb.local_to_utc(when.isoformat(timespec='minutes'))})
+        folder = self.ctx.out / baseline.isoformat()
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / 'batch.json').write_text(json.dumps({'posts': rows}))
+        current = sb.plan(self.ctx)
+        batch = self.drafts(current)
+        batch['week_start'] = week
+        for draft in batch['drafts']:
+            when = datetime.fromisoformat(draft['local_time']) + (monday - date(2026, 11, 2))
+            draft['local_time'] = when.isoformat(timespec='minutes')
+        batch['drafts'] = [d for d in batch['drafts'] if d['id'] not in ('o3', 'o4')]
+        if current['effective_cadence']['active_override']:
+            for name in ('li2', 'ig2'):
+                d = self.draft(batch, name)
+                d['format'] = 'carousel'
+                d['media'] = []
+                for index in range(2):
+                    path = self.media / f'{name}-{index}.png'
+                    png(path, 1080, 1350)
+                    path.write_bytes(path.read_bytes() + f'{name}-{index}'.encode())
+                    d['media'].append({'path': str(path), 'card_text': 'Read the lease'})
+            if week == '2026-12-14':
+                self.draft(batch, 'x1')['format'] = 'diagram'
+            extra = copy.deepcopy(self.draft(batch, 'li2'))
+            extra.update(id='li3', idea_key='synthetic:third-angle', format='text', media=[])
+            extra['local_time'] = f'{monday + timedelta(days=2)}T15:16'
+            batch['drafts'].append(extra)
+        return batch, current
+
+    def test_mix_manual_link_warns_and_schedules_remaining_slots(self):
+        batch, _ = self.treatment_batch()
+        manual = item('linkedin', sb.local_to_utc('2026-12-11T09:02'))
+        manual['text'] = 'Joe shared an article: https://news.example.com/story'
+        self.fake.items.append(manual)
+        batch['drafts'] = [d for d in batch['drafts'] if d['id'] != 'li3']
+        current = sb.plan(self.ctx)
+        batch['plan_digest'] = current['plan_digest']
+        self.assertEqual(sb.check(batch, current, self.ctx), [])
+        self.assertTrue(any(w.startswith('manual_platform_links:') for w in current['warnings']))
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+        self.assertEqual(self.fake.created, len(batch['drafts']))
+
+    def test_latest_baseline_check_replaces_abandoned_time_and_posts_win(self):
+        import io
+        from contextlib import redirect_stdout
+        batch, _ = self.treatment_batch('2026-11-23')
+        batch['drafts'] = self.drafts()['drafts']
+        for draft in batch['drafts']:
+            draft['local_time'] = (datetime.fromisoformat(draft['local_time']) + timedelta(weeks=3)).isoformat(timespec='minutes')
+        (self.ctx.out / '2026-11-09/batch.json').unlink()
+        path = Path(self.tmp.name) / 'baseline.json'
+
+        def checked():
+            path.write_text(json.dumps(batch))
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(sb.main(['check', str(path)], self.ctx), 0)
+
+        checked()
+        self.draft(batch, 'o1')['local_time'] = '2026-11-24T09:16'
+        checked()
+        self.ctx.now = datetime(2026, 12, 4, 6, tzinfo=sb.ZONE)
+        expected = ['2026-12-08T09:16', '2026-12-11T12:58']
+        self.assertEqual(sb.plan(self.ctx)['slot_plan']['slots']['one_liner'], expected)
+        self.ctx.now = datetime(2026, 11, 20, 6, tzinfo=sb.ZONE)
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+        self.draft(batch, 'o1')['local_time'] = '2026-11-24T07:13'
+        checked()
+        self.ctx.now = datetime(2026, 12, 4, 6, tzinfo=sb.ZONE)
+        self.assertEqual(sb.plan(self.ctx)['slot_plan']['slots']['one_liner'], expected)
+        (self.ctx.out / '2026-11-23/batch.json').unlink()
+        self.assertEqual(sb.plan(self.ctx)['slot_plan']['slots']['one_liner'], expected)
+
+    def test_mix_short_links_refused_for_drafts_and_logged_posts(self):
+        batch, current = self.treatment_batch()
+        draft = self.draft(batch, 'li1')
+        original = draft['text']
+        for link in ('bit.ly/x', 'lnkd.in', 't.co/x', 'buff.ly/x', 'ow.ly/x',
+                     'example.health/story', 'example.ai/path', 'www.example.us', 'https://example.invalid'):
+            with self.subTest(link=link):
+                draft['text'] = original + ' ' + link
+                self.assertIn('platform_links', {f['rule'] for f in sb.check(batch, current, self.ctx)})
+        draft['text'] = original
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+        ledger = self.ctx.out / '2026-12-07/ledger.jsonl'
+        rows = [json.loads(line) for line in ledger.read_text().splitlines()]
+        for row in rows:
+            if row.get('event') == 'posted' and row.get('platform') == 'linkedin':
+                row['text'] += ' bit.ly/x'
+        ledger.write_text(''.join(json.dumps(r) + '\n' for r in rows))
+        empty = copy.deepcopy(batch)
+        empty['drafts'] = []
+        current = sb.plan(self.ctx)
+        empty['plan_digest'] = current['plan_digest']
+        self.assertIn('platform_links', {f['rule'] for f in sb.check(empty, current, self.ctx)})
+
+    def test_mix_facebook_single_cards_allowed(self):
+        batch, current = self.treatment_batch()
+        draft = self.draft(batch, 'fb1')
+        draft['format'] = 'single_card'
+        draft['media'] = copy.deepcopy(self.draft(batch, 'fb2')['media'])
+        draft['media'][0]['path'] = str(self.media / 'fb1.png')
+        png(Path(draft['media'][0]['path']), 1080, 1080)
+        self.assertEqual(sb.check(batch, current, self.ctx), [])
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+
+    def test_linkedin_image_deviation_visible_in_plan_check_receipt_and_feedback(self):
+        import io
+        from contextlib import redirect_stdout
+        batch, current = self.treatment_batch()
+        deviation = current['deviations'][0]
+        self.assertEqual(deviation['platform'], 'linkedin')
+        self.assertEqual((deviation['requested_format'], deviation['actual_format']),
+                         ('document_carousel', 'image_carousel'))
+        self.assertIn('Blotato', deviation['reason'])
+        path = Path(self.tmp.name) / 'mix.json'
+        path.write_text(json.dumps(batch))
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(sb.main(['check', str(path)], self.ctx), 0)
+        self.assertEqual(json.loads(output.getvalue())['deviations'], [deviation])
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+        receipt = json.loads((self.ctx.out / '2026-12-07/batch.json').read_text())
+        self.assertEqual(receipt['deviations'], [deviation])
+        feedback = next(args['body_text'] for verb, args in self.verbs if verb == 'write-doctrine-section')
+        self.assertIn('document_carousel -> image_carousel', feedback)
+        self.assertIn(deviation['reason'], feedback)
+
+    def test_both_mix_weeks_schedule_counts_and_preserve_slot_order(self):
+        for week in ('2026-12-07', '2026-12-14'):
+            batch, current = self.treatment_batch(week)
+            self.assertEqual({p: current['lanes'][p]['max'] for p in sb.CARR_PLATFORMS},
+                             {'linkedin': 3, 'facebook': 2, 'instagram': 3})
+            self.assertEqual((current['x_total']['max'], current['lanes']['standalone']['min']), (6, 3))
+            self.assertEqual(sb.check(batch, current, self.ctx), [])
+            self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+            receipt = json.loads((self.ctx.out / week / 'batch.json').read_text())
+            self.assertEqual({p: sum(d['platform'] == p for d in receipt['posts'])
+                              for p in ('linkedin', 'facebook', 'instagram', 'twitter')},
+                             {'linkedin': 3, 'facebook': 2, 'instagram': 2, 'twitter': 5})
+            self.assertEqual(sum(d['format'] == 'carousel' and d['platform'] == 'instagram'
+                                 for d in receipt['posts']), 2)
+
+    def test_mix_refuses_carousel_filler_and_counts_held_formats(self):
+        batch, current = self.treatment_batch()
+        extra = copy.deepcopy(self.draft(batch, 'ig2'))
+        extra.update(id='ig3', local_time='2026-12-10T09:16', idea_key='synthetic:third-ig')
+        batch['drafts'].append(extra)
+        self.assertIn('platform_format_over', {f['rule'] for f in sb.check(batch, current, self.ctx)})
+        batch['drafts'].pop()
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+        planned = sb.plan(self.ctx)
+        self.assertEqual(sum(h.get('format') == 'carousel' for h in planned['held_posts']), 4)
+
+    def test_six_x_posts_reuse_fourth_baseline_standalone(self):
+        batch, _ = self.treatment_batch()
+        path = self.ctx.out / '2026-11-23/batch.json'
+        baseline = json.loads(path.read_text())
+        extra = copy.deepcopy(self.draft(batch, 'x3'))
+        extra.update(id='x4', local_time='2026-12-12T10:21', idea_key='synthetic:fourth-standalone')
+        baseline['posts'].append({**extra, 'utc': sb.local_to_utc('2026-11-28T10:21')})
+        path.write_text(json.dumps(baseline))
+        current = sb.plan(self.ctx)
+        batch['plan_digest'] = current['plan_digest']
+        batch['drafts'].append(extra)
+        self.assertEqual(sum(d['platform'] == 'twitter' for d in batch['drafts']), 6)
+        self.assertEqual(sb.check(batch, current, self.ctx), [])
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+
+    def test_baseline_cli_check_retains_slots_for_existing_weekly_publisher(self):
+        import io
+        from contextlib import redirect_stdout
+        batch, _ = self.treatment_batch('2026-11-23')
+        original = self.drafts()
+        batch['drafts'] = original['drafts']
+        for draft in batch['drafts']:
+            draft['local_time'] = (datetime.fromisoformat(draft['local_time']) + timedelta(weeks=3)).isoformat(timespec='minutes')
+        path = Path(self.tmp.name) / 'checked.json'
+        path.write_text(json.dumps(batch))
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(sb.main(['check', str(path)], self.ctx), 0)
+        receipt = self.ctx.out / '2026-11-23/baseline-slots.jsonl'
+        self.assertTrue(receipt.is_file())
+        self.assertEqual(self.fake.created, 0)
+        self.ctx.now = datetime(2026, 12, 4, 6, tzinfo=sb.ZONE)
+        current = sb.plan(self.ctx)
+        self.assertEqual(current['slot_plan']['missing_baseline'], [])
+        self.assertEqual(current['slot_plan']['slots']['linkedin'][:2], ['2026-12-08T09:06', '2026-12-10T08:38'])
+
+    def test_baseline_weeks_have_no_override(self):
+        baseline = copy.deepcopy(CADENCE)
+        baseline.pop('overrides')
+        for week in ('2026-11-16', '2026-11-23', '2026-11-30', '2026-12-21'):
+            day = date.fromisoformat(week)
+            self.assertEqual(sb.effective_cadence(CADENCE, day), sb.effective_cadence(baseline, day))
+
+    def test_mix_formats_and_no_links(self):
+        batch, current = self.treatment_batch()
+        self.assertEqual(sb.check(batch, current, self.ctx), [])
+        self.draft(batch, 'li2')['format'] = 'text'
+        self.draft(batch, 'li1')['text'] += ' https://example.invalid'
+        self.draft(batch, 'ig2')['format'] = 'big_number'
+        rules = {f['rule'] for f in sb.check(batch, current, self.ctx)}
+        self.assertTrue({'platform_format_under', 'platform_links'} <= rules)
+
+    def test_mix_slot_reuse_and_added_slots(self):
+        batch, current = self.treatment_batch()
+        slots = current['slot_plan']
+        self.assertEqual(slots['baseline_week'], '2026-11-23')
+        self.assertEqual(slots['slots']['linkedin'], ['2026-12-08T09:06', '2026-12-10T08:38', '2026-12-09T15:16'])
+        self.assertEqual(slots['slots']['instagram'], ['2026-12-09T11:27', '2026-12-12T10:53', '2026-12-10T09:16'])
+        self.draft(batch, 'li1')['local_time'] = '2026-12-08T10:06'
+        self.assertIn('slot_moved', {f['rule'] for f in sb.check(batch, current, self.ctx)})
+
+    def test_check_reports_video_skip_and_refuses_reserved_slot_filler(self):
+        import io
+        from contextlib import redirect_stdout
+        batch, current = self.treatment_batch()
+        path = Path(self.tmp.name) / 'drafts.json'
+        path.write_text(json.dumps(batch))
+        output = io.StringIO()
+        with redirect_stdout(output):
+            code = sb.main(['check', str(path)], self.ctx)
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output.getvalue())['skipped_slots'], current['automatic_skips'])
+        self.draft(batch, 'ig2')['local_time'] = current['automatic_skips'][0]['local_time']
+        self.assertIn('skipped_slot_filler', {f['rule'] for f in sb.check(batch, current, self.ctx)})
+
+    def test_video_skip_is_automatic_and_persisted_without_filler(self):
+        batch, current = self.treatment_batch()
+        self.assertEqual(current['automatic_skips'][0]['lane'], 'instagram_video')
+        self.assertIn('video generation', current['automatic_skips'][0]['reason'])
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+        receipt = json.loads((self.ctx.out / '2026-12-07/batch.json').read_text())
+        self.assertIn(current['automatic_skips'][0], receipt['run_notes']['skipped_slots'])
+        self.assertEqual(sum(p['platform'] == 'instagram' for p in receipt['posts']), 2)
+        self.assertEqual(receipt['slot_plan'], current['slot_plan'])
+
+    def test_missing_baseline_slots_refuses_invented_times(self):
+        batch, _ = self.treatment_batch()
+        (self.ctx.out / '2026-11-23/batch.json').unlink()
+        current = sb.plan(self.ctx)
+        batch['plan_digest'] = current['plan_digest']
+        self.assertIn('baseline_slots_unavailable', {f['rule'] for f in sb.check(batch, current, self.ctx)})
+
+    def test_treatment_calendar_and_expiry_preserve_other_mix(self):
+        for week in ('2026-11-16', '2026-11-23', '2026-11-30', '2026-12-07', '2026-12-14', '2026-12-21'):
+            with self.subTest(week=week):
+                _, current = self.treatment_batch(week)
+                inside = '2026-12-07' <= week < '2026-12-21'
+                self.assertEqual((current['lanes']['one_liner']['min'], current['lanes']['one_liner']['max']),
+                                 (2, 2) if inside else (3, 7))
+                for lane in ('standalone', *sb.CARR_PLATFORMS):
+                    self.assertEqual(current['lanes'][lane]['max'], 3 if inside and lane in ('linkedin', 'instagram') else CADENCE['lanes'][lane]['max'])
+
+    def test_treatment_start_and_end_use_central_run_date(self):
+        for instant, week, maximum in (
+            ('2026-11-23T05:59:00+00:00', '2026-11-23', 7),
+            ('2026-11-23T06:00:00+00:00', '2026-11-30', 7),
+            ('2026-11-30T05:59:00+00:00', '2026-11-30', 7),
+            ('2026-11-30T06:00:00+00:00', '2026-12-07', 2),
+            ('2026-12-07T05:59:00+00:00', '2026-12-07', 2),
+            ('2026-12-07T06:00:00+00:00', '2026-12-14', 2),
+            ('2026-12-14T05:59:00+00:00', '2026-12-14', 2),
+            ('2026-12-14T06:00:00+00:00', '2026-12-21', 7)):
+            with self.subTest(instant=instant):
+                self.ctx.now = datetime.fromisoformat(instant)
+                current = sb.plan(self.ctx)
+                self.assertEqual(current['week_start'], week)
+                self.assertEqual(current['lanes']['one_liner']['max'], maximum)
+
+    def test_treatment_allows_missing_days_but_refuses_third_one_liner(self):
+        batch, current = self.treatment_batch()
+        self.assertEqual(sb.check(batch, current, self.ctx), [])
+
+    def test_treatment_refuses_third_one_liner(self):
+        batch, current = self.treatment_batch()
+        third = copy.deepcopy(self.draft(batch, 'o2'))
+        third.update(id='third', local_time='2026-12-12T16:22')
+        batch['drafts'].append(third)
+        self.assertIn('lane_over', {f['rule'] for f in sb.check(batch, current, self.ctx)})
+
+    def test_outside_treatment_still_requires_daily_coverage_and_baseline_minimum(self):
+        for week in ('2026-11-16', '2026-12-21'):
+            batch, current = self.treatment_batch(week)
+            rules = {f['rule'] for f in sb.check(batch, current, self.ctx)}
+            self.assertIn('x_every_day', rules)
+            self.assertIn('lane_under', rules)
+
+    def test_treatment_quality_skip_is_required_and_logged(self):
+        batch, current = self.treatment_batch()
+        batch['drafts'] = [d for d in batch['drafts'] if d['id'] != 'o2']
+        self.assertIn('lane_under', {f['rule'] for f in sb.check(batch, current, self.ctx)})
+        batch['run_notes']['skipped_slots'] = [{'lane': 'one_liner', 'reason': 'no cleared quality fuel'}]
+        self.assertEqual(sb.check(batch, current, self.ctx), [])
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+        logged = json.loads((self.ctx.out / '2026-12-07/batch.json').read_text())
+        self.assertEqual(logged['run_notes']['skipped_slots'], batch['run_notes']['skipped_slots'] + current['automatic_skips'])
+
+    def test_effective_daily_rule_invalidates_digest(self):
+        batch, current = self.treatment_batch()
+        config = copy.deepcopy(CADENCE)
+        config['overrides'][0]['x_every_day'] = True
+        path = Path(self.tmp.name) / 'cadence.json'
+        path.write_text(json.dumps(config))
+        self.ctx.cadence_path = path
+        newer = sb.plan(self.ctx)
+        self.assertNotEqual(current['plan_digest'], newer['plan_digest'])
+        self.assertIn('plan_stale', {f['rule'] for f in sb.check(batch, newer, self.ctx)})
+
+    def test_treatment_topup_counts_held_one_liner_and_rejects_stale_digest(self):
+        batch, empty = self.treatment_batch()
+        held = self.draft(batch, 'o1')
+        utc = sb.local_to_utc(held['local_time'])
+        self.fake.items.append(item('twitter', utc))
+        sb.append(self.ctx.out / batch['week_start'] / 'ledger.jsonl',
+                  {'event': 'posted', 'draft': 'earlier', 'platform': 'twitter', 'lane': 'one_liner', 'utc': utc,
+                   'idea_key': 'earlier-bank:earlier-angle', 'bank_angles': ['earlier'], 'media_sha256': []})
+        current = sb.plan(self.ctx)
+        self.assertEqual(current['lanes']['one_liner'], {'min': 2, 'max': 2, 'held': 1, 'open': 1})
+        self.assertNotEqual(empty['plan_digest'], current['plan_digest'])
+        self.assertIn('plan_stale', {f['rule'] for f in sb.check(batch, current, self.ctx)})
+        batch['drafts'].remove(held)
+        batch['plan_digest'] = current['plan_digest']
+        self.assertEqual(sb.check(batch, current, self.ctx), [])
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+        self.assertEqual(sb.plan(self.ctx)['lanes']['one_liner']['open'], 0)
+
+    def test_treatment_lock_releases_after_failed_run(self):
+        batch, _ = self.treatment_batch()
+        with patch.object(sb, 'check', side_effect=ValueError('synthetic failure')):
+            with self.assertRaisesRegex(ValueError, 'synthetic failure'):
+                sb.submit(batch, self.ctx)
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+
+    def test_concurrent_treatment_topups_cannot_each_add_two(self):
+        config = copy.deepcopy(CADENCE)
+        config['lanes']['one_liner'].update(min=2, max=2)
+        path = Path(self.tmp.name) / 'cadence.json'
+        path.write_text(json.dumps(config))
+        self.ctx.cadence_path = path
+        batch, _ = self.treatment_batch()
+        batch['drafts'] = [d for d in batch['drafts'] if d['lane'] == 'one_liner']
+        batch['run_notes']['skipped_slots'] = [{'lane': lane, 'reason': 'no cleared quality fuel'}
+                                              for lane in sb.WAIVABLE if lane != 'one_liner']
+        other = copy.deepcopy(batch)
+        for d in other['drafts']:
+            d['id'] += '-other'
+            d['local_time'] = (datetime.fromisoformat(d['local_time']) + timedelta(minutes=1)).isoformat(timespec='minutes')
+        entered, release = threading.Event(), threading.Event()
+        results, errors = [], []
+        real_check = sb.check
+
+        def paused_check(*args):
+            entered.set()
+            release.wait(3)
+            return real_check(*args)
+
+        def run(value):
+            try:
+                results.append(sb.submit(value, self.ctx))
+            except BaseException as exc:
+                errors.append(exc)
+
+        with patch.object(sb, 'check', side_effect=paused_check):
+            first = threading.Thread(target=run, args=(batch,))
+            second = threading.Thread(target=run, args=(other,))
+            first.start()
+            self.assertTrue(entered.wait(3))
+            second.start()
+            second.join(0.2)
+            release.set()
+            first.join(5)
+            second.join(5)
+        self.assertFalse(first.is_alive() or second.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(self.fake.created, 2, results)
+        self.assertEqual(sum(r['ok'] for r in results), 1, results)
+        current = sb.plan(self.ctx)
+        self.assertEqual(current['lanes']['one_liner']['open'], 0)
+        self.assertNotEqual(current['plan_digest'], batch['plan_digest'])
 
     # -- the valid batch passes -------------------------------------------------
     def test_nov16_two_items_across_four_platforms_is_rejected(self):
