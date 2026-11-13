@@ -78,7 +78,9 @@ class DeliveryTests(unittest.TestCase):
                     return (status, b'') if method == 'HEAD' else response
                 self.send = blocked
                 try:
-                    self.run_check()
+                    first = self.run_check()
+                    self.assertIsNone(first['stop_reason'])
+                    self.assertEqual(first['deferred'], [])
                     result = self.run_check()
                 finally:
                     self.send = original

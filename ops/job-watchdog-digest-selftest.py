@@ -133,6 +133,20 @@ class HookTests(unittest.TestCase):
             self.assertIn('out/social-batch/delivery.json', context)
             self.assertNotIn('see out/watchdog/findings.jsonl', context)
 
+    def test_digest_prefers_newer_social_failures_and_names_mixed_overflow_files(self):
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        rows = [{'key': f'social-delivery:2026-10-{day}/post', 'kind': 'job_degraded',
+                 'source': 'social-delivery', 'reason': f'old failure {day}'} for day in range(10, 16)]
+        rows.append({'key': 'social-delivery:2026-11-02/post', 'kind': 'job_degraded',
+                     'source': 'social-delivery', 'reason': 'new failure'})
+        rows.append({'key': 'other', 'kind': 'job_degraded', 'reason': 'other actionable finding'})
+        with patch.object(watchdog, 'active_findings', return_value=rows):
+            context = watchdog.digest(ROOT, config)
+        self.assertEqual(len(context.splitlines()), 5)
+        self.assertEqual(context.splitlines()[1], '- new failure')
+        self.assertIn('out/social-batch/delivery.json', context.splitlines()[-1])
+        self.assertIn(config['paths']['findings'], context.splitlines()[-1])
+
     def test_launchd_cadence_is_config_projection(self):
         config = json.loads((ROOT / "ops/config/job-watchdog.json").read_text())
         plist = plistlib.loads((ROOT / "ops/launchd/com.carr.job-watchdog.plist").read_bytes())
