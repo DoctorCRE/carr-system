@@ -20,6 +20,11 @@ import subprocess
 import sys
 import tempfile
 import threading
+from datetime import datetime, timezone
+
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib import pg_capacity
 
 
 def postgres_bin_dir(names=('initdb', 'pg_ctl', 'createdb', 'psql', 'postgres')):
@@ -73,7 +78,7 @@ _supervising = False
 
 def _diagnose_shared_memory_failure(output):
     output = str(output).lower()
-    if 'no space left on device' in output and any(
+    if any(error in output for error in ('no space left on device', 'cannot allocate memory')) and any(
             term in output for term in ('shared memory', 'shared-memory', 'shmget')):
         raise RuntimeError(
             'disposable PostgreSQL environment fault: System V shared-memory exhaustion; '
@@ -134,6 +139,7 @@ class DisposablePostgres:
             self.root = Path(tempfile.mkdtemp(prefix=prefix, dir=directory)).resolve()
         self._identity = self.root.stat().st_ino
         self._data = []
+        self._telemetry_pids = {}
         self._lock = threading.RLock()
         self._closed = False
         _fixtures.append(self)
@@ -182,7 +188,55 @@ class DisposablePostgres:
             result.check_returncode()
         return result
 
+    def _event(self, event, data=None, error=None):
+        sink = self.env.get('CARR_PG_TELEMETRY')
+        if not sink or self._supervisor:
+            return
+        try:
+            for cluster in self._data:
+                pid_file = cluster / 'postmaster.pid'
+                if pid_file.exists():
+                    self._telemetry_pids[str(cluster)] = int(pid_file.read_text().splitlines()[0])
+            snapshot = pg_capacity.preflight()
+            owned = [segment['identifier'] for segment in
+                     snapshot.get('observed', {}).get('segments', [])
+                     if segment['creator'] in self._telemetry_pids.values()]
+            snapshot.get('observed', {}).pop('segments', None)
+            record = {'timestamp': datetime.now(timezone.utc).isoformat(), 'event': event,
+                      'root': str(self.root), 'data': str(data) if data else None,
+                      'supervisor_pid': os.getpid(), 'postmasters': self._telemetry_pids,
+                      'job': self.env.get('CARR_PG_JOB_ID', 'unidentified'),
+                      'backends': ['mmap', 'posix'], 'owned_segments': owned,
+                      'capacity': snapshot}
+            if error:
+                record['error'] = str(error)[-8192:]
+            descriptor = os.open(sink, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            try:
+                os.write(descriptor, (json.dumps(record) + '\n').encode())
+            finally:
+                os.close(descriptor)
+        except (OSError, ValueError, IndexError) as failure:
+            print(f'PostgreSQL telemetry unavailable: {failure}', file=sys.stderr)
+
     def run(self, command, **kwargs):
+        args = [str(arg) for arg in command]
+        event = ('initdb' if Path(args[0]).name == 'initdb' else
+                 'start' if Path(args[0]).name == 'pg_ctl' and 'start' in args else None)
+        data = args[args.index('-D') + 1] if event and '-D' in args else None
+        if event:
+            self._event(event + '_begin', data)
+        try:
+            result = self._run(command, **kwargs)
+        except Exception as error:
+            if event:
+                self._event(event + '_failed', data, error)
+            raise
+        if event:
+            self._event(event + ('_end' if result.returncode == 0 else '_failed'), data,
+                        getattr(result, 'stderr', None) if result.returncode else None)
+        return result
+
+    def _run(self, command, **kwargs):
         global _main_launches, _pending_signal
         args = [str(arg) for arg in command]
         if Path(args[0]).name == 'initdb' and '-D' in args and not any(
@@ -238,6 +292,17 @@ class DisposablePostgres:
                         _on_signal(signum, None)
 
     def close(self, *, remove_root=True):
+        if self._closed:
+            return
+        self._event('stop_begin')
+        try:
+            self._close(remove_root=remove_root)
+        except Exception as error:
+            self._event('stop_failed', error=error)
+            raise
+        self._event('stop_end')
+
+    def _close(self, *, remove_root=True):
         # remove_root=False keeps evidence when the caller cannot prove it owned
         # every process; closing still deregisters it from the exit hook.
         with self._lock:

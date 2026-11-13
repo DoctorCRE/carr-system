@@ -203,3 +203,34 @@ test("canonical runner executes mixed suites exactly once and validates shard se
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("PostgreSQL capacity refusal stops before snapshot acquisition without retries", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "capacity-runner-"));
+  try {
+    await mkdir(path.join(directory, "test"));
+    for (const file of ["run-tests.ts", "suite-discovery.ts"]) {
+      await copyFile(new URL(`../${file}`, import.meta.url), path.join(directory, file));
+    }
+    await writeFile(path.join(directory, "package.json"), JSON.stringify({ type: "module" }));
+    await writeFile(path.join(directory, "suite-inventory.json"), JSON.stringify({ expected: 1 }));
+    await writeFile(
+      path.join(directory, "test", "capacity-postgres.test.ts"),
+      "throw new Error('suite must not start');",
+    );
+    const probe = path.join(directory, "probe");
+    await writeFile(
+      probe,
+      "#!/usr/bin/env node\nprocess.stdout.write('injected capacity unreadable'); process.exit(78);\n",
+      { mode: 0o700 },
+    );
+    const env: NodeJS.ProcessEnv = { ...process.env, CARR_CI_PYTHON: probe };
+    delete env.NODE_TEST_CONTEXT;
+    const result = spawnSync(process.execPath, ["run-tests.ts"], { cwd: directory, env, encoding: "utf8" });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /PostgreSQL capacity preflight refused: injected capacity unreadable/);
+    assert.doesNotMatch(result.stderr, /Cannot find module|suite must not start/);
+    assert.equal(result.stderr.match(/injected capacity unreadable/g)?.length, 1);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
