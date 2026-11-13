@@ -329,10 +329,47 @@ def report_social_batch(root, config, *, week_start, queue_count=None,
             "queue_complete": queue_complete, "failure_class": failure_class}
 
 
+def social_delivery_findings(root, now=None):
+    folder = root / 'out/social-batch'
+    if not folder.exists():
+        return []
+    now = time.time() if now is None else now
+    found = []
+
+    def finding(key, reason):
+        return {'key': 'social-delivery:' + key, 'kind': 'job_degraded',
+                'source': 'social-delivery', 'subject': 'social-delivery-check', 'reason': reason}
+
+    try:
+        receipt = json.loads((folder / 'delivery.json').read_text())
+        if receipt['schema'] != 'carr-social-delivery/v1':
+            raise ValueError('unsupported receipt')
+        if now - receipt['observed_at'] > receipt['interval_seconds'] + 3600:
+            found.append(finding('freshness', 'Social delivery coverage unknown: observer run is overdue.'))
+        if receipt['coverage'] != 'observed':
+            found.append(finding('coverage', 'Social delivery coverage unknown: batch evidence is incomplete.'))
+        if receipt['deferred'] or receipt['stop_reason']:
+            found.append(finding('deferred', 'Social delivery checks deferred: ' +
+                                 (receipt['stop_reason'] or 'request budget') + '.'))
+        for key, post in receipt['posts'].items():
+            if post.get('visibility') == 'cannot_verify':
+                found.append(finding(key + ':visibility',
+                                     f"Social delivery cannot verify public link: {post['platform']} "
+                                     f"{post['topic']} ({post['submission_id']}): {post['publicUrl']}"))
+            if post['status'] in ('failed', 'unresolved'):
+                found.append(finding(key, f"Social delivery {post['status']}: {post['platform']} "
+                                     f"{post['topic']} ({post['submission_id'] or 'missing submission ID'}): "
+                                     f"{post['errorMessage'] or 'publisher supplied no error detail'}"))
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return [finding('coverage', 'Social delivery coverage unknown: observer receipt missing or malformed.')]
+    return found
+
+
 def active_findings(root, config):
-    return sorted((f for f in read_latest(path_at(root, config["paths"]["findings"])).values()
+    persisted = [f for f in read_latest(path_at(root, config["paths"]["findings"])).values()
                    if f.get("kind") in KINDS and (f["kind"] != "job_failed" or "exit_code" in f)
-                   and not f.get("cleared_at")), key=lambda f: f["key"])
+                   and not f.get("cleared_at")]
+    return sorted(persisted + social_delivery_findings(root), key=lambda f: f['key'])
 
 
 def deliver_findings(root, config, now):
@@ -356,7 +393,8 @@ def deliver_findings(root, config, now):
             signature = hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
             prior = previous.get(finding["key"], {})
             if (prior.get("signature") == signature
-                    and now - epoch(prior["delivered_at"]) < config["thresholds"]["reminder_seconds"]):
+                    and (finding.get('source') == 'social-delivery'
+                         or now - epoch(prior["delivered_at"]) < config["thresholds"]["reminder_seconds"])):
                 current[finding["key"]] = prior
             else:
                 current[finding["key"]] = {"key": finding["key"], "owner": "orchestrator", "signature": signature,
@@ -386,11 +424,28 @@ def digest(root, config):
     if not active:
         return ""
     lines = [f"Orchestrator watchdog: {len(active)} open finding(s)."]
-    limit = 4 if len(active) <= 4 else 3
-    for finding in active[:limit]:
-        lines.append("- " + " ".join(finding["reason"].split())[:300])
-    if len(active) > limit:
-        lines.append(f"- {len(active) - limit} more; see {config['paths']['findings']}")
+    visibility = [f for f in active if f.get('source') == 'social-delivery'
+                  and f['key'].endswith(':visibility')]
+    visibility_keys = {f['key'] for f in visibility}
+    actionable = [f for f in active if f['key'] not in visibility_keys]
+    actionable.sort(key=lambda f: f.get('first_seen') or f['key'], reverse=True)
+    actionable.sort(key=lambda f: 0 if f['key'] == 'social-delivery:freshness' else
+                    1 if f.get('kind') == 'job_failed' or
+                    (f.get('source') == 'social-delivery' and '/' in f['key']) else 2)
+    entries = [" ".join(f['reason'].split())[:300] for f in actionable]
+    if visibility:
+        entries.append(f"{len(visibility)} public links cannot be verified; see out/social-batch/delivery.json")
+    limit = 4 if len(entries) <= 4 else 3
+    lines.extend('- ' + entry for entry in entries[:limit])
+    if len(entries) > limit:
+        hidden = actionable[limit:]
+        paths = []
+        if any(f.get('source') != 'social-delivery' for f in hidden):
+            paths.append(config['paths']['findings'])
+        if visibility or any(f.get('source') == 'social-delivery' for f in hidden):
+            paths.append('out/social-batch/delivery.json')
+        count = f"; {len(visibility)} public links cannot be verified" if visibility else ''
+        lines.append(f"- {len(actionable) - limit} more{count}; see {', '.join(paths)}")
     return "\n".join(lines)
 
 

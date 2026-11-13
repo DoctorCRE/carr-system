@@ -103,6 +103,36 @@ class HookTests(unittest.TestCase):
             self.assertIn("7 more", context)
             self.assertNotIn("branch", context)
 
+    def test_social_visibility_cannot_crowd_failures_or_overdue_observer(self):
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = root / 'out/social-batch'
+            folder.mkdir(parents=True)
+            posts = {f'2026-10-26/{i}': {'status': 'published', 'visibility': 'cannot_verify',
+                     'platform': 'linkedin', 'topic': f'old topic {i}', 'submission_id': str(i),
+                     'publicUrl': 'https://www.linkedin.com/blocked'} for i in range(20)}
+            posts['2026-11-02/failure'] = {'status': 'failed', 'platform': 'linkedin', 'topic': 'new failure',
+                                    'submission_id': 'new', 'errorMessage': 'Account expired'}
+            receipt = {'schema': 'carr-social-delivery/v1', 'observed_at': 1, 'interval_seconds': 86400,
+                       'coverage': 'observed', 'deferred': [], 'stop_reason': None, 'posts': posts}
+            (folder / 'delivery.json').write_text(json.dumps(receipt))
+            context = watchdog.digest(root, config)
+            self.assertLessEqual(len(context.splitlines()), 5)
+            self.assertIn('Account expired', context)
+            self.assertIn('observer run is overdue', context)
+            self.assertIn('20 public links cannot be verified', context)
+            self.assertNotIn('old topic', context)
+            receipt['coverage'] = 'unknown'
+            receipt['stop_reason'] = 'authentication'
+            (folder / 'delivery.json').write_text(json.dumps(receipt))
+            context = watchdog.digest(root, config)
+            self.assertLessEqual(len(context.splitlines()), 5)
+            self.assertIn('observer run is overdue', context)
+            self.assertIn('Account expired', context)
+            self.assertIn('out/social-batch/delivery.json', context)
+            self.assertNotIn('see out/watchdog/findings.jsonl', context)
+
     def test_launchd_cadence_is_config_projection(self):
         config = json.loads((ROOT / "ops/config/job-watchdog.json").read_text())
         plist = plistlib.loads((ROOT / "ops/launchd/com.carr.job-watchdog.plist").read_bytes())
