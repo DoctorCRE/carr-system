@@ -53,11 +53,19 @@ class ReaderRoleTests(unittest.TestCase):
     def test_role_spec(self):
         data = role.load_spec()
         self.assertEqual(data['role'], 'engine_business_reader')
-        self.assertEqual(len(data['tables']), 72)
+        self.assertEqual(len(data['tables']), 73)
         self.assertIn('activity', data['tables'])
         self.assertIn('v_deal_room_current_lease', data['views'])
         self.assertEqual(data['settings']['timezone'], 'UTC')
-        self.assertEqual(len(set(data['tables'] + data['views'])), 113)
+        self.assertEqual(len(set(data['tables'] + data['views'])), 117)
+
+    def test_page_frame_grants_are_whole_relations(self):
+        data = role.load_spec()
+        statements = role.grant_statements(data)
+        self.assertIn('board_snapshot', data['tables'])
+        for name in ['board_snapshot', 'v_export_clients', 'v_export_deals', 'v_today_triage']:
+            self.assertIn(f'GRANT SELECT ON TABLE "public"."{name}" TO "engine_business_reader"', statements)
+        self.assertNotIn('tool_call', data['tables'] + data['views'])
 
     def test_spec_rejects_role_or_identifier_expansion(self):
         data = role.load_spec()
@@ -69,7 +77,7 @@ class ReaderRoleTests(unittest.TestCase):
         with self.assertRaises(role.Refusal):
             role.validate_spec(data)
 
-    def test_grants_are_whole_table_select_only(self):
+    def test_grants_preserve_existing_select_and_execute_contract(self):
         statements = role.grant_statements(role.load_spec())
         text = '\n'.join(statements)
         self.assertIn('GRANT SELECT ON TABLE "public"."activity"', text)
@@ -215,6 +223,8 @@ class ReaderRolePostgresTests(unittest.TestCase):
             self.assertTrue(first['proof']['idle_timeout_30s'])
             for key in ['ops_read_refused', 'insert_refused', 'update_refused', 'delete_refused']:
                 self.assertTrue(first['proof'][key], key)
+            for name in ['v_export_clients', 'v_export_deals', 'v_today_triage']:
+                self.assertTrue(first['proof'][name]['read'], name)
             self.assertTrue(first['proof']['function_grants_match'])
             self.assertTrue(first['proof']['functions_executable'])
             self.assertTrue(first['proof']['no_schema_create'])
@@ -242,10 +252,11 @@ class ReaderRolePostgresTests(unittest.TestCase):
             generated_password = unquote(urlsplit(secret).password)
             self.assertNotIn(generated_password, output)
             self.assertNotIn(secret, output)
-            table_probe = data | {'views': data['views'] + ['practice_origination_event', 'practice_origination_feed']}
+            table_probe = data | {'views': data['views'] + ['practice_origination_event', 'practice_origination_feed', 'board_snapshot']}
             provision_reads = role.proof(secret, table_probe)
             self.assertTrue(provision_reads['practice_origination_event']['read'])
             self.assertTrue(provision_reads['practice_origination_feed']['read'])
+            self.assertTrue(provision_reads['board_snapshot']['read'])
             with role.connect(owner) as conn:
                 conn.execute('GRANT extra_bundle TO engine_business_reader')
                 conn.execute('GRANT EXECUTE ON FUNCTION public.extra_fn() TO engine_business_reader')
@@ -254,6 +265,8 @@ class ReaderRolePostgresTests(unittest.TestCase):
                 conn.execute('GRANT USAGE ON SCHEMA ops TO engine_business_reader')
                 conn.execute('ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO engine_business_reader')
             second = role.provision(owner, data, 'engine-test', False, root)
+            for name in ['v_export_clients', 'v_export_deals', 'v_today_triage']:
+                self.assertTrue(second['proof'][name]['read'], name)
             self.assertTrue(second['proof']['function_grants_match'])
             self.assertTrue(second['proof']['v_open_deal_room_board']['read'])
             self.assertTrue(second['proof']['v_deal_room_presence']['read'])

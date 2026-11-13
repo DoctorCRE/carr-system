@@ -10,6 +10,7 @@
     "availability",
     "building",
     "building_ownership",
+    "board_snapshot",
     "cadence_rule",
     "client",
     "client_status",
@@ -116,7 +117,10 @@
     "v_record_flag_subject",
     "v_lead_workspace_correspondence",
     "v_lead_workspace_stage_history",
-    "v_subject_timeline"
+    "v_subject_timeline",
+    "v_export_clients",
+    "v_export_deals",
+    "v_today_triage"
   ],
   "settings": {
     "default_transaction_read_only": "on",
