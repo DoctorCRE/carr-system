@@ -59,7 +59,7 @@ FORMATS = SINGLE_CARDS | {'text', 'text_question', 'carousel', 'chart', 'animate
                           'diagram', 'annotated_screenshot'}
 KINDS = {None, 'take', 'series', 'story_time', 'quote_tweet'}
 ROUTES = {'webfetch', 'curl', 'grok_only', 'bank'}
-WAIVABLE = {'standalone', 'one_liner', *CARR_PLATFORMS, 'x_visual', 'x_series', 'story_time', 'x_every_day'}
+WAIVABLE = {'standalone', 'one_liner', *CARR_PLATFORMS, 'x_visual', 'x_series', 'story_time', 'x_every_day', 'instagram_video'}
 TOP_KEYS = {'schema', 'week_start', 'plan_digest', 'drafts', 'run_notes'}
 DRAFT_KEYS = {'id', 'platform', 'lane', 'kind', 'format', 'local_time', 'text', 'media', 'visual', 'sources',
               'lint_review_clearances', 'bank_angles', 'alt_text', 'idea_key'}
@@ -136,15 +136,42 @@ def target_week(now: datetime) -> date:
 def effective_cadence(cadence: dict, week: date) -> dict:
     """Resolve the dated treatment against the batch's Central-time Monday key."""
     effective = copy.deepcopy(cadence)
+    overrides = effective.pop('overrides', [])
     effective['x_every_day'] = True
     effective['active_override'] = None
-    for override in cadence.get('overrides', []):
+    for override in overrides:
         start = date.fromisoformat(override['start_week'])
         if start <= week < start + timedelta(weeks=override['weeks']):
             effective['active_override'] = override
-            effective['lanes']['one_liner'].update(override['one_liner'])
+            for lane, counts in override['lanes'].items():
+                effective['lanes'][lane].update(counts)
+            effective['platform_mix'] = override['platform_mix']
             effective['x_every_day'] = override['x_every_day']
     return effective
+
+
+def treatment_slots(ctx: Context, cadence: dict, week: date, logged: list[dict]) -> dict | None:
+    override = cadence['active_override']
+    if override is None:
+        return None
+    baseline = date.fromisoformat(override['baseline_start_week']) + (week - date.fromisoformat(override['start_week']))
+    path = ctx.out / baseline.isoformat() / 'batch.json'
+    posts = json.loads(path.read_text()).get('posts', []) if path.is_file() else []
+    posts += [r for r in logged if r['week'] == baseline.isoformat()]
+    slots = {}
+    for lane, rule in cadence['lanes'].items():
+        prior = sorted({parse_utc(p['utc']).astimezone(ZONE).replace(tzinfo=None)
+                        for p in posts if (p['lane'] if p['platform'] == 'twitter' else p['platform']) == lane})
+        chosen = [(w + (week - baseline)).isoformat(timespec='minutes') for w in prior[:rule['max']]]
+        for extra in override['extra_slots'].get(lane, []):
+            day, clock = extra.split('T')
+            candidate = f"{week + timedelta(days=int(day))}T{clock}"
+            if len(chosen) < rule['max'] and candidate not in chosen:
+                chosen.append(candidate)
+        slots[lane] = chosen
+    return {'baseline_week': baseline.isoformat(), 'slots': slots,
+            'missing_baseline': [lane for lane in cadence['lanes'] if not any(
+                (p['lane'] if p['platform'] == 'twitter' else p['platform']) == lane for p in posts)]}
 
 
 def bounds(week: date) -> tuple[datetime, datetime]:
@@ -339,12 +366,19 @@ def plan(ctx: Context, own: frozenset[tuple[str, str]] = frozenset()) -> dict:
     if not api.listing(*bounds(week - timedelta(days=7))):
         warnings.append('control_week_empty: the previous week lists no posts; planning from the spec cadence')
     unknown_x = sum(1 for h in held.values() if h['lane'] == 'unknown')
+    slot_plan = treatment_slots(ctx, cadence, week, logged)
+    video_required = cadence.get('platform_mix', {}).get('instagram', {}).get('formats', {}).get('video', {}).get('min', 0)
+    video_held = sum(h['platform'] == 'instagram' and h.get('format') == 'video' for h in held.values())
+    automatic_skips = ([{'lane': 'instagram_video',
+                         'reason': 'short video generation is unavailable in the static-card batch; video slot left empty',
+                         'local_time': slot_plan['slots']['instagram'][-1] if slot_plan['slots']['instagram'] else None}]
+                       if video_required > video_held else [])
     lanes = {}
     for lane, rule in cadence['lanes'].items():
         count = sum(1 for h in held.values() if h['lane'] == lane)
         blind = unknown_x if rule['platform'] == 'twitter' else 0
         lanes[lane] = {'min': rule['min'], 'max': rule['max'], 'held': count,
-                       'open': max(0, rule['max'] - count - blind)}
+                       'open': max(0, rule['max'] - count - blind - sum(s['lane'].startswith(lane + '_') for s in automatic_skips))}
     x_max = sum(r['max'] for r in cadence['lanes'].values() if r['platform'] == 'twitter')
     x_held = sum(1 for h in held.values() if h['platform'] == 'twitter')
     x_total = {'max': x_max, 'held': x_held, 'unknown_lane': unknown_x, 'open': max(0, x_max - x_held)}
@@ -358,6 +392,7 @@ def plan(ctx: Context, own: frozenset[tuple[str, str]] = frozenset()) -> dict:
         'days': [{'date': day.isoformat(), 'utc_offset': datetime.combine(day, time(12), ZONE).isoformat()[-6:]}
                  for day in (week + timedelta(days=i) for i in range(7))],
         'lanes': lanes, 'x_total': x_total, 'effective_cadence': cadence,
+        'slot_plan': slot_plan, 'automatic_skips': automatic_skips,
         'held_posts': sorted(held.values(), key=lambda h: h['utc']),
         'recent_x_visual_formats': [r['format'] for r in earlier if r['platform'] == 'twitter' and r.get('visual')]
         [:cadence['x_visual']['no_repeat_last']],
@@ -367,14 +402,14 @@ def plan(ctx: Context, own: frozenset[tuple[str, str]] = frozenset()) -> dict:
     }
     result['plan_digest'] = hashlib.sha256(json.dumps(
         {k: result[k] for k in ('week_start', 'lanes', 'x_total', 'held_posts', 'recent_x_visual_formats',
-                                'animated_last_week')} | {'effective_cadence': cadence}, sort_keys=True).encode()).hexdigest()
+                                'animated_last_week', 'slot_plan', 'automatic_skips')} | {'effective_cadence': cadence}, sort_keys=True).encode()).hexdigest()
     if covered:
         _artifact(ctx, {'summary': f'SOCIAL_BATCH_WEEK_COVERED week={week}', 'week_start': week.isoformat()})
     return result
 
 
 def _content_evidence(row: dict) -> dict:
-    return {key: row[key] for key in ('idea_key', 'media_sha256', 'bank_angles', 'sources') if key in row}
+    return {key: row[key] for key in ('idea_key', 'media_sha256', 'bank_angles', 'sources', 'format', 'text') if key in row}
 
 
 def _complete_evidence(row: dict) -> bool:
@@ -561,8 +596,39 @@ def check(drafts: dict, current: dict, ctx: Context) -> list[dict]:
         content.append({**draft, 'media_sha256': digests})
         valid.append((draft, when))
     _content_rules(content, find)
+    _mix_rules(content, current, cadence, skipped, find)
     _batch_rules(valid, current, cadence, skipped, find)
     return findings
+
+
+def _mix_rules(content, current, cadence, skipped, find):
+    slot_plan = current['slot_plan']
+    if slot_plan is None:
+        return
+    if slot_plan['missing_baseline']:
+        find(None, 'baseline_slots_unavailable', 'retain the paired baseline batch receipt before treatment: ' + ', '.join(slot_plan['missing_baseline']))
+    occupied = set()
+    for post in content:
+        lane = post['lane'] if post['platform'] == 'twitter' else post['platform']
+        when = post.get('local_time') or parse_utc(post['utc']).astimezone(ZONE).replace(tzinfo=None).isoformat(timespec='minutes')
+        key = (post['platform'], when)
+        if post.get('local_time') and (when not in slot_plan['slots'].get(lane, []) or key in occupied):
+            find(post.get('id'), 'slot_moved', f'{lane} must reuse an unoccupied planned weekday and time')
+        if post.get('local_time') and any(s.get('local_time') == when and s['lane'].startswith(post['platform'] + '_') for s in current['automatic_skips']):
+            find(post.get('id'), 'skipped_slot_filler', 'leave the unavailable format slot empty')
+        occupied.add(key)
+    for platform, policy in cadence['platform_mix'].items():
+        mine = [p for p in content if p['platform'] == platform]
+        for post in mine:
+            if policy.get('no_links') and re.search(r'(?:https?://|www\.|\b[a-z0-9-]+\.(?:com|org|net|io|co|gov|edu)\b)', post.get('text', ''), re.I):
+                find(post.get('id'), 'platform_links', f'{platform} treatment posts have no links')
+        for form, rule in policy['formats'].items():
+            n = sum(p.get('format') == form for p in mine)
+            if n > rule['max']:
+                find(None, 'platform_format_over', f'{platform} {form}: maximum {rule["max"]}')
+            automatic = any(s['lane'] == f'{platform}_{form}' for s in current['automatic_skips'])
+            if n < rule['min'] and platform not in skipped and not automatic:
+                find(None, 'platform_format_under', f'{platform} requires {rule["min"]} {form} posts or a quality skip reason')
 
 
 def _batch_rules(valid, current, cadence, skipped, find) -> None:
@@ -573,7 +639,7 @@ def _batch_rules(valid, current, cadence, skipped, find) -> None:
         if counts[lane] > rule['open']:
             find(None, 'lane_over', f"{lane}: {counts[lane]} drafts for {rule['open']} open slots")
         blind = current['x_total']['unknown_lane'] if cadence['lanes'][lane]['platform'] == 'twitter' else 0
-        if counts[lane] + rule['held'] + blind < rule['min'] and lane not in skipped:
+        if counts[lane] + rule['held'] + blind < rule['min'] - sum(1 for s in current['automatic_skips'] if s['lane'].startswith(lane + '_')) and lane not in skipped:
             find(None, 'lane_under', f"{lane}: below the minimum of {rule['min']}; add a skipped_slots reason")
     if len(x) > current['x_total']['open']:
         find(None, 'x_total_over', f"{len(x)} X drafts for {current['x_total']['open']} open X slots")
@@ -604,9 +670,9 @@ def _batch_rules(valid, current, cadence, skipped, find) -> None:
         clock.setdefault(w.strftime('%H:%M'), d['id'])
     carr = [d for d, _ in valid if d['platform'] in CARR_PLATFORMS]
     formats = {d['format'] for d in carr}
-    if len(formats) < min(cadence['carr_formats']['min_distinct'], len(carr)):
+    if not cadence.get('platform_mix') and len(formats) < min(cadence['carr_formats']['min_distinct'], len(carr)):
         find(None, 'carr_formats', f"at least {cadence['carr_formats']['min_distinct']} distinct CARR formats")
-    if len(carr) >= cadence['carr_formats']['min_distinct'] and 'carousel' not in formats:
+    if not cadence.get('platform_mix') and len(carr) >= cadence['carr_formats']['min_distinct'] and 'carousel' not in formats:
         find(None, 'carr_carousel', 'a carousel on at least one CARR platform')
     for platform in CARR_PLATFORMS:
         mine = [d['format'] for d in carr if d['platform'] == platform]
@@ -648,6 +714,10 @@ def _submit(drafts: dict, ctx: Context) -> dict:
     findings = check(drafts, current, ctx)
     if findings:
         return {'ok': False, 'status': 'refused', 'findings': findings}
+    drafts = copy.deepcopy(drafts)
+    for skip in current['automatic_skips']:
+        if skip not in drafts['run_notes'].setdefault('skipped_slots', []):
+            drafts['run_notes']['skipped_slots'].append(skip)
     accounts, api = ctx.accounts, Blotato(ctx.transport)
     folder = ctx.out / current['week_start']
     ledger = folder / 'ledger.jsonl'
@@ -661,7 +731,7 @@ def _submit(drafts: dict, ctx: Context) -> dict:
             continue
         utc = local_to_utc(draft['local_time'])
         base = {'draft': draft['id'], 'platform': draft['platform'], 'lane': draft['lane'], 'kind': draft.get('kind'),
-                'format': draft['format'], 'visual': bool(draft.get('visual')), 'utc': utc,
+                'format': draft['format'], 'text': draft['text'], 'visual': bool(draft.get('visual')), 'utc': utc,
                 'idea_key': draft['idea_key'], 'bank_angles': draft['bank_angles'], 'sources': draft.get('sources', []),
                 'media_sha256': [hashlib.sha256(Path(m['path']).read_bytes()).hexdigest() for m in draft.get('media') or []]}
         if draft['id'] in intents:
@@ -722,7 +792,7 @@ def _finish(drafts, current, ctx, api, ledger, posted, media_urls, window) -> di
     (folder / 'batch.json').write_text(json.dumps({
         'schema': 'carr-social-batch-log/v1', 'week_start': current['week_start'], 'summary': summary,
         'posts': posts, 'run_notes': drafts['run_notes'], 'plan_warnings': current['warnings'],
-        'effective_cadence': current['effective_cadence']},
+        'effective_cadence': current['effective_cadence'], 'slot_plan': current['slot_plan']},
         indent=1, sort_keys=True) + '\n')
     if verified != len(posts):
         return {'ok': False, 'status': 'unverified', 'summary': summary,
@@ -906,8 +976,9 @@ def main(argv=None, ctx: Context | None = None) -> int:
             return _print(plan(ctx))
         drafts = json.loads(args.drafts.read_text())
         if args.command == 'check':
-            findings = check(drafts, plan(ctx, own_keys(ctx, drafts)), ctx)
-            return _print({'ok': not findings, 'findings': findings}, 0 if not findings else 1)
+            current = plan(ctx, own_keys(ctx, drafts))
+            findings = check(drafts, current, ctx)
+            return _print({'ok': not findings, 'findings': findings, 'skipped_slots': current['automatic_skips']}, 0 if not findings else 1)
         result = submit(drafts, ctx)
         return _print(result, 0 if result['ok'] else 1)
     except Stop as stop:
