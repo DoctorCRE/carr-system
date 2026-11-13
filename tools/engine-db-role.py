@@ -3,7 +3,9 @@
 
 Use --environment production, optionally with --branch for a named Neon branch.
 The reader CLI keeps its existing private credential-file protocol.
-Writer callers use load_spec("writer") and publish_credential with in-memory custody.
+Writer --writer runs the reviewed procedure with in-memory credential custody.
+Writer --writer --recover disables an orphan after inspecting Hyperdrive.
+See docs/engine-role-procedure.md before any authorized production execution.
 Reader --rotate publishes to Hyperdrive without writing a credential file.
 The --rotate flag is the only way to reset an existing login's password.
 """
@@ -295,38 +297,112 @@ def set_password(conn, role_name, password):
         raise Refusal('password statement failed; transaction must roll back') from None
 
 
-def publish_credential(owner, data, publish, *, rotate=False):
-    """Commit, authenticate, publish once; invalidate on failed or ambiguous publication.
+def invalidate_credential(conn, role_name):
+    if role_name not in (ROLE, 'engine_business_writer'):
+        raise Refusal('invalidation target exceeds the engine role contract')
+    conn.execute(sql.SQL('ALTER ROLE {} NOLOGIN PASSWORD NULL').format(sql.Identifier(role_name)))
 
-    publish accepts an in-memory password and returns no secret-bearing metadata.
-    Its caller must check the Hyperdrive name/target before invoking this function.
-    Writer creation refuses an existing role. Reader rotation requires an existing role.
-    """
-    password = secrets.token_urlsafe(48)
+
+def clear_password_statements(owner, role_name):
+    """Remove committed password utility text from the cluster-wide statistics."""
+    from psycopg.conninfo import make_conninfo
+    with connect(make_conninfo(owner, dbname='postgres')) as conn:
+        installed = conn.execute("SELECT to_regclass('pg_stat_statements')").fetchone()[0]
+        if installed is None:
+            if 'pg_stat_statements' in conn.execute('SHOW shared_preload_libraries').fetchone()[0]:
+                raise Refusal('password statistics are enabled but the reset interface is unavailable')
+            return
+        schema = conn.execute("""SELECT n.nspname FROM pg_extension e
+            JOIN pg_namespace n ON n.oid=e.extnamespace WHERE e.extname='pg_stat_statements'""").fetchone()
+        if not schema:
+            raise Refusal('password statistics extension cannot be located')
+        view = sql.Identifier(schema[0], 'pg_stat_statements')
+        # Parameters select only statement IDs. Never fetch or print the utility text.
+        prefixes = [sql.SQL('ALTER ROLE {} PASSWORD ').format(sql.Identifier(role_name)).as_string(),
+                    'ALTER ROLE ' + role_name + ' PASSWORD ']
+        predicate = sql.SQL('(left(query,length(%s))=%s OR left(query,length(%s))=%s)')
+        params = (prefixes[0], prefixes[0], prefixes[1], prefixes[1])
+        rows = conn.execute(sql.SQL('SELECT userid,dbid,queryid FROM {} WHERE ').format(view)
+                            + predicate, params).fetchall()
+        for userid, dbid, queryid in rows:
+            conn.execute(sql.SQL('SELECT {}(%s::oid,%s::oid,%s::bigint)').format(
+                sql.Identifier(schema[0], 'pg_stat_statements_reset')), (userid, dbid, queryid))
+        if conn.execute(sql.SQL('SELECT EXISTS(SELECT FROM {} WHERE ').format(view)
+                        + predicate + sql.SQL(')'), params).fetchone()[0]:
+            raise Refusal('password statistics entry remains after reset')
+
+
+def credential_lock(conn, role_name):
+    if '-pooler.' in conn.info.host:
+        raise Refusal('credential rotation requires a direct session, never a pooler')
+    # Session ownership survives the password commit and ends when the connection closes.
+    if not conn.execute('SELECT pg_try_advisory_lock(hashtext(%s))', (role_name,)).fetchone()[0]:
+        raise Refusal('another credential rotation is in progress')
+    conn.commit()
+
+
+def recover_credential(owner, data, inspect_hyperdrive):
+    """An interrupted publish must be inspected under the same lock as rotation."""
     try:
         with connect(owner) as conn:
-            conn.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', (data['role'],))
+            credential_lock(conn, data['role'])
+            config_id = inspect_hyperdrive()
+            exists = conn.execute('SELECT EXISTS(SELECT FROM pg_roles WHERE rolname=%s)',
+                                  (data['role'],)).fetchone()[0]
+            if config_id:
+                if not exists:
+                    raise Refusal('Hyperdrive exists without its role; inspect before recovery')
+                return {'hyperdrive_exists': True, 'invalidated': False}
+            if exists:
+                invalidate_credential(conn, data['role'])
+                conn.commit()
+                clear_password_statements(owner, data['role'])
+            return {'hyperdrive_exists': False, 'invalidated': bool(exists)}
+    except Refusal:
+        raise
+    except BaseException:
+        raise Refusal('credential recovery failed; inspect metadata before retry') from None
+
+
+def publish_credential(owner, data, publish, *, rotate=False, connection=None):
+    """Hold the role lock through commit, statistics cleanup, login and publication."""
+    from contextlib import nullcontext
+    try:
+        with (nullcontext(connection) if connection is not None else connect(owner)) as conn:
+            credential_lock(conn, data['role'])
             exists = conn.execute('SELECT EXISTS(SELECT FROM pg_roles WHERE rolname=%s)',
                                   (data['role'],)).fetchone()[0]
             if exists != rotate:
                 raise Refusal('creation requires an absent role; rotation requires an existing role')
-            created = reconcile(conn, data, password)
-    except Exception:
-        raise Refusal('credential reconciliation or commit failed') from None
-    try:
-        uri = credentials.build_role_uri(owner, data['role'], password)
-        if not authenticated(uri, data['role']):
-            raise Refusal('post-commit login failed')
-        publish(password)
+            password = secrets.token_urlsafe(48)
+            try:
+                created = reconcile(conn, data, password)
+                conn.commit()
+            except BaseException:
+                raise Refusal('credential reconciliation or commit failed') from None
+            try:
+                clear_password_statements(owner, data['role'])
+                uri = credentials.build_role_uri(owner, data['role'], password)
+                if not authenticated(uri, data['role']):
+                    raise Refusal('post-commit login failed')
+                publish(password)
+            except BaseException:
+                try:
+                    conn.rollback()
+                    invalidate_credential(conn, data['role'])
+                    conn.commit()
+                except BaseException:
+                    raise Refusal('credential publication failed; INVALIDATION FAILED, recovery required') from None
+                try:
+                    clear_password_statements(owner, data['role'])
+                except BaseException:
+                    raise Refusal('credential invalidated; password statistics cleanup failed, recovery required') from None
+                raise Refusal('credential publication failed; credential invalidated; inspect Hyperdrive before retry') from None
+            return {'created': created is True, 'password_changed': True}
+    except Refusal:
+        raise
     except BaseException:
-        try:
-            with connect(owner) as conn:
-                conn.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', (data['role'],))
-                set_password(conn, data['role'], secrets.token_urlsafe(48))
-        except BaseException:
-            raise Refusal('credential publication failed; INVALIDATION FAILED, recovery required') from None
-        raise Refusal('credential publication failed; credential invalidated; inspect Hyperdrive before retry') from None
-    return {'created': created is True, 'password_changed': True}
+        raise Refusal('credential operation failed; inspect recovery status') from None
 
 
 def function_grants_match(conn, data):
@@ -459,6 +535,9 @@ def hyperdrive_publisher(owner, data, account, config_id=None):
                     or metadata['origin']['user'] != data['role']):
                 raise Refusal('Hyperdrive target differs from requested role')
             name = metadata['name']
+            if not isinstance(metadata.get('caching'), dict) or not isinstance(
+                    metadata.get('origin_connection_limit'), int):
+                raise Refusal('Hyperdrive settings unavailable; refusing replacement')
         elif response.get('result_info', {}).get('total_pages', 1) > 1 or any(
                 item['name'] == name for item in metadata):
             raise Refusal('Hyperdrive name exists or absence is unproven')
@@ -468,7 +547,9 @@ def hyperdrive_publisher(owner, data, account, config_id=None):
     def publish(password):
         payload = {'name': name, 'origin': {'scheme': 'postgres', 'host': parsed.hostname,
             'port': parsed.port or 5432, 'database': 'neondb', 'user': data['role'],
-            'password': password}, 'caching': {'disabled': True}, 'origin_connection_limit': 10}
+            'password': password},
+            'caching': metadata['caching'] if config_id else {'disabled': True},
+            'origin_connection_limit': metadata['origin_connection_limit'] if config_id else 10}
         request = urllib.request.Request(base + ('/' + config_id if config_id else ''),
             method='PUT' if config_id else 'POST', headers=headers, data=json.dumps(payload).encode())
         try:
@@ -480,9 +561,83 @@ def hyperdrive_publisher(owner, data, account, config_id=None):
     return publish
 
 
+PRODUCTION_WRITER_HOST = 'ep-restless-resonance-awbp35k3.c-12.us-east-1.aws.neon.tech'
+PRODUCTION_HYPERDRIVE_ACCOUNT = '12ccca77eb49142a6be8eb84c0d6a3a0'
+
+
+def validate_writer_owner(owner):
+    parsed = urlsplit(owner)
+    if os.environ.get('CARR_BREAK_GLASS') != '1':
+        raise Refusal('writer requires db-tap production break-glass receipt')
+    if (parsed.hostname != PRODUCTION_WRITER_HOST or parsed.username != 'neondb_owner'
+            or parsed.path != '/neondb' or parsed.port not in (None, 5432)):
+        raise Refusal('writer requires the pinned direct production owner endpoint')
+
+
+def inspect_writer_hyperdrive(owner, data):
+    from lib.release_reader import read
+    from lib.token_store import read as token
+    try:
+        response = read('https://api.cloudflare.com/client/v4/accounts/'
+            + PRODUCTION_HYPERDRIVE_ACCOUNT + '/hyperdrive/configs',
+            headers={'Authorization': 'Bearer ' + token('CLOUDFLARE_API_TOKEN')})
+        body = json.loads(response.body)
+        if (response.status != 200 or body.get('success') is not True
+                or body.get('result_info', {}).get('total_pages', 1) != 1):
+            raise Refusal('Hyperdrive absence is unproven')
+        matches = [item for item in body['result'] if item['name'] == 'doctorcre-engine-db-writer']
+        if not matches:
+            return None
+        if len(matches) != 1:
+            raise Refusal('multiple writer Hyperdrives require inspection')
+        item = matches[0]
+        if (item['origin']['host'] != urlsplit(owner).hostname
+                or item['origin']['database'] != 'neondb' or item['origin']['user'] != data['role']
+                or not re.fullmatch('[a-f0-9]{32}', item['id'])):
+            raise Refusal('writer Hyperdrive target differs')
+        return item['id']
+    except BaseException:
+        raise Refusal('writer Hyperdrive inspection failed; recovery refused') from None
+
+
+def writer_procedure(owner, *, rotate=False, recover=False):
+    """Reviewed production entrypoint. Recovery never publishes or reveals a secret."""
+    validate_writer_owner(owner)
+    data = load_spec('writer')
+    if recover:
+        return recover_credential(owner, data, lambda: inspect_writer_hyperdrive(owner, data))
+    with connect(owner) as locked:
+        credential_lock(locked, data['role'])
+        with connect(owner) as conn:
+            observed = {key: conn.execute('SHOW ' + key).fetchone()[0] for key in LOGGING_GUARDS}
+        if observed != {'log_statement': 'none', 'log_min_error_statement': 'panic',
+                        'log_min_duration_statement': '-1', 'log_parameter_max_length': '-1'}:
+            raise Refusal('owner logging settings differ; reassess risk before password SQL')
+        config_id = inspect_writer_hyperdrive(owner, data)
+        if bool(config_id) != rotate:
+            raise Refusal('creation requires absent Hyperdrive; rotation requires matching Hyperdrive')
+        publisher = hyperdrive_publisher(owner, data, PRODUCTION_HYPERDRIVE_ACCOUNT, config_id)
+        # Recovery can leave an existing NOLOGIN role. Creation may safely reuse only that state.
+        if not rotate:
+            with connect(owner) as conn:
+                state = conn.execute('SELECT rolcanlogin FROM pg_roles WHERE rolname=%s',
+                                     (data['role'],)).fetchone()
+            if state:
+                if state[0]:
+                    raise Refusal('writer login already exists; run --recover first')
+                rotate = True
+        def checked_publish(password):
+            checks = proof(credentials.build_role_uri(owner, data['role'], password), data)
+            if not (all(checks[k] for k in CHECKS)
+                    and all(checks[n]['read'] for n in ['activity'] + data['views'])):
+                raise Refusal('fresh writer proof failed')
+            publisher(password)
+        return publish_credential(owner, data, checked_publish, rotate=rotate, connection=locked)
+
+
 def provision(owner, data, environment, rotate, root, publish=None):
     if data['role'] != ROLE:
-        raise Refusal('writer credentials must stay in memory and Cloudflare; use reconcile directly')
+        raise Refusal('writer credentials must stay in memory and Cloudflare; use the reviewed --writer procedure')
     if rotate:
         if publish is None:
             raise Refusal('rotation requires an in-memory credential publisher')
@@ -502,7 +657,7 @@ def provision(owner, data, environment, rotate, root, publish=None):
                   expected_database=parsed.path.lstrip('/'))
     with credentials.exclusive_lock(root / (environment + '-engine-business-reader.lock')):
         with connect(owner) as conn:
-            conn.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', (ROLE,))
+            credential_lock(conn, ROLE)
             exists = conn.execute('SELECT EXISTS(SELECT FROM pg_roles WHERE rolname=%s)', (ROLE,)).fetchone()[0]
             if exists and credentials.file_state(paths) == 'absent' and not rotate:
                 raise Refusal('existing role has no local secret; explicit rotation required')
@@ -510,11 +665,14 @@ def provision(owner, data, environment, rotate, root, publish=None):
             change = password_change(exists=exists, rotate=rotate,
                                      authenticated=exists and authenticated(stored.value))
             created = reconcile(conn, data, stored.password if change else None)
-        if not authenticated(stored.value):
-            raise Refusal('post-commit authentication failed; pending secret retained')
-        if stored.state == 'pending':
-            credentials.promote_pending(paths, key=key, expected_value=stored.value)
-        result = proof(stored.value, data)
+            conn.commit()
+            if change:
+                clear_password_statements(owner, ROLE)
+            if not authenticated(stored.value):
+                raise Refusal('post-commit authentication failed; pending secret retained')
+            if stored.state == 'pending':
+                credentials.promote_pending(paths, key=key, expected_value=stored.value)
+            result = proof(stored.value, data)
     return dict(environment=environment, created=created is True,
                 password_changed=change is True, secret_key=key,
                 proof={name: result[name] is True for name in CHECKS} | {
@@ -532,12 +690,18 @@ def main():
     parser.add_argument('--environment', choices=['production'], required=True)
     parser.add_argument('--branch', help='named Neon branch in the production project')
     parser.add_argument('--rotate', action='store_true')
+    parser.add_argument('--writer', action='store_true', help='run the reviewed production writer procedure')
+    parser.add_argument('--recover', action='store_true', help='inspect writer Hyperdrive and disable an orphan role')
     parser.add_argument('--hyperdrive-account')
     parser.add_argument('--hyperdrive-config')
     args = parser.parse_args()
     if args.branch and not re.fullmatch('[a-z][a-z0-9-]*', args.branch):
         raise Refusal('branch must be a lowercase Neon branch name')
     data = load_spec()
+    if args.recover and (not args.writer or args.rotate):
+        raise Refusal('--recover requires --writer and cannot combine with --rotate')
+    if args.writer and args.branch:
+        raise Refusal('writer procedure requires production without a branch override')
     owner = os.environ.get('DATABASE_URL')
     if not owner:
         raise Refusal('run through tools/db-tap.py run mode')
@@ -553,6 +717,9 @@ def main():
     expected = tap.dsn(branch=args.branch, project=args.environment)
     if urlsplit(expected).hostname != urlsplit(owner).hostname or urlsplit(expected).path != urlsplit(owner).path:
         raise Refusal('db-tap target differs from the selected environment')
+    if args.writer:
+        print_result(writer_procedure(owner, rotate=args.rotate, recover=args.recover))
+        return 0
     target = args.environment if args.branch in (None, 'production') else 'branch-' + args.branch
     publisher = None
     if args.rotate:

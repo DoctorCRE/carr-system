@@ -305,6 +305,91 @@ class WriterRoleTests(unittest.TestCase):
 
 
 class CredentialLifecycleTests(unittest.TestCase):
+    def test_writer_procedure_reuses_only_disabled_orphan_through_ordered_path(self):
+        owner = 'postgresql://neondb_owner@' + role.PRODUCTION_WRITER_HOST + '/neondb'
+        checks = {k: True for k in role.CHECKS}
+        checks |= {n: {'read': True} for n in ['activity'] + role.load_spec('writer')['views']}
+        for live in [False, True]:
+            conn = MagicMock()
+            conn.__enter__.return_value = conn
+            settings = {'log_statement': 'none', 'log_min_error_statement': 'panic',
+                        'log_min_duration_statement': '-1', 'log_parameter_max_length': '-1'}
+            conn.execute.side_effect = lambda q, p=None: MagicMock(fetchone=lambda:
+                (settings[q[5:]],) if str(q).startswith('SHOW ') else (live,) if 'rolcanlogin' in str(q) else (True,))
+            publisher = MagicMock()
+            def ordered(owner, data, publish, **kwargs):
+                self.assertTrue(kwargs['rotate'])
+                self.assertIs(kwargs['connection'], conn)
+                publish('synthetic-test-value')
+                return {'password_changed': True}
+            with patch.dict(os.environ, {'CARR_BREAK_GLASS': '1'}), patch.object(
+                role, 'connect', return_value=conn), patch.object(role, 'inspect_writer_hyperdrive', return_value=None), patch.object(
+                role, 'hyperdrive_publisher', return_value=publisher), patch.object(role, 'publish_credential', side_effect=ordered
+            ) as lifecycle, patch.object(role, 'proof', return_value=checks), patch.object(
+                role.credentials, 'build_role_uri', return_value='in-memory'):
+                if live:
+                    with self.assertRaises(role.Refusal):
+                        role.writer_procedure(owner)
+                    lifecycle.assert_not_called()
+                else:
+                    self.assertTrue(role.writer_procedure(owner)['password_changed'])
+                    publisher.assert_called_once_with('synthetic-test-value')
+
+    def test_writer_owner_pins_survive_optimized_python(self):
+        with patch.dict(os.environ, {'CARR_BREAK_GLASS': '1'}):
+            for owner in ['postgresql://neondb_owner@wrong/neondb',
+                          'postgresql://other@ep-restless-resonance-awbp35k3.c-12.us-east-1.aws.neon.tech/neondb']:
+                with self.assertRaises(role.Refusal):
+                    role.validate_writer_owner(owner)
+        with patch.dict(os.environ, {'CARR_BREAK_GLASS': ''}):
+            with self.assertRaises(role.Refusal):
+                role.validate_writer_owner('invalid')
+
+    def test_invalidation_disables_login_and_clears_password(self):
+        conn = MagicMock()
+        role.invalidate_credential(conn, role.ROLE)
+        self.assertIn('NOLOGIN PASSWORD NULL', conn.execute.call_args.args[0].as_string())
+
+    def test_busy_rotation_refuses_before_reconciliation(self):
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = (False,)
+        with patch.object(role, 'connect', return_value=conn), patch.object(role, 'reconcile') as reconcile:
+            with self.assertRaisesRegex(role.Refusal, 'rotation.*progress'):
+                role.publish_credential('owner', role.load_spec(), lambda p: None, rotate=True)
+            reconcile.assert_not_called()
+
+    def test_statement_cleanup_resets_matching_entries_and_verifies_absence(self):
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.side_effect = [MagicMock(fetchone=lambda: ('pg_stat_statements',)),
+            MagicMock(fetchone=lambda: ('public',)),
+            MagicMock(fetchall=lambda: [(11, 22, 33)]), MagicMock(),
+            MagicMock(fetchone=lambda: (False,))]
+        with patch.object(role, 'connect', return_value=conn):
+            role.clear_password_statements('postgresql://fixture@localhost/neondb', role.ROLE)
+        self.assertTrue(any(call.args[1] == (11, 22, 33) for call in conn.execute.call_args_list if len(call.args)>1))
+
+    def test_recovery_invalidates_existing_role_without_hyperdrive(self):
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = (True,)
+        with patch.object(role, 'connect', return_value=conn), patch.object(
+            role, 'invalidate_credential') as invalidate, patch.object(role, 'clear_password_statements'):
+            result = role.recover_credential('owner', role.load_spec('writer'), lambda: None)
+        invalidate.assert_called_once_with(conn, 'engine_business_writer')
+        self.assertTrue(result['invalidated'])
+
+    def test_recovery_preserves_matching_hyperdrive_and_lock(self):
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = (True,)
+        with patch.object(role, 'connect', return_value=conn), patch.object(
+            role, 'invalidate_credential') as invalidate:
+            result = role.recover_credential('owner', role.load_spec('writer'), lambda: 'c'*32)
+        invalidate.assert_not_called()
+        self.assertTrue(result['hyperdrive_exists'])
+
     def test_publication_order_failure_cleanup_and_redaction(self):
         import traceback
         for kind, rotate in [('reader', True), ('writer', False)]:
@@ -314,12 +399,12 @@ class CredentialLifecycleTests(unittest.TestCase):
                     secrets_seen = []
                     conn = MagicMock()
                     conn.__enter__.return_value = conn
-                    conn.execute.return_value.fetchone.return_value = (rotate,)
+                    conn.execute.side_effect = lambda q, p=None: MagicMock(fetchone=lambda: (True if 'pg_try_advisory_lock' in str(q) else rotate,))
                     def exit_conn(*args):
                         events.append('commit')
-                        if failure == 'commit':
+                        if failure == 'commit' and secrets_seen:
                             raise RuntimeError('private-value')
-                    conn.__exit__.side_effect = exit_conn
+                    conn.commit.side_effect = exit_conn
                     def reconcile(*args):
                         events.append('reconcile')
                         secrets_seen.append(args[2])
@@ -334,15 +419,15 @@ class CredentialLifecycleTests(unittest.TestCase):
                             raise RuntimeError(password)
                     def invalidate(*args):
                         events.append('invalidate')
-                        self.assertNotEqual(args[2], secrets_seen[0])
+                        self.assertEqual(len(args), 2)
                         if failure == 'cleanup':
-                            raise RuntimeError(args[2])
+                            raise RuntimeError('private-value')
                     output = io.StringIO()
                     with patch.object(role, 'connect', return_value=conn), patch.object(
                         role, 'reconcile', side_effect=reconcile
                     ), patch.object(role, 'authenticated', side_effect=login), patch.object(
                         role.credentials, 'build_role_uri', return_value='in-memory'
-                    ), patch.object(role, 'set_password', side_effect=invalidate), redirect_stdout(output):
+                    ), patch.object(role, 'invalidate_credential', side_effect=invalidate), patch.object(role, 'clear_password_statements'), redirect_stdout(output):
                         if failure:
                             with self.assertRaises(role.Refusal) as caught:
                                 role.publish_credential('owner', role.load_spec(kind), publish, rotate=rotate)
@@ -371,7 +456,8 @@ class CredentialLifecycleTests(unittest.TestCase):
             name = 'doctorcre-engine-db-' + kind
             config = 'c' * 32 if kind == 'reader' else None
             metadata = {'name': name, 'origin': {'host': 'ep-example.neon.tech',
-                'database': 'neondb', 'user': data['role']}}
+                'database': 'neondb', 'user': data['role']},
+                'caching': {'disabled': False, 'max_age': 120}, 'origin_connection_limit': 23}
             reply = release_reader.Reply(200, {}, json.dumps({'success': True,
                 'result': metadata if config else []}).encode())
             with patch.object(token_store, 'read', return_value='not-a-real-token'), patch.object(
@@ -386,8 +472,8 @@ class CredentialLifecycleTests(unittest.TestCase):
                 payload = json.loads(request.data)
                 self.assertEqual(payload['origin']['user'], data['role'])
                 self.assertEqual(payload['origin']['password'], 'synthetic-test-value')
-                self.assertTrue(payload['caching']['disabled'])
-                self.assertEqual(payload['origin_connection_limit'], 10)
+                self.assertEqual(payload['caching'], metadata['caching'] if config else {'disabled': True})
+                self.assertEqual(payload['origin_connection_limit'], 23 if config else 10)
                 opener.return_value.open.side_effect = RuntimeError('synthetic-test-value')
                 with self.assertRaises(role.Refusal) as caught:
                     publisher('synthetic-test-value')
@@ -425,7 +511,7 @@ class CredentialLifecycleTests(unittest.TestCase):
         for kind, rotate in [('writer', False), ('reader', True)]:
             conn = MagicMock()
             conn.__enter__.return_value = conn
-            conn.execute.return_value.fetchone.return_value = (not rotate,)
+            conn.execute.side_effect = lambda q, p=None: MagicMock(fetchone=lambda: (True if 'pg_try_advisory_lock' in str(q) else not rotate,))
             with patch.object(role, 'connect', return_value=conn), patch.object(role, 'reconcile') as reconcile:
                 with self.assertRaises(role.Refusal):
                     role.publish_credential('owner', role.load_spec(kind), lambda password: None, rotate=rotate)
@@ -527,6 +613,8 @@ class PasswordPostgresTests(unittest.TestCase):
                 published = []
                 def fail_publication(password):
                     published.append(password)
+                    with role.connect(target) as contender:
+                        self.assertFalse(contender.execute('SELECT pg_try_advisory_lock(hashtext(%s))', (name,)).fetchone()[0])
                     self.assertTrue(role.authenticated(target.replace('fixture@', name + ':' + password + '@'), name))
                     raise RuntimeError(password)
                 with patch.object(role.credentials, 'build_role_uri', side_effect=lambda owner, role_name, password:
@@ -536,6 +624,26 @@ class PasswordPostgresTests(unittest.TestCase):
                 self.assertEqual(len(published), 1)
                 self.assertNotIn(published[0], str(caught.exception))
                 self.assertFalse(role.authenticated(target.replace('fixture@', name + ':' + published[0] + '@'), name))
+                with role.connect(target) as conn:
+                    self.assertFalse(conn.execute('SELECT rolcanlogin FROM pg_roles WHERE rolname=%s', (name,)).fetchone()[0])
+                    conn.execute(role.sql.SQL('ALTER ROLE {} LOGIN').format(role.sql.Identifier(name)))
+                self.assertFalse(role.authenticated(target.replace('fixture@', name + ':' + published[0] + '@'), name))
+                crash = subprocess.run([sys.executable, '-c',
+                    "import importlib.util,sys,json,os; "
+                    "s=importlib.util.spec_from_file_location('crash_role',sys.argv[1]); "
+                    "r=importlib.util.module_from_spec(s);s.loader.exec_module(r); "
+                    "r.credentials.build_role_uri=lambda owner,name,pw:owner.replace('fixture@',name+':'+pw+'@'); "
+                    "r.publish_credential(sys.argv[2],json.loads(sys.argv[3]),lambda pw:os._exit(71),rotate=True)",
+                    str(PATH), target, role.json.dumps(data)], capture_output=True)
+                self.assertEqual(crash.returncode, 71)
+                with role.connect(target) as conn:
+                    self.assertTrue(conn.execute('SELECT rolcanlogin FROM pg_roles WHERE rolname=%s', (name,)).fetchone()[0])
+                result = role.recover_credential(target, data, lambda: None)
+                self.assertTrue(result['invalidated'])
+                with patch.object(role.credentials, 'build_role_uri', side_effect=lambda owner, role_name, password:
+                        owner.replace('fixture@', role_name + ':' + password + '@')):
+                    resumed = role.publish_credential(target, data, lambda password: None, rotate=True)
+                self.assertTrue(resumed['password_changed'])
                 with role.connect(target) as conn:
                     conn.execute(role.sql.SQL('DROP OWNED BY {}').format(role.sql.Identifier(name)))
                     conn.execute(role.sql.SQL('DROP ROLE {}').format(role.sql.Identifier(name)))
