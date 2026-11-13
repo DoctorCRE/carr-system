@@ -35,7 +35,7 @@ class DeliveryTests(unittest.TestCase):
         self.assertIn(method, ('GET', 'HEAD'))
         self.assertIsNone(data)
         if method == 'GET':
-            self.assertRegex(url, '^' + re.escape(delivery.API) + r'/posts/[A-Za-z0-9_-]+$')
+            self.assertIsNotNone(re.fullmatch(re.escape(delivery.API) + r'/posts/[A-Za-z0-9_-]+', url))
         else:
             links = {value.get('publicUrl') for value in self.responses.values()
                      if isinstance(value, dict) and isinstance(value.get('publicUrl'), str)}
@@ -58,6 +58,7 @@ class DeliveryTests(unittest.TestCase):
     def test_fake_rejects_unexpected_endpoints_and_unrelated_links(self):
         for method, url in [('GET', delivery.API + '/posts'),
                             ('GET', delivery.API + '/posts/old/extra'),
+                            ('GET', delivery.API + '/posts/old\n'),
                             ('HEAD', 'https://x.com/unrelated'),
                             ('HEAD', delivery.API + '/posts/old')]:
             with self.subTest(method=method, url=url), self.assertRaises(AssertionError):
