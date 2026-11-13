@@ -231,7 +231,9 @@ class SocialBatchTest(unittest.TestCase):
         self.media.mkdir()
         for name, size in {'x1': (1200, 675), 'li1a': (1080, 1350), 'li1b': (1080, 1350), 'fb2': (1080, 1080),
                            'ig1a': (1080, 1350), 'ig1b': (1080, 1350), 'ig2': (1080, 1350)}.items():
-            png(self.media / f'{name}.png', *size)
+            path = self.media / f'{name}.png'
+            png(path, *size)
+            path.write_bytes(path.read_bytes() + name.encode())
         accounts = root / 'accounts.json'
         accounts.write_text(json.dumps(RECORDED['accounts']))
         self.verbs: list[tuple[str, dict]] = []
@@ -256,6 +258,117 @@ class SocialBatchTest(unittest.TestCase):
         return {(f['draft'], f['rule']) for f in sb.check(batch, sb.plan(self.ctx), self.ctx)}
 
     # -- the valid batch passes -------------------------------------------------
+    def test_nov16_two_items_across_four_platforms_is_rejected(self):
+        batch = self.drafts()
+        batch['drafts'] = [self.draft(batch, name) for name in ('x1', 'li1', 'fb2', 'ig1', 'o1', 'li2', 'fb1', 'ig2')]
+        for index, draft in enumerate(batch['drafts']):
+            draft['idea_key'] = 'synthetic-bank:' + ('escalator-cost' if index < 4 else 'remaining-term')
+        (self.media / 'ig1a.png').write_bytes((self.media / 'li1a.png').read_bytes())
+        rules = {f['rule'] for f in sb.check(batch, sb.plan(self.ctx), self.ctx)}
+        self.assertIn('idea_platform_limit', rules)
+        self.assertIn('cross_platform_media', rules)
+
+    def test_two_platforms_pass_third_fails_and_text_needs_no_image(self):
+        batch = self.drafts()
+        for name in ('li2', 'fb1'):
+            self.draft(batch, name)['idea_key'] = 'synthetic-bank:remaining-term'
+        self.assertEqual(sb.check(batch, sb.plan(self.ctx), self.ctx), [])
+        self.draft(batch, 'o1')['idea_key'] = 'synthetic-bank:remaining-term'
+        self.assertIn('idea_platform_limit', {r for _, r in self.rules(batch)})
+
+    def test_renamed_image_and_shared_carousel_slide_fail(self):
+        batch = self.drafts()
+        (self.media / 'ig1b.png').write_bytes((self.media / 'li1b.png').read_bytes())
+        self.assertIn(('ig1', 'cross_platform_media'), self.rules(batch))
+
+    def test_missing_idea_or_angle_is_rejected(self):
+        for key in ('idea_key', 'bank_angles'):
+            batch = self.drafts()
+            del self.draft(batch, 'li2')[key]
+            self.assertIn(('li2', 'schema'), self.rules(batch))
+
+    def test_partial_refill_includes_published_history_and_current_queue(self):
+        batch = self.drafts()
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+        # Published earlier in the week, no longer returned by the scheduled listing.
+        self.fake.items = []
+        for value in self.fake.posts.values():
+            value['status'] = 'published'
+        plan = sb.plan(self.ctx)
+        self.assertEqual(len(plan['held_posts']), 13)
+        new = copy.deepcopy(self.draft(batch, 'li2'))
+        new.update(id='refill', platform='linkedin', idea_key='synthetic-bank:escalator-cost')
+        batch.update(plan_digest=plan['plan_digest'], drafts=[new])
+        rules = {f['rule'] for f in sb.check(batch, plan, self.ctx)}
+        self.assertIn('idea_platform_limit', rules)
+        self.assertNotIn('content_coverage_incomplete', rules)
+
+    def test_partial_refill_rejects_media_used_by_a_held_platform(self):
+        batch = self.drafts()
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+        plan = sb.plan(self.ctx)
+        new = copy.deepcopy(self.draft(batch, 'fb2'))
+        new.update(id='new-image-name', platform='linkedin', idea_key='synthetic-bank:new-angle')
+        batch.update(plan_digest=plan['plan_digest'], drafts=[new])
+        self.assertIn('cross_platform_media', {f['rule'] for f in sb.check(batch, plan, self.ctx)})
+
+    def test_missing_media_hashes_in_logged_history_stops_refill(self):
+        batch = self.drafts()
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+        ledger = self.ctx.out / '2026-11-02/ledger.jsonl'
+        rows = [json.loads(line) for line in ledger.read_text().splitlines()]
+        for row in rows:
+            if row['event'] == 'posted':
+                row.pop('media_sha256')
+        ledger.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+        plan = sb.plan(self.ctx)
+        self.assertIn('content_coverage_incomplete', {f['rule'] for f in sb.check(self.drafts(plan), plan, self.ctx)})
+
+    def test_synthetic_paired_content_eval(self):
+        cases = [json.loads(line) for line in (REPO / 'evals/social-content-quality.jsonl').read_text().splitlines()]
+        for case in cases:
+            with self.subTest(case=case['id']):
+                self.assertTrue(case['fuel'])
+                self.assertTrue(case['reviewer_expected']['baseline'])
+                self.assertEqual(case['reviewer_expected']['candidate'], [])
+                # The synthetic evaluator uses literal theses. Live reviewers must also catch paraphrases.
+                for version in ('baseline', 'candidate'):
+                    platforms = {}
+                    for post in case[version]:
+                        platforms.setdefault(post['thesis'], set()).add(post['platform'])
+                    semantic_overuse = any(len(p) > 2 for p in platforms.values())
+                    self.assertEqual(semantic_overuse, version == 'baseline' and case['id'] != 'trivial-crop')
+                    findings = []
+                    sb._content_rules([{**p, 'media_sha256': []} for p in case[version]],
+                                      lambda draft, rule, detail: findings.append(rule))
+                    self.assertEqual('idea_platform_limit' in findings,
+                                     version == 'baseline' and case['id'] == 'one-source-distinct-ideas')
+
+    def test_missing_historical_metadata_stops_refill(self):
+        self.fake.items = [item('linkedin', '2026-11-03T15:06:00Z')]
+        plan = sb.plan(self.ctx)
+        self.assertTrue(any('content_coverage_incomplete' in w for w in plan['warnings']))
+        result = sb.submit(self.drafts(plan), self.ctx)
+        self.assertFalse(result['ok'])
+        self.assertIn('content_coverage_incomplete', {f['rule'] for f in result['findings']})
+        self.assertEqual(self.fake.writes(), [])
+
+    def test_content_evidence_does_not_leak_across_central_week_boundary(self):
+        self.fake.items = [item('linkedin', '2026-11-02T05:59:00Z')]
+        self.assertEqual(sb.check(self.drafts(), sb.plan(self.ctx), self.ctx), [])
+
+    def test_batch_and_ledger_retain_idea_sources_angles_and_hashes(self):
+        batch = self.drafts()
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+        logged = json.loads((self.ctx.out / '2026-11-02/batch.json').read_text())
+        rows = [r for r in sb.ledger_rows(self.ctx.out) if r['event'] == 'posted']
+        for source, post, row in zip(batch['drafts'], logged['posts'], rows):
+            for record in (post, row):
+                self.assertEqual(record['idea_key'], source['idea_key'])
+                self.assertEqual(record['bank_angles'], source['bank_angles'])
+                self.assertEqual(record['sources'], source.get('sources', []))
+                self.assertEqual(len(record['media_sha256']), len(source.get('media', [])))
+
     def test_valid_batch_has_no_findings(self):
         plan = sb.plan(self.ctx)
         self.assertEqual(plan['status'], 'ready')
