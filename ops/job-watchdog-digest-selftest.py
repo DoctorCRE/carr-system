@@ -190,6 +190,66 @@ class HookTests(unittest.TestCase):
         self.assertIn('out/social-batch/delivery.json', context.splitlines()[-1])
         self.assertIn(config['paths']['findings'], context.splitlines()[-1])
 
+    def test_old_social_failures_do_not_hide_other_watchdog_findings(self):
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        for job in ('social-batch-weekly', 'com.carr.morning-brief'):
+            with self.subTest(job=job), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path = root / config['paths']['findings']
+                rows = [
+                    {'key': 'disk_low:local', 'kind': 'disk_low',
+                     'reason': 'local disk free is 6 percent', 'first_seen': '2026-11-13T12:00:00Z'},
+                    {'key': f'job_failed:{job}', 'kind': 'job_failed', 'exit_code': 1,
+                     'reason': f'{job} failed', 'first_seen': '2026-11-13T13:00:00Z'},
+                ]
+                for row in rows:
+                    watchdog.append(path, row)
+                folder = root / 'out/social-batch'
+                folder.mkdir(parents=True)
+                posts = {f'2026-10-26/p{i}': {'status': 'failed', 'platform': 'linkedin',
+                         'topic': f'old failure {i}', 'submission_id': f'f{i}',
+                         'errorMessage': 'Account expired'} for i in range(3)}
+                receipt = {'schema': 'carr-social-delivery/v1', 'observed_at': 1,
+                           'interval_seconds': 86400, 'coverage': 'observed',
+                           'deferred': [], 'stop_reason': None, 'posts': posts}
+                (folder / 'delivery.json').write_text(json.dumps(receipt))
+                with patch.object(watchdog.time, 'time', return_value=100000):
+                    context = watchdog.digest(root, config)
+                self.assertEqual(context.splitlines()[1:4], [
+                    '- local disk free is 6 percent', f'- {job} failed',
+                    '- Social delivery coverage unknown: observer run is overdue.'])
+                self.assertNotIn('old failure', context)
+
+    def test_no_social_data_digest_matches_main_bytes(self):
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        rows = [
+            {'key': 'disk_low:local', 'kind': 'disk_low', 'reason': 'local disk free is 6 percent',
+             'first_seen': '2026-11-13T10:00:00Z'},
+            {'key': 'job_degraded:outlook', 'kind': 'job_degraded', 'reason': 'outlook degraded',
+             'first_seen': '2026-11-13T09:00:00Z'},
+            {'key': 'job_failed:com.carr.a', 'kind': 'job_failed', 'exit_code': 1,
+             'reason': 'com.carr.a exited 1', 'first_seen': '2026-11-13T12:00:00Z'},
+            {'key': 'job_failed:com.carr.morning-brief', 'kind': 'job_failed', 'exit_code': 1,
+             'reason': 'morning-brief exited 1', 'first_seen': '2026-11-13T13:00:00Z'},
+            {'key': 'job_failed:social-batch-weekly', 'kind': 'job_failed', 'exit_code': 1,
+             'reason': 'social-batch-weekly failed', 'first_seen': '2026-11-13T14:00:00Z'},
+        ]
+        expected = {
+            0: b'',
+            1: b'Orchestrator watchdog: 1 open finding(s).\n- local disk free is 6 percent',
+            4: (b'Orchestrator watchdog: 4 open finding(s).\n- local disk free is 6 percent'
+                b'\n- outlook degraded\n- com.carr.a exited 1\n- morning-brief exited 1'),
+            5: (b'Orchestrator watchdog: 5 open finding(s).\n- local disk free is 6 percent'
+                b'\n- outlook degraded\n- com.carr.a exited 1'
+                b'\n- 2 more; see out/watchdog/findings.jsonl'),
+        }
+        for count, output in expected.items():
+            with self.subTest(count=count), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                for row in reversed(rows[:count]):
+                    watchdog.append(root / config['paths']['findings'], row)
+                self.assertEqual(watchdog.digest(root, config).encode(), output)
+
     def test_launchd_cadence_is_config_projection(self):
         config = json.loads((ROOT / "ops/config/job-watchdog.json").read_text())
         plist = plistlib.loads((ROOT / "ops/launchd/com.carr.job-watchdog.plist").read_bytes())
