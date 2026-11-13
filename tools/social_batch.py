@@ -369,10 +369,11 @@ def plan(ctx: Context, own: frozenset[tuple[str, str]] = frozenset()) -> dict:
     slot_plan = treatment_slots(ctx, cadence, week, logged)
     video_required = cadence.get('platform_mix', {}).get('instagram', {}).get('formats', {}).get('video', {}).get('min', 0)
     video_held = sum(h['platform'] == 'instagram' and h.get('format') == 'video' for h in held.values())
-    automatic_skips = ([{'lane': 'instagram_video',
-                         'reason': 'short video generation is unavailable in the static-card batch; video slot left empty',
-                         'local_time': slot_plan['slots']['instagram'][-1] if slot_plan['slots']['instagram'] else None}]
-                       if video_required > video_held else [])
+    automatic_skips: list[dict] = []
+    if slot_plan is not None and video_required > video_held:
+        automatic_skips.append({'lane': 'instagram_video',
+                                'reason': 'short video generation is unavailable in the static-card batch; video slot left empty',
+                                'local_time': slot_plan['slots']['instagram'][-1] if slot_plan['slots']['instagram'] else None})
     lanes = {}
     for lane, rule in cadence['lanes'].items():
         count = sum(1 for h in held.values() if h['lane'] == lane)
