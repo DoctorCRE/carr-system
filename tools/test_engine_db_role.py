@@ -180,8 +180,17 @@ class WriterRoleTests(unittest.TestCase):
         reader = role.load_spec()
         writer = role.load_spec('writer')
         self.assertEqual(writer['role'], 'engine_business_writer')
-        self.assertEqual(writer['tables'], reader['tables'])
-        self.assertEqual(writer['views'], reader['views'])
+        excluded = (
+            'board_snapshot practice_origination_event practice_origination_feed '
+            'v_calendar_capture_receipt v_capture_candidate_queue v_capture_session_status '
+            'v_deal_room_presence v_export_clients v_export_deals v_lead_client_best '
+            'v_lead_prospect_engagement v_lead_workspace v_lead_workspace_correspondence '
+            'v_lead_workspace_stage_history v_party_graph v_practice_origination_party_address '
+            'v_record_flag_subject v_subject_timeline v_today_triage v_vendor_assignment_context'
+        ).split()
+        self.assertEqual(writer['tables'], [name for name in reader['tables'] if name not in excluded])
+        self.assertEqual(writer['views'], [name for name in reader['views'] if name not in excluded])
+        self.assertEqual(len(writer['tables'] + writer['views']), 97)
         expected = {
             'INSERT': {
                 'deal_participant': 'deal_id actor_id role set_by'.split(),
@@ -247,6 +256,15 @@ class WriterRoleTests(unittest.TestCase):
             role.validate_spec(role.load_spec() | {'tables': ['tool_call']})
         with self.assertRaises(role.Refusal):
             role.load_spec('owner')
+        for columns in [{'DELETE': {'deal': ['id']}}, {'UPDATE': {'tool_call': ['response']}},
+                        {'SELECT': {'deal': ['id']}}, {'INSERT': {'ops.work_request': ['id']}},
+                        {'INSERT': {'deal': ['id', 'id']}}, {'INSERT': {'deal': ['id;bad']}},
+                        {'INSERT': {'deal': []}}, {'INSERT': ['deal']}]:
+            with self.subTest(columns=columns), self.assertRaises(role.Refusal):
+                role.validate_spec(role.load_spec('writer') | {'columns': columns})
+        with self.assertRaises(role.Refusal):
+            role.validate_spec(role.load_spec() | {'columns': {'SELECT': {'tool_call': ['id']}}})
+
 
     def test_effective_matrix_requires_exact_table_and_column_rights(self):
         data = role.load_spec('writer')
@@ -274,6 +292,16 @@ class WriterRoleTests(unittest.TestCase):
                                pathlib.Path(directory))
             connect.assert_not_called()
             self.assertEqual(list(pathlib.Path(directory).iterdir()), [])
+
+    def test_writer_read_exclusions_are_bounded_by_reader(self):
+        reader = role.load_spec()
+        writer = role.json.loads(role.SPEC.with_name('engine-business-writer.json').read_text())
+        for excluded in ['activity', ['activity', 'activity'], ['unknown'], [None]]:
+            with self.subTest(excluded=excluded), patch.object(
+                pathlib.Path, 'read_text', side_effect=[role.json.dumps(reader),
+                    role.json.dumps(writer | {'exclude_reads': excluded})]
+            ), self.assertRaises(role.Refusal):
+                role.load_spec('writer')
 
 
 @unittest.skipUnless(os.environ.get('ENGINE_ROLE_TEST_DSN'), 'canonical PostgreSQL fixture not requested')

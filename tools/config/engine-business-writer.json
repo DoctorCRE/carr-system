@@ -1,6 +1,28 @@
 {
   "role": "engine_business_writer",
   "extends": "reader",
+  "exclude_reads": [
+    "board_snapshot",
+    "practice_origination_event",
+    "practice_origination_feed",
+    "v_calendar_capture_receipt",
+    "v_capture_candidate_queue",
+    "v_capture_session_status",
+    "v_deal_room_presence",
+    "v_export_clients",
+    "v_export_deals",
+    "v_lead_client_best",
+    "v_lead_prospect_engagement",
+    "v_lead_workspace",
+    "v_lead_workspace_correspondence",
+    "v_lead_workspace_stage_history",
+    "v_party_graph",
+    "v_practice_origination_party_address",
+    "v_record_flag_subject",
+    "v_subject_timeline",
+    "v_today_triage",
+    "v_vendor_assignment_context"
+  ],
   "columns": {
     "INSERT": {
       "deal_participant": ["deal_id", "actor_id", "role", "set_by"],

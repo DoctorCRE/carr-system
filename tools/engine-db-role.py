@@ -93,8 +93,14 @@ def load_spec(kind='reader'):
     writer = json.loads(SPEC.with_name('engine-business-writer.json').read_text())
     if writer.pop('extends') != 'reader':
         raise Refusal('writer must extend the reader contract')
+    excluded = writer.pop('exclude_reads', [])
+    if (not isinstance(excluded, list) or any(not isinstance(n, str) for n in excluded)
+            or len(excluded) != len(set(excluded))
+            or not set(excluded) <= set(reader['tables'] + reader['views'])):
+        raise Refusal('writer read exclusions must name duplicate-free reader relations')
     return validate_spec(reader | writer | {
-        'functions': writer['functions'],
+        'tables': [name for name in reader['tables'] if name not in excluded],
+        'views': [name for name in reader['views'] if name not in excluded],
         'settings': reader['settings'] | {'default_transaction_read_only': 'off'},
     })
 
