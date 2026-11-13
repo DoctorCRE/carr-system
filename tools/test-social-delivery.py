@@ -43,6 +43,103 @@ class DeliveryTests(unittest.TestCase):
         return delivery.check(self.out, self.send, accounts=RECORDED['accounts'],
                               now=lambda: self.clock, sleep=sleep, **kwargs)
 
+    def test_due_failure_precedes_10_and_45_unreachable_links(self):
+        import job_watchdog as watchdog
+        for count in (10, 45):
+            with self.subTest(count=count):
+                self.out = Path(self.temp.name) / f'case{count}/out/social-batch'
+                self.clock = float(NOW)
+                self.post('old', '2026-10-26', 'first')
+                self.responses['old'] = {'status': 'scheduled', 'scheduledTime': '2026-11-03T16:23:00Z'}
+                self.run_check()
+                source, _ = delivery.discover(self.out, RECORDED['accounts'])
+                prior = json.loads((self.out / delivery.RECEIPT).read_text())
+                for index in range(count):
+                    name = f'blocked{count}_{index}'
+                    self.post(name, '2026-11-02', name)
+                    prior['posts']['2026-11-02/' + name] = {
+                        **source['2026-10-26/first'], 'submission_id': name,
+                        'status': 'published', 'observed_at': '2026-11-01T00:00:00Z',
+                        'visibility': 'unverified', 'publicUrl': 'https://x.com/blocked'}
+                (self.out / delivery.RECEIPT).write_text(json.dumps(prior))
+                self.responses['blocked'] = (302, b'')
+                self.responses['old'] = {'status': 'failed', 'errorMessage': 'Account expired'}
+                self.clock += 86400
+                self.calls.clear()
+                result = self.run_check()
+                self.assertEqual(result['posts']['2026-10-26/first']['status'], 'failed')
+                self.assertTrue(self.calls[0][1].endswith('/old'))
+                found = watchdog.social_delivery_findings(self.out.parents[1], self.clock)
+                self.assertTrue(any('Account expired' in row['reason'] for row in found))
+                for path in self.out.glob('*/ledger.jsonl'):
+                    if path.parent.name != '2026-10-26':
+                        path.unlink()
+
+    def test_visibility_attempts_end_with_deduplicated_cannot_verify(self):
+        import job_watchdog as watchdog
+        from unittest.mock import patch
+        self.responses['old'] = {'status': 'published', 'publicUrl': 'https://x.com/blocked'}
+        self.responses['blocked'] = (302, b'')
+        self.run_check()
+        self.clock += 86400
+        result = self.run_check()
+        self.assertEqual(result['posts']['2026-10-26/first']['visibility'], 'cannot_verify')
+        self.assertEqual(result['posts']['2026-10-26/first']['visibility_attempts'], 2)
+        count = len(self.calls)
+        root = self.out.parents[1]
+        config = watchdog.load_config(delivery.ROOT / 'ops/config/job-watchdog.json')
+        with patch.object(watchdog.time, 'time', side_effect=lambda: self.clock):
+            watchdog.deliver_findings(root, config, self.clock)
+            inbox = root / config['paths']['orchestrator_inbox']
+            first = inbox.read_bytes()
+            self.assertIn('cannot verify public link', first.decode())
+            self.clock += 86400
+            self.run_check()
+            watchdog.deliver_findings(root, config, self.clock)
+            self.assertEqual(inbox.read_bytes(), first)
+        self.assertEqual(len(self.calls), count)
+
+    def test_404_is_quiet_terminal_cancellation(self):
+        import job_watchdog as watchdog
+        self.responses['old'] = (404, b'{}')
+        result = self.run_check()
+        self.assertEqual(result['posts']['2026-10-26/first']['status'], 'cancelled')
+        self.clock += 86400
+        self.run_check()
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(watchdog.social_delivery_findings(self.out.parents[1], self.clock), [])
+
+    def test_rate_limit_defers_trigger_and_rotates_before_links(self):
+        import job_watchdog as watchdog
+        self.post('second', '2026-11-02', 'second')
+        self.responses['old'] = (429, b'{}')
+        result = self.run_check()
+        self.assertIn('2026-10-26/first', result['deferred'])
+        self.assertFalse(any('unavailable or malformed' in row['reason']
+                             for row in watchdog.social_delivery_findings(self.out.parents[1], self.clock)))
+        self.clock += 86400
+        self.responses['second'] = {'status': 'failed', 'errorMessage': 'Account expired'}
+        self.calls.clear()
+        result = self.run_check()
+        self.assertTrue(self.calls[0][1].endswith('/second'))
+        self.assertEqual(result['posts']['2026-11-02/second']['status'], 'failed')
+
+    def test_32_historical_posts_complete_in_two_daily_runs(self):
+        for index in range(31):
+            self.post(str(index), '2026-11-02', str(index))
+        for name in ['old'] + [str(index) for index in range(31)]:
+            self.responses[name] = {'status': 'published', 'publicUrl': 'https://x.com/reachable'}
+        self.responses['reachable'] = (200, b'')
+        first = self.run_check()
+        self.assertEqual(first['requests'], 40)
+        self.assertEqual(sum(p['status'] == 'published' for p in first['posts'].values()), 32)
+        self.assertEqual(len(first['deferred']), 24)
+        self.clock += 86400
+        second = self.run_check()
+        self.assertEqual(second['requests'], 24)
+        self.assertEqual(second['deferred'], [])
+        self.assertTrue(all(p['visibility'] == 'verified' for p in second['posts'].values()))
+
     def test_published_and_restart_preserve_evidence(self):
         self.responses['old'] = {**RECORDED['post_status'], 'status': 'published', 'publicUrl': 'https://www.linkedin.com/feed/update/synthetic'}
         self.responses['synthetic'] = (200, b'')
