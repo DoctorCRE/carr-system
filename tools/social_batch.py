@@ -156,7 +156,7 @@ def treatment_slots(ctx: Context, cadence: dict, week: date, logged: list[dict])
         return None
     baseline = date.fromisoformat(override['baseline_start_week']) + (week - date.fromisoformat(override['start_week']))
     folder = ctx.out / baseline.isoformat()
-    posts = []
+    posts: list[dict] = []
     for name in ('baseline-slots.jsonl', 'batch.json'):
         path = folder / name
         if path.is_file():
