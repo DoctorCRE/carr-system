@@ -467,6 +467,7 @@ export function profileForActor(actor, request) {
   if (actor?.unattended === true || actor?.via === "unattended-token") return "unattended";
   if (actor?.hermesCos === true && actor?.via === "hermes-cos-token") return "hermes-cos";
   if (actor?.hermes) return "hermes";
+  if (actor?.comparison === true && actor?.via === "comparison-reads") return "read";
   return profileFor(request);
 }
 
