@@ -22,6 +22,7 @@ import psycopg
 from psycopg import sql
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'tools'))
 import staging_database_credential as credentials
 
