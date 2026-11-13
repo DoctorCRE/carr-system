@@ -385,10 +385,10 @@ class CredentialLifecycleTests(unittest.TestCase):
         conn.__enter__.return_value = conn
         conn.execute.return_value.fetchone.return_value = (True,)
         with patch.object(role, 'connect', return_value=conn), patch.object(
-            role, 'invalidate_credential') as invalidate:
+            role, 'invalidate_credential') as invalidate, patch.object(role, 'clear_password_statements'):
             result = role.recover_credential('owner', role.load_spec('writer'), lambda: 'c'*32)
         invalidate.assert_not_called()
-        self.assertTrue(result['hyperdrive_exists'])
+        self.assertEqual(result, {'hyperdrive_exists': True, 'invalidated': False})
 
     def test_publication_order_failure_cleanup_and_redaction(self):
         import traceback
