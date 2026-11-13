@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // Production handlers and real competing transactions, synthetic loopback DB only.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -5,7 +6,7 @@ import {randomUUID} from 'node:crypto';
 import pg from 'pg';
 import {TOOLS} from '../src/tools.js';
 const url=process.env.CARR_CI_DATABASE_URL||process.env.DATABASE_URL;
-if(!url||!['localhost','127.0.0.1'].includes(new URL(url).hostname))throw Error('disposable_loopback_database_required');
+assertDisposableDatabase(url);
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 async function fixture(t) {
   const clients=await Promise.all([0,1,2].map(async()=>{const c=new pg.Client({connectionString:url});await c.connect();return c;}));

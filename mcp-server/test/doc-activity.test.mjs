@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import { docActivityEntry, docActivityTools } from '../src/doc-activity.js';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { connectionRouteForTool } from '../src/mcp.js';
-import { CURRENT_REGISTRY_VERSION } from '../../ops/scac-mutation-inventory.mjs';
-import { SCAC_MUTATION_REGISTRY_VERSION, registeredOperation } from '../src/mutation-registry.js';
+import { CURRENT_REGISTRY_VERSION } from '../../ops/scac-mutation-inventory.ts';
+import { SCAC_MUTATION_REGISTRY_VERSION, registeredOperation } from '../src/mutation-registry.ts';
 const tools = docActivityTools({ ToolError: class extends Error { constructor(p) { super(p.error); this.payload = p; } } });
 const actor = { slug: 'joe', human: true };
 const event = { id: '10000000-0000-4000-8000-000000000001', recorded_at: '2026-10-01T15:00:00Z',

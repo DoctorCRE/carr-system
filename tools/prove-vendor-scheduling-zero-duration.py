@@ -149,14 +149,17 @@ def main():
         raise TimeoutError()
 
     previous = signal.signal(signal.SIGALRM, expired)
-    signal.setitimer(signal.ITIMER_REAL, args.timeout_seconds)
     try:
-        code = observe(args, receipt)
+        try:
+            signal.setitimer(signal.ITIMER_REAL, args.timeout_seconds)
+            code = observe(args, receipt)
+        finally:
+            try:
+                signal.setitimer(signal.ITIMER_REAL, 0)
+            finally:
+                signal.signal(signal.SIGALRM, previous)
     except (Insufficient, OSError, ValueError, TypeError, AttributeError, subprocess.SubprocessError):
         code = 78
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous)
     print(json.dumps(receipt, sort_keys=True))
     return code
 

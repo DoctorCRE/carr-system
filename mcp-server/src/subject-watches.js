@@ -1,4 +1,6 @@
 // Partner subscriptions preserve each actor's initial canonical subject baseline.
+import { parseSubjectWatchV2, subjectWatchPolicySchema, validSubjectWatchPolicy } from '../contracts/subject-watch.v2.ts';
+export { parseSubjectWatchV2 } from '../contracts/subject-watch.v2.ts';
 const VERSION = 'subject-watch.v1';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const targetProperties = {
@@ -54,4 +56,52 @@ export function subjectWatchTools({ withEnvelope, ToolError }) {
       },
     },
   };
+}
+
+export function subjectWatchV2Tools({ withEnvelope, ToolError }) {
+  const unwrap = result => {
+    if (!result?.ok) throw new ToolError({ error: result?.error || 'subject_watch_unavailable' });
+    return parseSubjectWatchV2(result);
+  };
+  const tools = {};
+  for (const command of ['watch', 'pause', 'resume', 'replace-policy', 'unwatch', 'read', 'list']) {
+    const write = !['read', 'list'].includes(command);
+    const verb = { watch: 'watch-subject-v2', unwatch: 'unwatch-subject-v2', list: 'list-subject-watches-v2',
+      read: 'read-subject-watch-v2', pause: 'pause-subject-watch-v2', resume: 'resume-subject-watch-v2',
+      'replace-policy': 'replace-subject-watch-policy-v2' }[command];
+    const properties = command === 'list' ? {
+      cursor: { type: 'string', pattern: UUID.source },
+      limit: { type: 'integer', minimum: 1, maximum: 100, default: 50 },
+    } : { ...targetProperties };
+    const required = command === 'list' ? [] : ['subject_type', 'subject_id'];
+    if (write) {
+      properties.idempotency_key = { type: 'string', pattern: UUID.source };
+      required.push('idempotency_key');
+    }
+    if (write && command !== 'watch') {
+      properties.subscription_id = { type: 'string', pattern: UUID.source };
+      properties.base_version = { type: 'integer', minimum: 1 };
+      required.push('subscription_id', 'base_version');
+    }
+    if (['watch', 'replace-policy'].includes(command)) {
+      properties.policy = subjectWatchPolicySchema;
+      required.push('policy');
+    }
+    tools[verb] = {
+      humanOnly: true,
+      humanCallerOnly: true,
+      ...(write ? { write: true } : { writerConnection: true }),
+      description: `Watch v2 ${command}. Server-derived partner only. Separate v2 policy lifecycle; v1 unchanged. Listing targets refuse until a canonical listing contract exists. Watch and resume are quiet. Exact subscription and lifecycle version required for changes.`,
+      inputSchema: { type: 'object', additionalProperties: false, properties, required },
+      handler: async (c, actor, args) => {
+        if (args.policy && !validSubjectWatchPolicy(args.policy)) throw new ToolError({ error: 'watch_policy_invalid' });
+        const run = async () => unwrap((await c.query(
+          'select ops.subject_watch_v2($1,$2::jsonb) as result', [command, JSON.stringify(args)])).rows[0]?.result);
+        if (!write) return run();
+        await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
+        return withEnvelope(c, actor, verb, args, run);
+      },
+    };
+  }
+  return tools;
 }

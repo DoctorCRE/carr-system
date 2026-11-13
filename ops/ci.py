@@ -272,12 +272,16 @@ class Controller:
             self.show('worker-types', tail=25, error=True)
             self.verdict('bad', 'Worker verb contract types failed')
             return
+        if self.run_quiet('staged-types', ['npm', '--prefix', 'mcp-server', 'run', 'check:staged']):
+            self.show('staged-types', tail=25, error=True)
+            self.verdict('bad', 'staged strict TypeScript gate failed')
+            return
         if not os.access('bin/type-check.sh', os.X_OK):
             self.verdict('skip', 'bin/type-check.sh not present')
             return
         rc = self.run_quiet('types', ['./bin/type-check.sh'])
         if rc == 0:
-            self.verdict('ok', 'Worker verb contracts and Python types pass')
+            self.verdict('ok', 'Staged strict TypeScript, Worker verb contracts and Python types pass')
         elif rc == 78:
             version = 'unknown'
             for python in (str(ROOT / '.venv/bin/python'), 'python3'):
@@ -299,7 +303,7 @@ class Controller:
             self.verdict('bad', 'mypy found shape mistakes — see the errors above')
 
     def check_gates(self):
-        if self.run_quiet('registry-check', ['node', 'ops/scac-mutation-inventory.mjs']):
+        if self.run_quiet('registry-check', ['node', 'ops/scac-mutation-inventory.ts']):
             self.fail_tail('registry-check')
             self.verdict('bad', 'committed registry differs from source; run ./run.sh regen registry')
             return

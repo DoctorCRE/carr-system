@@ -7,12 +7,12 @@
   ],
   "repositories": [
     "DoctorCRE/carr-system",
-    "jbookout/doctorcre-app",
+    "DoctorCRE/doctorcre-app",
     "jbookout/software-factory"
   ],
   "repository_roots": {
     "DoctorCRE/carr-system": "~/carr-system",
-    "jbookout/doctorcre-app": "~/doctorcre-app",
+    "DoctorCRE/doctorcre-app": "~/doctorcre-app",
     "jbookout/software-factory": "~/software-factory"
   },
   "board": "carr-v5",

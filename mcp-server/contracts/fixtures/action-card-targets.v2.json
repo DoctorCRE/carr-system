@@ -1,0 +1,120 @@
+[
+  {
+    "schema_version": "action-link-resolve.v2",
+    "ref": "al1_Y3I6MjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTAwOjQzOTJkOWVlOTlhM2U3OTQwOTk5YzU2OGJkNGM3YjYx",
+    "card": {
+      "kind": "post_call_review",
+      "id": "20000000-0000-4000-8000-000000000100",
+      "source_version": "4392d9ee99a3e7940999c568bd4c7b61",
+      "state": "pending_review",
+      "detail": {
+        "changes": [
+          {
+            "id": "20000000-0000-4000-8000-000000000600",
+            "kind": "next_step",
+            "status": "pending",
+            "payload": {
+              "action": "Synthetic pending action"
+            },
+            "undone_at": null,
+            "evidence_quote": "Synthetic evidence",
+            "applied_automatically": false
+          }
+        ],
+        "reviewed": false,
+        "candidates": [],
+        "session_id": "20000000-0000-4000-8000-000000000100",
+        "started_at": "2026-11-01T00:00:00+00:00"
+      },
+      "actions": [
+        {
+          "action": "review",
+          "verb": "review-call-outcome",
+          "args": {
+            "session_id": "20000000-0000-4000-8000-000000000100"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "schema_version": "action-link-resolve.v2",
+    "ref": "al1_ZmU6MjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMjAwOjE",
+    "card": {
+      "kind": "feedback_event",
+      "id": "20000000-0000-4000-8000-000000000200",
+      "source_version": "1",
+      "state": "resolved",
+      "detail": {
+        "action": "comment",
+        "comment": "Synthetic feedback",
+        "event_id": "20000000-0000-4000-8000-000000000200",
+        "created_at": "2026-11-01T00:00:00+00:00",
+        "property_id": "20000000-0000-4000-8000-000000000300",
+        "shortlisted": null,
+        "projection_id": "20000000-0000-4000-8000-000000000300",
+        "share_grant_id": "20000000-0000-4000-8000-000000000300"
+      },
+      "actions": []
+    }
+  },
+  {
+    "schema_version": "action-link-resolve.v2",
+    "ref": "al1_Y3I6MjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTAxOjhlNDUwMTM3Y2UzMjk5ODM1ZTVhMWNkODFjNzUxYWJj",
+    "card": {
+      "kind": "post_call_review",
+      "id": "20000000-0000-4000-8000-000000000101",
+      "source_version": "8e450137ce3299835e5a1cd81c751abc",
+      "state": "pending_review",
+      "detail": {
+        "changes": [
+          {
+            "id": "20000000-0000-4000-8000-000000000601",
+            "kind": "next_step",
+            "status": "pending",
+            "payload": {
+              "action": "Synthetic pending action"
+            },
+            "undone_at": null,
+            "evidence_quote": "Synthetic evidence",
+            "applied_automatically": false
+          }
+        ],
+        "reviewed": false,
+        "candidates": [],
+        "session_id": "20000000-0000-4000-8000-000000000101",
+        "started_at": "2026-11-01T00:00:00+00:00"
+      },
+      "actions": [
+        {
+          "action": "review",
+          "verb": "review-call-outcome",
+          "args": {
+            "session_id": "20000000-0000-4000-8000-000000000101"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "schema_version": "action-link-resolve.v2",
+    "ref": "al1_ZmU6MjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMjAxOjI",
+    "card": {
+      "kind": "feedback_event",
+      "id": "20000000-0000-4000-8000-000000000201",
+      "source_version": "2",
+      "state": "resolved",
+      "detail": {
+        "action": "comment",
+        "comment": "Synthetic feedback",
+        "event_id": "20000000-0000-4000-8000-000000000201",
+        "created_at": "2026-11-01T00:00:00+00:00",
+        "property_id": "20000000-0000-4000-8000-000000000301",
+        "shortlisted": null,
+        "projection_id": "20000000-0000-4000-8000-000000000301",
+        "share_grant_id": "20000000-0000-4000-8000-000000000301"
+      },
+      "actions": []
+    }
+  }
+]

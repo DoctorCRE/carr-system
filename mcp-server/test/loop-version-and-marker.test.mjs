@@ -1,4 +1,4 @@
-import { NOW } from "./helpers/fixed-clock.mjs";
+import { NOW } from "./helpers/fixed-clock.ts";
 // loop-version-and-marker.test.mjs — coverage for the two Phase 1 defects
 // found live 2026-08-13 (decision 7026246b):
 //
@@ -32,7 +32,8 @@ import { NOW } from "./helpers/fixed-clock.mjs";
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { TOOLS, ToolError, executeRegisteredTool, compareVersion, pgConstraintError } from "../src/tools.js";
+import { TOOLS, ToolError, executeRegisteredTool, compareVersion } from "../src/tools.js";
+import { pgConstraintError } from "../src/constraint-errors.ts";
 
 // ────────────────────────────────────────────────────────────────────────
 // compareVersion — pure logic, no DB. This is the actual fix for defect 1:

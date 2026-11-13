@@ -1,0 +1,11 @@
+{
+  "node": [],
+  "worker": [
+    "../practice-plugin/src/runway.ts",
+    "../practice-plugin/src/verticals.ts"
+  ],
+  "entry": [
+    "../practice-plugin/src/runway.ts",
+    "../practice-plugin/src/verticals.ts"
+  ]
+}

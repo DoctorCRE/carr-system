@@ -1,0 +1,13 @@
+{
+  "node": [
+    "portal-parity/probes.ts",
+    "portal-parity/rows.ts",
+    "test/portal-parity-probes.test.ts",
+    "test/portal-parity.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "test/portal-parity-probes.test.ts",
+    "test/portal-parity.test.ts"
+  ]
+}

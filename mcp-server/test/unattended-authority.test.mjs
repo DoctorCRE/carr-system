@@ -25,8 +25,8 @@ import {
 } from "../src/identity.js";
 import { partnerAuthoritySlugForActor } from "../src/partner-authority.js";
 import { PROFILES, allowedIn, authorityDsnForActor, profileForActor, readCallCountSQL } from "../src/mcp.js";
-import { LOCAL_CLIENT_PROFILE_NAMES, selectLocalClientCredential } from "../local-client-auth.mjs";
-import { mcpInventory } from "../../ops/scac-mutation-inventory.mjs";
+import { LOCAL_CLIENT_PROFILE_NAMES, selectLocalClientCredential } from "../local-client-auth.ts";
+import { mcpInventory } from "../../ops/scac-mutation-inventory.ts";
 
 const SECRET = "unattended-secret-fixture";
 const RUNNER = "nightly-mac";
@@ -34,6 +34,18 @@ const runnerMap = (sponsor, token = SECRET, runner = RUNNER) =>
   JSON.stringify({ [sponsor]: { [runner]: token } });
 const MAP = runnerMap("joe");
 const BEARER = `Bearer ${SECRET}`;
+
+const WATCH_V2_VERBS = [
+  "list-subject-watches-v2",
+  "pause-subject-watch-v2",
+  "read-subject-watch-v2",
+  "replace-subject-watch-policy-v2",
+  "resume-subject-watch-v2",
+  "unwatch-subject-v2",
+  "watch-subject-v2",
+];
+const watchV2Migration = readFileSync(new URL("../../migrations/1162_subject_watch_v2.sql", import.meta.url), "utf8");
+const watchActorMigration = readFileSync(new URL("../../migrations/1154_subject_watches.sql", import.meta.url), "utf8");
 
 const forbiddenClient = {
   query: async (text) => {
@@ -184,12 +196,12 @@ test("identity merges, retrieval, board answers, partner-only deal acts and huma
   assert.equal(TOOLS["confirm-merge"].humanCallerOnly, true);
   assert.equal(TOOLS["confirm-merge"].humanOnly, true);
   const flagged = Object.keys(TOOLS).filter(name => TOOLS[name].humanCallerOnly === true);
-  assert.deepEqual(flagged.sort(), ["answer-board-question", "answer-work-request-for-joe",
+  assert.deepEqual(flagged.sort(), ["abandon-deal-deliverable", "answer-board-question", "answer-work-request-for-joe",
     "append-tour-entrance-verification-receipt", "cancel-pending-deal", "commit-winning-property",
-    "confirm-email-deal-progress", "confirm-email-filing", "confirm-email-next-step", "confirm-merge", "confirm-requirement-reply", "dismiss-email-proposal", "edit-email-draft", "finalize-deal-deliverable", "handle-email-proposal",
-    "record-artifact-preservation-hold", "record-deal-closing", "record-evidence-subject-link", "record-lifecycle-correction",
+    "confirm-email-deal-progress", "confirm-email-filing", "confirm-email-next-step", "confirm-merge", "confirm-requirement-reply", "dismiss-email-proposal", "edit-email-draft", "finalize-deal-deliverable", "handle-email-proposal", "invalidate-web-push-session-v1",
+    "read-web-push-config-v1", "read-web-push-delivery-status-v1", "read-web-push-subscriptions-v1", "record-artifact-preservation-hold", "record-deal-closing", "record-evidence-subject-link", "record-lifecycle-correction",
     "record-partner-lifecycle-fact", "record-tour-map-promotion-receipt", "record-tour-pdf-human-review",
-    "register-record-source-authority-policy", "reject-requirement-reply", "retire-retrieval-curation", "set-deal-deliverable-visibility", "snooze-email-proposal", "start-deal-deliverable", "submit-doc-request", "submit-email-draft", "undo-email-thread-filing"]);
+    "register-record-source-authority-policy", "register-web-push-subscription-v1", "reject-requirement-reply", "resolve-action-link-v2", "retire-retrieval-curation", "revoke-web-push-subscription-v1", "set-deal-deliverable-visibility", "snooze-email-proposal", "start-deal-deliverable", "submit-doc-request", "submit-email-draft", "undo-email-thread-filing", ...WATCH_V2_VERBS, "read-subject-watch-changes-v1"].sort());
 });
 
 test("confirm-merge refuses the unattended actor before database access", async () => {
@@ -203,6 +215,20 @@ test("confirm-merge refuses the unattended actor before database access", async 
   assert.equal(error.payload.error, "human_only_verb_requires_verified_partner");
   assert.equal(error.payload.verb, "confirm-merge");
   assert.equal(error.payload.actor_class, "sponsored_agent");
+});
+
+test("partner upload mutations refuse unattended callers before database access", async () => {
+  for (const verb of ["start-deal-deliverable", "finalize-deal-deliverable", "abandon-deal-deliverable"]) {
+    assert.equal(TOOLS[verb].humanOnly, true, verb);
+    assert.equal(TOOLS[verb].humanCallerOnly, true, verb);
+    assert.equal(UNATTENDED_AUTHORITY_VERBS.includes(verb), false, verb);
+    const error = await executeRegisteredTool(forbiddenClient, unattended(), verb, {})
+      .then(() => null, e => e);
+    assert.ok(error instanceof ToolError, verb);
+    assert.equal(error.payload.error, "human_only_verb_requires_verified_partner", verb);
+    assert.equal(error.payload.verb, verb);
+    assert.equal(error.payload.actor_class, "sponsored_agent", verb);
+  }
 });
 
 // ---------- partner authority: exactly the allowlist ----------
@@ -247,7 +273,7 @@ test("rule-context, rule-adoption and deal-fact verbs refuse the unattended acto
 test("every humanOnly/authorityOnly verb off the allowlist refuses the unattended actor", async () => {
   const off = authorityVerbs().filter(name =>
     !UNATTENDED_AUTHORITY_VERBS.includes(name) && TOOLS[name].humanCallerOnly !== true);
-  for (const verb of ["bind-rule-context-contract", "record-executed-lease"])
+  for (const verb of ["bind-rule-context-contract", "record-executed-lease", "read-deal-document-text"])
     assert.ok(off.includes(verb), verb);
   for (const verb of off)
     assert.equal((await gateError(unattended(), verb))?.payload?.error,
@@ -323,4 +349,89 @@ test("the unattended client profile never falls back to the attended local token
     { CARR_MCP_CLIENT_PROFILE: "unattended", CARR_MCP_LOCAL_TOKEN: "attended-secret" }, "").token, "");
   // and the attended profile never borrows the unattended token
   assert.equal(selectLocalClientCredential({}, "CARR_MCP_UNATTENDED_TOKEN=unattended-secret\n").token, "");
+});
+
+test('every push registry verb participates in unattended refusal coverage', async () => {
+  for (const name of ['register-web-push-subscription-v1', 'revoke-web-push-subscription-v1',
+    'read-web-push-delivery-status-v1', 'read-web-push-subscriptions-v1', 'invalidate-web-push-session-v1']) {
+    assert.ok(authorityVerbs().includes(name), name);
+    assert.equal(TOOLS[name].humanCallerOnly, true, name);
+    assert.equal((await gateError(unattended(), name))?.payload?.error,
+      'human_only_verb_requires_verified_partner', name);
+  }
+});
+test('document retention reader requires attended partner authority', () => {
+  assert.equal(TOOLS['read-deal-document-text'].humanOnly, true);
+  assert.equal(allowedIn('unattended', 'read-deal-document-text', TOOLS['read-deal-document-text']), false);
+});
+
+const documentTextProducers = [
+  ["record-deal-document-text", false, {
+    document_ref: "20000000-0000-4000-8000-000000000001",
+    entity_ref: "20000000-0000-4000-8000-000000000002",
+    content_hash: "a".repeat(64), text_format_version: "page-text.v1",
+    status: "produced", pages: ["Synthetic retained text"],
+  }],
+  ["list-deal-document-text-sources", true, { limit: 1 }],
+];
+
+for (const [verb, profileAdmitted, args] of documentTextProducers) {
+  test(`${verb} automation metadata matches its registered unattended guard`, async () => {
+    assert.notEqual(TOOLS[verb].humanOnly, true);
+    assert.notEqual(TOOLS[verb].authorityOnly, true);
+    assert.notEqual(TOOLS[verb].humanCallerOnly, true);
+    assert.equal(UNATTENDED_AUTHORITY_VERBS.includes(verb), false);
+    assert.equal(allowedIn("unattended", verb, TOOLS[verb]), profileAdmitted);
+    const reachedDatabase = new Error("unattended producer reached the database");
+    const client = { query: async () => { throw reachedDatabase; } };
+    const actor = { ...unattended(), id: "10000000-0000-0000-0000-000000000010" };
+    await assert.rejects(executeRegisteredTool(client, actor, verb, args),
+      error => error === reachedDatabase);
+    const partner = {
+      id: "10000000-0000-0000-0000-000000000002", slug: "joe", human: true, via: "oauth",
+    };
+    await assert.rejects(executeRegisteredTool(forbiddenClient, partner, verb, args), error => {
+      assert.ok(error instanceof ToolError);
+      assert.equal(error.payload.error, "not_in_profile");
+      return true;
+    });
+  });
+}
+
+for (const verb of WATCH_V2_VERBS) {
+  test(`${verb} metadata matches the literal-human store guard`, () => {
+    assert.match(watchV2Migration, /a uuid:=ops\.subject_watch_actor\(\)/);
+    assert.match(watchActorMigration, /kind='human' and slug in \('joe','dell'\)/);
+    assert.equal(TOOLS[verb].humanOnly, true, verb);
+    assert.equal(TOOLS[verb].humanCallerOnly, true, verb);
+  });
+  test(`${verb} refuses registered unattended dispatch before database access`, async () => {
+    const error = await executeRegisteredTool(forbiddenClient, unattended(), verb, {}).then(() => null, e => e);
+    assert.ok(error instanceof ToolError);
+    assert.equal(error.payload.error, "human_only_verb_requires_verified_partner");
+    assert.equal(error.payload.verb, verb);
+    assert.equal(error.payload.actor_class, "sponsored_agent");
+  });
+}
+
+import { hermesActorForToken, hermesCosActorForToken } from "../src/identity.js";
+
+test("Hermes credentials retain server-derived sponsorship", () => {
+  const selected = selectLocalClientCredential({ CARR_MCP_CLIENT_PROFILE: "hermes-projector" }, "CARR_HERMES_MCP_TOKEN=hermes-secret");
+  const serverActor = hermesActorForToken(
+    `Bearer ${selected.token}`, JSON.stringify({ "hermes-pilot": "hermes-secret" }));
+  assert.deepEqual({ slug: serverActor.slug, sponsor: serverActor.sponsoring_human_slug,
+    via: serverActor.via, hermes: serverActor.hermes }, {
+    slug: "hermes-pilot", sponsor: "joe", via: "hermes-token", hermes: true,
+  }, "the selected client credential resolves to exact server-derived reader provenance");
+});
+
+test("Hermes CoS credentials retain server-derived sponsorship", () => {
+  const selected = selectLocalClientCredential({ CARR_MCP_CLIENT_PROFILE: "hermes-cos" }, "CARR_HERMES_COS_MCP_TOKEN=cos-secret");
+  const serverActor = hermesCosActorForToken(
+    `Bearer ${selected.token}`, JSON.stringify({ "hermes-pilot": "cos-secret" }));
+  assert.deepEqual({ slug: serverActor.slug, sponsor: serverActor.sponsoring_human_slug,
+    via: serverActor.via, hermesCos: serverActor.hermesCos }, {
+    slug: "hermes-pilot", sponsor: "joe", via: "hermes-cos-token", hermesCos: true,
+  });
 });

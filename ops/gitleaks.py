@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.request
 
 VERSION = '8.30.0'
@@ -31,9 +32,18 @@ def binary(install=False):
     archive = cache / 'release.tar.gz'
     executable = cache / 'gitleaks'
     if install and not archive.exists():
-        data = urllib.request.urlopen(
-            f'https://github.com/gitleaks/gitleaks/releases/download/v{VERSION}/gitleaks_{VERSION}_{target}.tar.gz',
-            timeout=60).read()
+        for attempt in range(3):
+            try:
+                print('Gitleaks release download attempt ' + str(attempt + 1), file=sys.stderr)
+                with urllib.request.urlopen(
+                        f'https://github.com/gitleaks/gitleaks/releases/download/v{VERSION}/gitleaks_{VERSION}_{target}.tar.gz',
+                        timeout=30) as response:
+                    data = response.read()
+                break
+            except OSError:
+                if attempt == 2:
+                    raise
+                time.sleep(2 ** (attempt + 1))
         if hashlib.sha256(data).hexdigest() != ARCHIVES[target]:
             raise ValueError('Gitleaks release checksum mismatch')
         cache.mkdir(parents=True, exist_ok=True, mode=0o700)

@@ -1,7 +1,7 @@
 // Test Deal Room release verb registration and account migration.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readMigration } from "./migration-source.testhelper.mjs";
+import { readMigration } from "./migration-source.testhelper.ts";
 import { createHash } from "node:crypto";
 import { TOOLS } from "../src/tools.js";
 

@@ -15,7 +15,7 @@ export const HOME_INBOX_CONTRACT = Object.freeze({
   },
   sections: ['inbox', 'working', 'held', 'done', 'snoozed', 'settled'],
   done_window_days: 7,
-  notification_subject_types: ['deal', 'loop', 'call', 'email', 'doc_conversation_request'],
+  notification_subject_types: ['deal', 'lease', 'loop', 'call', 'email', 'doc_conversation_request'],
   limit: 1000,
   truncated: 'boolean; the item limit or 10000-notification scan bound was exceeded',
   ordering: 'Unfinished first, newest activity first, item ID as tie breaker',

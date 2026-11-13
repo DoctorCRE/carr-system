@@ -1261,7 +1261,8 @@ def _canonical_health():
             if not (bad or unreceipted or missing or stuck):
                 print(f"  OK {len(live_jobs)} live job(s), every due window present; "
                       "no terminal failure, stuck state, or unreceipted success")
-        rc = _canonical_contradiction_alarm() or rc
+        if not CANONICAL_FIXTURE:
+            rc = _canonical_contradiction_alarm() or rc
 
     if CANONICAL_SECTION in ("all", "registry"):
         print("Registry integrity — canonical v_export_leads")

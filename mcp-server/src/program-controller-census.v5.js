@@ -41,7 +41,7 @@
 //
 // This module is deliberately a library, not a program: it takes nothing from a
 // process and carries no self-execution construct. The sealed frontier
-// predicate in ops/scac-mutation-inventory.mjs matches on PLAIN TEXT, so even
+// predicate in ops/scac-mutation-inventory.ts matches on PLAIN TEXT, so even
 // naming those constructs in a comment here would move the frontier and cost a
 // registry successor.
 
@@ -424,27 +424,4 @@ export async function readProgramControllerCensus({
     release_answer: releaseAnswer,
     coverage,
   };
-}
-
-/**
- * The admission decision for one slice, for the door in engineering-runtime.js.
- * Returns the evaluator's own frozen answer, or a typed dependency failure the
- * door records and returns rather than throwing away.
- */
-export async function evaluateSliceAdmissionForSlice({
-  client, sliceRef, programRef, repositoryRoot = null, now = () => new Date(),
-}) {
-  return evaluateSliceAdmission(await readSliceAdmissionRequest({
-    client, sliceRef, programRef, repositoryRoot, now }));
-}
-
-/**
- * The resume decision for one slice, or `null` when the slice has no checkpoint
- * row — which leaves the replay branch exactly as it was.
- */
-export async function evaluateCheckpointResumeForSlice({
-  client, sliceRef, repositoryRoot = null, now = () => new Date(),
-}) {
-  const request = await readCheckpointResumeRequest({ client, sliceRef, repositoryRoot, now });
-  return request === null ? null : evaluateCheckpointResume(request);
 }

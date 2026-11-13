@@ -86,8 +86,8 @@ set local carr.verified_human_actor_slug='joe';
 do $client_allowlist$
 declare
   v_actor_id text; v_digest text; v_share uuid; v_packet jsonb; v_render jsonb; v_map jsonb; v_text text; v_key text;
-  v_allowed_stop_keys text[] := array['property_ref','route_sequence','route_label','name','address','suite','property_type','size','asking_economics','availability','parking'];
-  v_forbidden text[] := array['Gate code','Bob Landlord','251-555-0100','251 555 01 00','tight on budget','Acme Pediatrics','ownerphoto','2031-03-04','Stop 1',
+  v_allowed_stop_keys text[] := array['property_ref','route_sequence','route_label','name','address','suite','property_type','size','asking_economics','availability','parking','public_packet_note','appointment_start','appointment_end'];
+  v_forbidden text[] := array['Gate code','Bob Landlord','251-555-0100','251 555 01 00','tight on budget','Acme Pediatrics','ownerphoto','Stop 1',
     'b1000000-0000-4000-8000-000000000001','b2000000-0000-4000-8000-000000000001','ac100000-0000-4000-8000-000000000001',
     'b9000000-0000-4000-8000-00000000000','b5000000-0000-4000-8000-000000000001','b6000000-0000-4000-8000-000000000001'];
   v_needle text;
@@ -97,7 +97,7 @@ begin
   select id::text into strict v_actor_id from public.actor where slug='joe' and active and kind='human';
 
   -- The allowlist is exactly the eight fields on today's Tour PDF.
-  if ops.tour_client_field_keys() is distinct from array['display.name','display.address','suite','property_type','size','asking_economics','availability','parking']::text[] then
+  if ops.tour_client_field_keys() is distinct from array['display.name','display.address','suite','property_type','size','asking_economics','availability','parking','public_packet_note']::text[] then
     raise exception 'client field allowlist drifted from the ruling';
   end if;
   -- `is distinct from false`, not plain truthiness: a NULL answer (unknown
@@ -691,6 +691,10 @@ begin
     end;
   end loop;
 
+  insert into ops.tour_field_assertion(id,organization_tenant_id,property_id,field_key,value,source_evidence_id,rights_receipt_id,observed_at,effective_from,effective_to,confidence,data_classification,review_state,created_at)
+  select 'b9000000-0000-4000-8000-000000000090',organization_tenant_id,property_id,'public_packet_note','"Please meet in the lobby"',source_evidence_id,rights_receipt_id,observed_at,effective_from,effective_to,confidence,data_classification,review_state,created_at
+  from ops.tour_field_assertion where id='b9000000-0000-4000-8000-000000000008';
+  v_all_client_facts:=v_all_client_facts||',{"property_id":"b1000000-0000-4000-8000-000000000001","field_assertion_id":"b9000000-0000-4000-8000-000000000090","display_field_key":"public_packet_note"}';
   -- A clean seal of exactly the client fields -- ordinary text the old rule
   -- refused -- succeeds, is promoted for the map, and shares.
   insert into ops.tour_public_projection(id,organization_tenant_id,tour_id,projection_version,route_version,as_of,facts_only,projection_digest,status)
@@ -719,6 +723,11 @@ begin
   v_packet:=ops.read_tour_share_packet('sha256:'||repeat('e',64));
   v_render:=ops.read_tour_packet_for_render('tour-client-share-proof','ac100000-0000-4000-8000-000000000001',v_actor_id);
   v_map:=ops.read_tour_share_map('sha256:'||repeat('e',64));
+  if v_packet->>'contract_version'<>'2.1.0' or v_render->'packet'->>'renderer_version'<>'2.0.0' then raise exception 'packet versions missing'; end if;
+  if v_packet->'stops'->0->>'public_packet_note'<>'Please meet in the lobby' then raise exception 'public packet note missing'; end if;
+  if (v_packet->'stops'->0->>'appointment_start')::timestamptz <> '2031-03-04 14:00:00+00'::timestamptz
+    or (v_packet->'stops'->0->>'appointment_end')::timestamptz <> '2031-03-04 14:30:00+00'::timestamptz then raise exception 'recorded appointment differs'; end if;
+  if v_packet->'stops' is distinct from v_render->'packet'->'properties' then raise exception 'share/render packet parity differs'; end if;
   if v_packet is null or jsonb_array_length(v_packet->'stops')<>1 then raise exception 'client packet did not read back one stop'; end if;
   if v_render is null or jsonb_array_length(v_render->'packet'->'properties')<>1 then raise exception 'render packet did not read back one property'; end if;
   if v_map is null or jsonb_array_length(v_map->'points')<>1 or v_map->'points'->0->>'route_label'<>'A' then raise exception 'client map did not read back one marked point: %', v_map; end if;
@@ -800,7 +809,7 @@ begin
   end loop;
 end $client_allowlist$;
 
--- The GENERATED adversarial corpus (test/fixtures/tour-client-text-adversarial.mjs):
+-- The GENERATED adversarial corpus (test/fixtures/tour-client-text-adversarial.ts):
 -- every access-code trigger against every ASCII punctuation mark and the
 -- allowlisted Unicode dashes, quotes and bullets as the connector, the same
 -- characters as phone separators, and the reviewer's link forms. Each

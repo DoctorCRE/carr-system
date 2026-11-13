@@ -17,8 +17,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { neonConfig } from '@neondatabase/serverless';
-import { acquireDisposablePostgres } from './disposable-postgres.mjs';
-import { callContext, openCallSession, seedSyntheticBook, rehearsalClock, observeRehearsalClaim } from './call-rehearsal.mjs';
+import { acquireDisposablePostgres } from './disposable-postgres.ts';
+import { callContext, openCallSession, seedSyntheticBook, rehearsalClock, observeRehearsalClaim } from './call-rehearsal.ts';
 import { APP_STAGING_HOST } from '../../src/staging-browser.ts';
 import { TOOLS, executeRegisteredTool } from '../../src/tools.js';
 
@@ -218,19 +218,21 @@ export async function startLocalCarr({ port = 0, assets = async () => new Respon
    * companion reports the extraction blocked. The call starts at a fixed
    * instant, the rehearsal's, so its call date never depends on the runner.
    */
-  async function fileCall({ distiller = 'stand-in', started = '2026-10-27T15:00:00Z' } = {}) {
+  async function fileCall({ distiller = 'stand-in', started = '2026-10-27T15:00:00Z', env = {}, wait = {} } = {}) {
     const root = mkdtempSync(path.join(tmpdir(), 'local-carr-call-'));
     roots.push(root);
     const call = await openCallSession({ root, started, captureUrl: url, deviceToken, distiller,
       clock: rehearsalClock(started),
       observeClaim: (token, clock) => observeRehearsalClaim((sql, params) => admin.query(sql, params), token, clock),
-      env: { CARR_MCP_URL: `${url}/mcp`, CARR_MCP_LOCAL_TOKEN: localToken, CARR_MCP_ENV: path.join(root, 'no-token-file') } });
+      env: { CARR_MCP_URL: `${url}/mcp`, CARR_MCP_LOCAL_TOKEN: localToken, CARR_MCP_ENV: path.join(root, 'no-token-file'), ...env } });
     calls.push(call);
     const { deals: index } = await mcp('get-call-context', { deal_ids: Object.values(deals) });
     call.writeTranscript();
     await call.request('/api/call-context', callContext(call.session, started, index));
-    await call.waitFor(distiller === 'failing' ? review => review.status?.state === 'blocked'
-      : review => review.report?.automatic?.finished_at);
+    await call.waitFor(distiller === 'failing' ? review => review.status?.extraction_attempts > 0
+      && ['blocked', 'needs_attention'].includes(review.status.state)
+      && review.status.reason && review.status.reason !== 'Extraction attempt did not finish.'
+      : review => review.report?.automatic?.finished_at, wait);
     return call;
   }
 

@@ -43,11 +43,11 @@ class LegacyDispositionTests(unittest.TestCase):
                 board.main(['dispose-legacy', 'test', '--apply'])
             report = json.loads(output.getvalue().split('\n', 1)[1])
             self.assertEqual(report['counts']['done'], 1)
-            self.assertEqual(github.call_args.args[0][2:5], ['116', '--repo', 'jbookout/doctorcre-app'])
+            self.assertEqual(github.call_args.args[0][2:5], ['116', '--repo', 'DoctorCRE/doctorcre-app'])
             saved = json.loads(path.read_text())
             receipt = saved['legacy_history']['recorded']
             self.assertEqual(receipt['status'], 'done')
-            self.assertIn('jbookout/doctorcre-app#116', receipt['reason'])
+            self.assertIn('DoctorCRE/doctorcre-app#116', receipt['reason'])
             self.assertIn(info['mergeCommit']['oid'], receipt['reason'])
             self.assertEqual(receipt['note'], task['note'])
             self.assertEqual(receipt['summary'], task['summary'])
@@ -226,7 +226,7 @@ class LegacyDispositionTests(unittest.TestCase):
             path.write_text(json.dumps({'project': 'test', 'tasks': FIXTURE['tasks']}))
             original = path.read_bytes()
             def github(args):
-                info = FIXTURE['github'][f'{args[4]}#{args[2]}']
+                info = next(info for key, info in FIXTURE['github'].items() if board.canonical_repo(key.split('#')[0]) == board.canonical_repo(args[4]) and key.split('#')[1] == args[2])
                 return {key: info[key] for key in args[-1].split(',') if key in info}
             with patch.dict(os.environ, {'PROGRESS_BOARD_ROOT': directory}), \
                     patch.object(board, 'now_utc', return_value=AT), \

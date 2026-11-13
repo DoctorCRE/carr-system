@@ -1,4 +1,4 @@
-import { NOW } from "./helpers/fixed-clock.mjs";
+import { NOW } from "./helpers/fixed-clock.ts";
 // Test engineering runtime envelopes, admission, plans, receipts, and closure.
 import assert from "node:assert/strict";
 import test from "node:test";

@@ -1,0 +1,10 @@
+{
+  "node": [
+    "src/tour-download-policy.ts",
+    "src/private-object-policy.ts",
+    "test/tour-download-policy.test.ts"
+  ],
+  "entry": [
+    "test/tour-download-policy.test.ts"
+  ]
+}

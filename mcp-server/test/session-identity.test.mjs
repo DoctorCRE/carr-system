@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // WR-000117 — the session-identity read pair's acceptance proofs.
 //
 // EVERY IDENTITY CASE MINTS TWO ACTORS. Both verbs derive the acting actor
@@ -24,7 +25,6 @@ import { PROFILES } from "../src/mcp.js";
 
 const DSN = process.env.DATABASE_URL || "";
 const REQUIRED = process.env.CARR_SESSION_IDENTITY_DB_REQUIRED === "1";
-const LOOPBACK = /@(localhost|127[.]0[.]0[.]1)[:/]|^postgres(ql)?:\/\/(localhost|\/)/;
 
 class ToolError extends Error {
   constructor(fields) { super(fields.error); Object.assign(this, fields); }
@@ -38,8 +38,7 @@ async function skipUnlessDatabase(t) {
     t.skip("the migration class supplies DATABASE_URL");
     return null;
   }
-  assert.ok(LOOPBACK.test(DSN),
-    "REFUSED: this proof seeds four session books and runs against a disposable loopback only");
+  assertDisposableDatabase(DSN);
   return (await import("pg")).default ?? (await import("pg"));
 }
 

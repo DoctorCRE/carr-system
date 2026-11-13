@@ -31,7 +31,7 @@ class PreflightTests(unittest.TestCase):
         mod = load("ci_fixture", "ci-selftest.py")
         with mod.ci_fixture() as root:
             self.assertNotEqual(root, ROOT)
-            self.assertLess(len(list(root.rglob("*.py"))), 33)
+            self.assertLess(len(list(root.rglob("*.py"))), 34)
             rc, output = mod.run(["--only", "dependency"], root=root)
             self.assertEqual(rc, 0, output)
             (root / "requirements.txt").write_text("synthetic-package>=2\n")

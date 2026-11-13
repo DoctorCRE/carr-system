@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // Tests catch-up timeline verbs on the writer route.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -6,7 +7,7 @@ import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { connectionRouteForTool } from '../src/mcp.js';
 
 const dsn = process.env.CARR_WRITER_READ_TEST_DATABASE_URL;
-if (dsn) assert.match(dsn, /^postgres(?:ql)?:\/\/[^@/]*@(?:127\.0\.0\.1|localhost):/);
+if (dsn) assertDisposableDatabase(dsn);
 
 const TIMELINE_VERBS = ['catch-me-up', 'find-and-catch-up', 'prepare-conversation'];
 

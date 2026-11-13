@@ -1,0 +1,17 @@
+stateDiagram-v2
+    [*] --> Collapsed
+    Collapsed --> Loading: Open Historical client fit
+    Loading --> Wins: Valid recorded response
+    Loading --> Empty: No eligible completed wins
+    Loading --> Unavailable: Invalid response or read failure
+    Wins --> Evidence: Open Wins
+    Evidence --> Loading: Refresh history
+    Empty --> Loading: Refresh history
+    Unavailable --> Loading: Refresh history
+    Loading --> Retired: Session invalidated
+    Evidence --> Retired: Session invalidated
+    Retired --> Retired: Late response ignored
+    Retired --> Disposed: Dispose
+    %% never display a name as HTML
+    %% never change UUID navigation, counts or evidence ordering
+    %% never revive retired evidence

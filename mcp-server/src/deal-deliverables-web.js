@@ -1,4 +1,6 @@
 // Verify bounded partner upload bytes and gate private downloads on a current session.
+import { DELIVERABLE_IO_POLICY, boundedBody, dependencyPolicy } from "./private-object-policy.ts";
+export { DELIVERABLE_IO_POLICY } from "./private-object-policy.ts";
 import {
   DELIVERABLE_POLICY,
   DELIVERABLE_PREFIX,
@@ -7,7 +9,7 @@ import {
 } from "./deal-deliverables.js";
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const path = new RegExp(
-  `^${DELIVERABLE_PREFIX}/(${UUID})(?:/(${UUID})/(bytes|download|finalize|visibility))?$`,
+  `^${DELIVERABLE_PREFIX}/(${UUID})(?:/(${UUID})/(bytes|download|finalize|visibility|receipt|abandon))?$`,
 );
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -21,128 +23,6 @@ const json = (body, status = 200) =>
 const refuse = (error) => {
   throw Object.assign(new Error(error), { payload: { error } });
 };
-async function boundedBody(request, max, timeoutMs) {
-  const reader = request.body?.getReader();
-  if (!reader) refuse("upload_size_refused");
-  const expires = Date.now() + timeoutMs;
-  const chunks = [];
-  let size = 0;
-  try {
-    for (;;) {
-      if (Date.now() >= expires) refuse("deliverable_body_timeout");
-      const { done, value } = await deadline(
-        reader.read(),
-        Math.max(1, expires - Date.now()),
-        "deliverable_body_timeout",
-      );
-      if (done) break;
-      size += value.byteLength;
-      if (size > max) {
-        void reader.cancel().catch(() => {});
-        refuse("upload_size_refused");
-      }
-      chunks.push(value);
-    }
-  } catch (error) {
-    void reader.cancel().catch(() => {});
-    throw error;
-  } finally {
-    reader.releaseLock();
-  }
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return bytes;
-}
-export const DELIVERABLE_IO_POLICY = Object.freeze({
-  timeoutMs: 10_000,
-  failureThreshold: 3,
-  cooldownMs: 30_000,
-  maxOutstanding: 4,
-  requestsPerMinute: 60,
-});
-const bucketPolicies = new WeakMap();
-async function deadline(work, milliseconds, code) {
-  let timer;
-  try {
-    return await Promise.race([
-      work,
-      new Promise((_, reject) => {
-        timer = setTimeout(
-          () =>
-            reject(
-              Object.assign(new Error(code), { payload: { error: code } }),
-            ),
-          milliseconds,
-        );
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-function dependencyPolicy(bucket, timeoutMs) {
-  if (bucketPolicies.has(bucket)) return bucketPolicies.get(bucket);
-  let failures = 0,
-    openUntil = 0,
-    outstanding = 0,
-    probing = false;
-  const windows = new Map();
-  const policy = {
-    admit(slug) {
-      const minute = Math.floor(Date.now() / 60_000);
-      const entry = windows.get(slug);
-      const count = entry?.minute === minute ? entry.count + 1 : 1;
-      windows.set(slug, { minute, count });
-      if (count > DELIVERABLE_IO_POLICY.requestsPerMinute)
-        refuse("deliverable_rate_limited");
-    },
-    async run(work) {
-      if (
-        Date.now() < openUntil ||
-        probing ||
-        outstanding >= DELIVERABLE_IO_POLICY.maxOutstanding
-      )
-        refuse("deliverable_storage_unavailable");
-      const probe = openUntil !== 0;
-      if (probe) probing = true;
-      outstanding++;
-      const pending = Promise.resolve()
-        .then(work)
-        .finally(() => {
-          outstanding--;
-        });
-      try {
-        const result = await deadline(
-          pending,
-          timeoutMs,
-          "deliverable_storage_timeout",
-        );
-        failures = 0;
-        openUntil = 0;
-        return result;
-      } catch (error) {
-        if (++failures >= DELIVERABLE_IO_POLICY.failureThreshold || probe) {
-          openUntil = Date.now() + DELIVERABLE_IO_POLICY.cooldownMs;
-          console.error(
-            JSON.stringify({
-              event: "deal_deliverables_storage_circuit_open",
-              cooldown_ms: DELIVERABLE_IO_POLICY.cooldownMs,
-            }),
-          );
-        }
-        throw error;
-      } finally {
-        if (probe) probing = false;
-      }
-    },
-  };
-  bucketPolicies.set(bucket, policy);
-  return policy;
-}
 
 export function createDealDeliverablesHandler({
   transaction,
@@ -192,9 +72,9 @@ export function createDealDeliverablesHandler({
         const verified = await verifyDeliverableBytes(bytes, reservation);
         const result = await transaction(async (c) => {
           const row = await deliverableRow(c, actor, deal, id, { lock: true });
-          if (row.state !== "started") refuse("deliverable_upload_conflict");
-          if (Date.parse(row.expires_at) <= Date.now())
+          if (Date.parse(row.expires_at) <= Date.now() || row.state === "expired")
             refuse("deliverable_upload_expired");
+          if (row.state !== "started") refuse("deliverable_upload_conflict");
           await c.query(
             "update ops.deal_deliverable set state='uploading' where id=$1",
             [id],
@@ -275,8 +155,11 @@ export function createDealDeliverablesHandler({
           : request.method === "POST"
             ? "start-deal-deliverable"
             : null
-        : request.method === "POST"
+        : action === "receipt" && request.method === "GET"
+          ? "read-deal-deliverable"
+          : request.method === "POST"
           ? {
+              abandon: "abandon-deal-deliverable",
               finalize: "finalize-deal-deliverable",
               visibility: "set-deal-deliverable-visibility",
             }[action]

@@ -1,0 +1,55 @@
+  unit-coverage:
+    needs: [select, unit]
+    if: ${{ !cancelled() && !github.event.pull_request.draft && (github.event_name != 'pull_request' || needs.select.outputs['unit-coverage'] == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: unit-receipt-*
+          merge-multiple: true
+          path: unit-receipts
+      - name: Prove exact suite coverage and missing-suite failure
+        run: |
+          python3 ops/ci-unit-shards-selftest.py
+          python3 ops/ci_unit_shards.py verify unit-receipts/*.json
+
+  classes:
+    needs: select
+    # The full class matrix runs on merge groups and scheduled/manual checks.
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.select.outputs.full == 'true') }}
+    name: ${{ matrix.gate_shard == 2 && matrix.job_names.gates_shard_2.name || matrix.job_names[matrix.classes].name }}
+    runs-on: ubuntu-24.04
+    container:
+      options: --init
+      image: ${{ (matrix.classes == 'unit' || matrix.classes == 'gates' || matrix.classes == 'migration') && 'ghcr.io/jbookout/software-factory/ci-postgres@sha256:2efca181e7962b7fed6a1184f88de14117d6c626f64f5cdb7afcb4bdccc461fa' || '' }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARR_CI_POSTGRES_IMAGE: both
+      CARR_LOCAL_PG_ALLOW_HOSTED: "1"
+      CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin
+    strategy:
+      fail-fast: false
+      matrix:
+        gate_shard: [1, 2]
+        # MCP suites run in the unit matrix; this unit group owns practice-plugin.
+        # Every class appears once here (ops/ci-selftest.py verifies this).
+        classes:
+          - "migration"
+          - "lint pushfloor types secret binding artifact"
+          - "unit"
+          - "gates"
+          - "hxprobe"
+          - "dependency"
+        job_names:
+          - migration: {name: "ops/ci.sh --strict --only migration", classes: "migration"}
+            "lint pushfloor types secret binding artifact": {name: "ops/ci.sh --strict --only lint pushfloor types secret binding artifact", classes: "lint pushfloor types secret binding artifact"}
+            unit: {name: "ops/ci.sh --strict --only unit", classes: "unit"}
+            gates: {name: "ops/ci.sh --strict --only gates", classes: "gates"}
+            gates_shard_2: {name: "Gates selftests shard 2 of 2", classes: "gates"}
+            hxprobe: {name: "ops/ci.sh --strict --only hxprobe", classes: "hxprobe"}
+            dependency: {name: "ops/ci.sh --strict --only dependency", classes: "dependency"}
+        # The second dimension partitions only gates; ready runs keep every class.

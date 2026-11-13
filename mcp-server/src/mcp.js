@@ -13,17 +13,18 @@
 
 import { installTourDealAccess } from './tour-deal-access.js';
 import { verbRequestBudgetRefusal } from "./verb-request-budget.js";
-import { neon, Pool } from "@neondatabase/serverless";
+import { neon, Pool } from "./postgres.ts";
 import { budgetedAi } from "./ai-budget.js";
+import { coerceArgsToSchema } from "./input-validation.ts";
 import { publicError } from "./public-errors.ts";
 import { mcpOriginRefusal } from "./oauth-policy.ts";
 import { DOC_TOOL_NAMES, DOC_INSTRUCTIONS, docToolAnnotations } from "./doc-profile.ts";
 import { isolatePullRequests, isolateProduction } from "./work-queue.js";
 import { MEMORY_ATTACH_LINE } from "./doctrine.js";
-import { toolCallContent } from "./untrusted-text.js";
+import { toolCallContent } from "./untrusted-text.ts";
 import { TOOLS, ToolError, executeRegisteredTool, assertRegisteredToolInput, UNATTENDED_AUTHORITY_VERBS,
-  auditIdentity, assertNoCallerAuthorityFields, coerceArgsToSchema,
-  pgConstraintError, describeConstraint } from "./tools.js";
+  auditIdentity, assertNoCallerAuthorityFields } from "./tools.js";
+import { pgConstraintError, describeConstraint } from "./constraint-errors.ts";
 import { canExercisePartnerAuthority, partnerAuthoritySlugForActor } from "./partner-authority.js";
 import { authenticatedIdentity, isKnownPartner, authorizationClassForActor, organizationTenantForActor,
   personalScopeForActor, verifiedAgentSlugForClient } from "./identity.js";
@@ -829,6 +830,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
     // a refused write killed the answer (migration 0223). Anything using this
     // must treat the write as optional: losing it costs a record, never a reply.
     const client = {
+      vapidPublicKey: env.VAPID_PUBLIC_KEY,
       ai: budgetedAi(env),
       pullRequests: isolatePullRequests(env.GITHUB_TOKEN),
       production: isolateProduction(env.GITHUB_TOKEN),
@@ -847,6 +849,11 @@ export async function callTool(env, actor, name, args, profile = "full") {
     // only — never the result itself, never args.
     let ok = true;
     try {
+      if (!actor?.slug) throw new ToolError({ error: "unauthenticated" });
+      const resolved = await client.query("select id from public.actor where slug=$1", [actor.slug]);
+      if (!resolved.rows.length) throw new ToolError({ error: "unauthenticated" });
+      // Preserve identity.js's object-identity brand and all authenticated authority fields.
+      Object.assign(actor, { id: resolved.rows[0].id });
       return await executeRegisteredTool(client, actor, name, args || {});
     } catch (e) {
       ok = false;

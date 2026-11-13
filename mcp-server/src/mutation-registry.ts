@@ -1,0 +1,94 @@
+// Validate operations against the registered mutation manifest.
+import {
+  SCAC_MUTATION_DB_METADATA_AUTHORITY,
+  SCAC_MUTATION_OPERATIONS,
+  SCAC_MUTATION_REGISTRY_DIGEST,
+  SCAC_MUTATION_REGISTRY_VERSION,
+  SCAC_MUTATION_RUNTIME_PROJECTION_AUTHORIZING,
+} from "./scac-mutation-registry.current.generated.ts";
+
+export { SCAC_MUTATION_REGISTRY_DIGEST, SCAC_MUTATION_REGISTRY_VERSION };
+
+type RegistryTool = {
+  registrySource?: string;
+  inputSchema?: { properties?: object };
+  write?: boolean;
+  humanOnly?: boolean;
+  humanCallerOnly?: boolean;
+  authorityOnly?: boolean;
+};
+type Operation = (typeof SCAC_MUTATION_OPERATIONS)[keyof typeof SCAC_MUTATION_OPERATIONS];
+const operations: Readonly<Record<string, Operation>> = SCAC_MUTATION_OPERATIONS;
+
+export class MutationRegistryRefusal extends Error {
+  error: string;
+  operation: unknown;
+  fields?: string[];
+  constructor(error: string, operation: unknown) {
+    super(error);
+    this.name = "MutationRegistryRefusal";
+    this.error = error;
+    this.operation = operation;
+  }
+}
+
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, canonicalize(Reflect.get(value, key))]),
+    );
+  return value;
+}
+
+async function sha256(value: unknown) {
+  const bytes = new TextEncoder().encode(typeof value === "string" ? value : JSON.stringify(canonicalize(value)));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export function registeredOperation(name: unknown) {
+  return typeof name === "string" ? operations[name] || null : null;
+}
+
+export function assertClosedTopLevel(name: unknown, tool: RegistryTool | null | undefined, args: unknown) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return;
+  const allowed = new Set(Object.keys(tool?.inputSchema?.properties || {}));
+  const extras = Object.keys(args)
+    .filter((key) => !allowed.has(key))
+    .sort();
+  if (extras.length) {
+    const refusal = new MutationRegistryRefusal("unregistered_operation_fields", name);
+    refusal.fields = extras;
+    throw refusal;
+  }
+}
+
+export async function assertRegisteredOperation(name: unknown, tool: RegistryTool | null | undefined, args: unknown) {
+  const row = registeredOperation(name);
+  if (!row) throw new MutationRegistryRefusal("unregistered_operation", name);
+  const actual = {
+    source_locator: tool?.registrySource,
+    schema_digest: await sha256(tool?.inputSchema || {}),
+    write: tool?.write === true,
+    human_only: tool?.humanOnly === true,
+    human_caller_only: tool?.humanCallerOnly === true,
+    authority_only: tool?.authorityOnly === true,
+  };
+  for (const [key, value] of Object.entries(actual)) {
+    if (Reflect.get(row, key) !== value) throw new MutationRegistryRefusal("mutation_contract_mismatch", name);
+  }
+  assertClosedTopLevel(name, tool, args);
+  return row;
+}
+
+export function mutationManifestIdentity() {
+  return {
+    registry_version: SCAC_MUTATION_REGISTRY_VERSION,
+    registry_digest: SCAC_MUTATION_REGISTRY_DIGEST,
+    db_metadata_authority: SCAC_MUTATION_DB_METADATA_AUTHORITY,
+    runtime_projection_authorizing: SCAC_MUTATION_RUNTIME_PROJECTION_AUTHORIZING,
+  };
+}

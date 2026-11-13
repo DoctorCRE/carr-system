@@ -5,7 +5,7 @@ import Ajv from 'ajv';
 import { callTool, TOOLS } from '../src/tools.mjs';
 import { addMonths } from '../src/sale-readiness.mjs';
 
-import { runwayFixture, conversionFixture, saleFixture, fact } from './fixtures.mjs';
+import { runwayFixture, conversionFixture, saleFixture, fact } from './fixtures.ts';
 const invoke = (name, args) => {
   const response = callTool(name, args); assert.ok(!response.isError, JSON.stringify(response)); return response.structuredContent.results;
 };
@@ -256,3 +256,41 @@ for (const [name, fixture] of [['calculate_practice_runway_v1', runwayFixture], 
     assert.ok(callTool(name, { ...a, personal_data: 'synthetic' }).isError);
   });
 }
+
+test('runway ledger: scheduled injections, reserve breach, exhaustion and recovery', () => {
+  const a = runwayFixture();
+  a.initial_cash_usd = 10; a.reserve_floor_usd = 5;
+  a.one_time_costs = []; a.recurring_costs = [{ id: 'expense', monthly_usd: 10, start_month: 1, end_month: 3, timing: 'fixed_calendar' }];
+  a.cash_injections = [{ id: 'equity', month: 1, amount_usd: 3, type: 'equity' }];
+  a.receipts.monthly_usd = [0, 0, 30];
+  const r = runway(a).base;
+  assert.deepEqual(r.ledger.map(x => x.closing_cash_usd), [3, -7, 13]);
+  assert.deepEqual(r.ledger.map(x => x.injections_usd), [3, 0, 0]);
+  assert.equal(r.first_reserve_breach_month, 1); assert.equal(r.first_exhaustion_month, 2);
+  assert.equal(r.minimum_cash_month, 2); assert.equal(r.required_initial_cash_usd, 22);
+  for (const [receipts, closing] of [
+    [[0, 15, 10], [3, 8, 8]], [[0, 10, 10], [3, 3, 3]], [[0, 0, 0], [3, -7, -17]],
+  ]) {
+    a.receipts.monthly_usd = receipts;
+    const horizon = runway(a).base;
+    assert.deepEqual(horizon.ledger.map(x => x.closing_cash_usd), closing);
+    assert.equal(horizon.status, 'complete');
+  }
+});
+
+test('runway ledger: initial reserve breach and half-up output rounding', () => {
+  const a = runwayFixture(); a.initial_cash_usd = 0; a.reserve_floor_usd = 1;
+  a.one_time_costs = []; a.recurring_costs = []; a.receipts.monthly_usd = [.005, .005, .005];
+  const r = runway(a).base;
+  assert.equal(r.first_reserve_breach_month, 0);
+  assert.deepEqual(r.ledger.map(x => x.receipts_usd), [.01, .01, .01]);
+  assert.deepEqual(r.ledger.map(x => x.closing_cash_usd), [.01, .01, .02]);
+});
+
+test('runway ledger: missing cost categories suppress funding recommendations', () => {
+  const a = runwayFixture(); a.missing_cost_categories = ['taxes'];
+  const r = callTool('calculate_practice_runway_v1', a).structuredContent;
+  assert.deepEqual(r.missing_inputs, ['taxes']);
+  assert.equal(r.results.base.status, 'incomplete_model');
+  assert.equal(r.results.base.additional_funding_needed_usd, null);
+});

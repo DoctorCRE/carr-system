@@ -200,10 +200,10 @@ def main() -> int:
 
     branch_sources = {
         "bin/restore-rehearse.sh",
+        "ops/neon-persistent-branch.py",
     }
-    # A create through the provider's REST API (POST .../branches) is a branch
-    # create exactly as much as a neonctl call is, so it is discovered too.
-    api_branch_create = re.compile(r'["\x27]POST["\x27]\s*,\s*f?["\x27]/projects/\{[^}]+\}/branches["\x27]')
+    # Project creation also provisions a root branch and must stay inventoried.
+    api_branch_create = re.compile(r'["\x27]POST["\x27]\s*,\s*f?["\x27]/projects(?:/\{[^}]+\}/branches)?["\x27]')
     branch_patterns = (
         re.compile(r'["\x27]branches["\x27]\s*,\s*["\x27]create["\x27]'),
         re.compile(r'(?:\$NEONCTL|\bneon\b)[^\n]*\bbranches\s+create\b'),
@@ -216,7 +216,7 @@ def main() -> int:
                                                           errors="ignore"))
                for pattern in branch_patterns)
     }
-    check("every Neon branch-create implementation is inventoried",
+    check("every Neon project/branch-create implementation is inventoried",
           discovered_branch_sources == branch_sources)
     for relative in sorted(branch_sources):
         source = (REPO / relative).read_text(encoding="utf-8")
@@ -228,7 +228,7 @@ def main() -> int:
         if create_at < 0:
             api_match = api_branch_create.search(source)
             create_at = api_match.start() if api_match else -1
-        authorize_at = source.find("neon-disposable-branch")
+        authorize_at = source.find("neon-persistent-branch" if relative == "ops/neon-persistent-branch.py" else "neon-disposable-branch")
         check(f"{relative} admits metered branch work before create",
               authorize_at >= 0 and create_at >= 0 and authorize_at < create_at)
 

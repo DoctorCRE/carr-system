@@ -1,0 +1,8 @@
+{
+  "node": [
+    "test/web-push-sender.test.ts"
+  ],
+  "entry": [
+    "test/web-push-sender.test.ts"
+  ]
+}

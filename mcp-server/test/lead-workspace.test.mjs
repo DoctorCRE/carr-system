@@ -1,5 +1,5 @@
 // Test lead workspace projections, evidence and lifecycle actions.
-import { readMigration } from "./migration-source.testhelper.mjs";
+import { readMigration } from "./migration-source.testhelper.ts";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -8,7 +8,7 @@ import { TOOLS } from '../src/tools.js';
 const id=n=>`30000000-0000-0000-0000-${String(n).padStart(12,'0')}`;
 const human={id:id(900),slug:'joe',display:'Example Partner',human:true,via:'mcp',client_id:'test'};
 class Fake {
- constructor(){this.row={id:id(1),stage:'new',version:1,base_version:1,suppressed:false,contact_eligible:true,live_party:true,owner_id:null,owner:null,owner_label:null,score:null,score_reason:null,client_id:null};this.state='FL';this.events=[];this.calls=new Map();this.queries=[];this.evidence=[{id:id(10),occurred_at:'2026-10-01T10:00:00Z'}];this.last={event_id:id(20),automatic:true,stage:'new',prior_stage:'outreach_active'};}
+ constructor(){this.row={opportunity_timing:{contract:'lead-opportunity-timing.v1',record_added_at:'2026-09-01T00:00:00Z',status:'unknown',events:[]},id:id(1),stage:'new',version:1,base_version:1,suppressed:false,contact_eligible:true,live_party:true,owner_id:null,owner:null,owner_label:null,score:null,score_reason:null,client_id:null};this.state='FL';this.events=[];this.calls=new Map();this.queries=[];this.evidence=[{id:id(10),occurred_at:'2026-10-01T10:00:00Z'}];this.last={event_id:id(20),automatic:true,stage:'new',prior_stage:'outreach_active'};}
  async query(text,p=[]){const s=text.replace(/\s+/g,' ').trim();this.queries.push({s,p});
  if(s.startsWith('select pg_advisory'))return{rows:[]};
  if(s.startsWith('select request_hash'))return{rows:this.calls.has(p[0])?[this.calls.get(p[0])]:[]};

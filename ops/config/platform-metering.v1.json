@@ -81,7 +81,7 @@
     ],
     "selected_workload": {
       "name": "DoctorCRE Tour search and selection-cart regression",
-      "repository": "jbookout/doctorcre-app",
+      "repository": "DoctorCRE/doctorcre-app",
       "source_commit": "6a9f996cd731a9debe1d9df82b9449f864d28f5e",
       "source_tree": "edc2e0ee8b98d9bed4a1ccb211157ae67a8f732c",
       "command_argv": [
@@ -180,6 +180,42 @@
       "maximums": {
         "requested_lifetime_minutes": 120,
         "active_nondefault_branches": 2
+      }
+    },
+    "neon-persistent-branch": {
+      "platform": "neon",
+      "installed": true,
+      "installed_enforcement_ref": "ops/neon-persistent-branch.py gathers live inventory and consumption before lib/platform_metering.py admission; budget threshold is enforced at creation only; organization spending limit is alert-only",
+      "registration": {
+        "name": "engine-test",
+        "org_id": "org-dry-dew-75906281",
+        "owner": "DoctorCRE engine",
+        "endpoint": {
+          "type": "read_write",
+          "autoscaling_limit_min_cu": 0.25,
+          "autoscaling_limit_max_cu": 0.25,
+          "suspend_timeout_seconds": 300
+        },
+        "monthly_cost_ceiling_usd": 40,
+        "source": {
+          "branch_name": "production",
+          "branch_id": "br-summer-breeze-aw7jh2m5",
+          "project_id": "steep-field-48688294",
+          "database_name": "neondb",
+          "role_name": "neondb_owner"
+        },
+        "destination": {
+          "database_name": "neondb",
+          "role_name": "neondb_owner"
+        },
+        "initialization": {
+          "dump_path": "/Users/booko/engine-facts/full-schema.sql"
+        }
+      },
+      "required_true": [],
+      "required_nonempty": [],
+      "maximums": {
+        "existing_registered_projects": 0
       }
     }
   },

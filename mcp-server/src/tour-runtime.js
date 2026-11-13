@@ -1,7 +1,10 @@
 // Production adapters for the authenticated internal Tour leaf and the public
 // reports leaf. Identity remains owned by Deal Room; writes remain owned by the
 // registered tool envelope; public reads accept digests only.
-import { Pool } from "@neondatabase/serverless";
+import { boundedBody, DELIVERABLE_IO_POLICY } from "./private-object-policy.ts";
+import { tourDownloadPolicy } from './tour-download-policy.ts';
+import { tourCheatHistoryQuery } from "./tour-cheat-history.ts";
+import { Pool } from "./postgres.ts";
 import { installTourDealAccess } from './tour-deal-access.js';
 import { callTool } from "./mcp.js";
 import { ToolError } from "./tool-error.ts";
@@ -214,7 +217,7 @@ export async function runTourPdfRender(context, dependencies = {}) {
         idempotency_key: resultIdempotencyKey, render_job_id: renderJobId,
         status: stored.qc.blocked ? "qc_blocked" : "review_ready", artifact_ref: artifactRef,
         artifact_digest: prepared.rendered.artifactDigest, storage_ref: stored.storageRef,
-        content_length: stored.contentLength, page_count: prepared.rendered.propertyCount,
+        content_length: stored.contentLength, page_count: prepared.rendered.pageCount,
         blocking_finding_count: stored.qc.findings.length, qc_run_digest: stored.qcRunDigest,
       }));
     } catch (error) {
@@ -266,6 +269,11 @@ export function createTourRuntimeAdapters(renderDependencies = {}) {
       const data = projectTourDetail(await readInternal(context,
         "select ops.read_tour_internal_detail($1::text,$2::uuid,$3::text) as data",
         [organizationTenantForActor(context.actor), context.input.tour_id]));
+      return data ? { ok: true, data } : { ok: false, status: 404 };
+    },
+    readCheatSheetHistoryFn: async context => {
+      const data = await readInternal(context, tourCheatHistoryQuery,
+        [organizationTenantForActor(context.actor), context.input.tour_id]);
       return data ? { ok: true, data } : { ok: false, status: 404 };
     },
     readPropertyEvidenceFn: async context => ({ ok: true, data: await withPool(
@@ -346,6 +354,38 @@ async function publicAccess({ env }, transaction, fn) {
 
 export function createReportsRuntimeAdapters() {
   return {
+    downloadFn: async ({ env, sessionDigest, signal }) => {
+      if (!/^sha256:[a-f0-9]{64}$/.test(sessionDigest)) return { ok: false, status: 404 };
+      if (!env.carr_documents?.get) return { ok: false, status: 404 };
+      try {
+        return await tourDownloadPolicy(env.carr_documents).run(signal, async guard => {
+          guard.assertActive();
+          const artifact = await publicAccess({ env }, "begin read only", async client => {
+            const result = await client.query("select ops.read_tour_share_download($1::text) as data", [sessionDigest]);
+            return result.rows[0]?.data;
+          });
+          if (!artifact?.storage_ref || !env.carr_documents?.get || !Number.isSafeInteger(artifact.content_length) || artifact.content_length < 1 || artifact.content_length > 16 * 1024 * 1024) return { ok: false, status: 404 };
+          guard.admitGrant(artifact.grant_id);
+          const object = await env.carr_documents.get(artifact.storage_ref);
+          guard.assertActive();
+          if (!object) return { ok: false, status: 404 };
+          const bytes = object.body
+            ? await boundedBody(object, 16 * 1024 * 1024, DELIVERABLE_IO_POLICY.timeoutMs)
+            : new Uint8Array(await object.arrayBuffer());
+          guard.assertActive();
+          if (bytes.byteLength !== artifact.content_length || await sha256Bytes(bytes) !== artifact.artifact_digest)
+            return { ok: false, status: 404 };
+          return { ok: true, response: new Response(bytes, { headers: {
+            "content-type": "application/pdf", "content-disposition": 'attachment; filename="Tour.pdf"',
+            "cache-control": "no-store",
+          } }) };
+        });
+      } catch (error) {
+        if (error.message === "download_rate_limited" || error.payload?.error === "deliverable_rate_limited")
+          return { ok: false, status: 429 };
+        return { ok: false, status: 503 };
+      }
+    },
     exchangeShareTokenFn: async ({ env, tokenDigest, sessionDigest, sessionExpiresAt, auditDigest }) =>
       publicAccess({ env }, "begin", async client => {
         const result = await sharing.exchange(client, {

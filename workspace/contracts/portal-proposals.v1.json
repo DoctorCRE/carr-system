@@ -1,0 +1,46 @@
+{
+  "schema_version": "portal-proposals.v1",
+  "version": "1.0.0",
+  "transport": "Authenticated carr_writer PostgreSQL connection, never a public SQL interface",
+  "type": "mcp-server/src/portal-proposals.ts PortalProposalRequest and PortalProposalReceipt",
+  "session_contract": "workspace/contracts/client-portal-session.v1.json",
+  "fixture": "workspace/contracts/fixtures/portal-proposals.v1.json",
+  "scope": ["slug from URL", "SHA-256 digest of verified session cookie", "publication_id from host publication"],
+  "operations": {
+    "bind_publication": {
+      "authority": "Trusted partner publication producer after existing deal authorization; never exposed by portal adapter",
+      "sql": "select ops.bind_portal_proposal_publication($1::uuid,$2::integer,$3::uuid[])",
+      "arguments": ["publication_id", "publication_version", "canonical_property_ids"],
+      "idempotency": "Immutable publication ID and version. Exact property array repeats; changed membership conflicts. Publish a new partner publication revision before changing membership."
+    },
+    "read": {
+      "sql": "select ops.portal_proposal($1::text,$2::text,$3::uuid,null,null)",
+      "arguments": ["slug", "digest", "publication_id"],
+      "result": "receipt containing latest selection, current publication revision and retired IDs; empty selection version 0 before first save"
+    },
+    "save": {
+      "sql": "select ops.portal_proposal($1::text,$2::text,$3::uuid,$4::integer,$5::jsonb)",
+      "arguments": ["slug", "digest", "publication_id", "publication_version", "request"],
+      "request": {"version": "nonnegative integer base selection version", "selected": "up to 100 unique lowercase canonical UUIDs in current publication membership", "notes": "object keyed only by selected property IDs, string values up to 2000 UTF-16 code units, matching the retained app parser", "idempotency_key": "1 to 200 characters, frozen with complete request and source publication revision"},
+      "idempotency": "Key scoped to portal. Exact JSON request, publication ID and source revision replay the original receipt, even after newer saves or publication revisions. Changed request or source with same key conflicts. Authorization and current publication enablement precede replay."
+    },
+    "partner_read": {
+      "authority": "Authorized partner deal reader, following the same authorization as list-deal-client-publications; never exposed to portal sessions",
+      "sql": "select ops.read_portal_proposal_for_deal($1::uuid,$2::uuid,$3::integer)",
+      "arguments": ["authorized_deal_id", "publication_id", "proposal_version or null for latest"],
+      "result": "exact stored receipt or null, including after publication withdrawal; never mutates canonical records"
+    }
+  },
+  "receipt": {"status": "success", "schema_version": "portal-proposals.v1", "publication_id": "UUID", "publication_version": "positive integer", "selection": {"version": "integer", "selected": "canonical UUID array", "notes": "property note object"}, "retired": "IDs in latest selection absent from current publication; historical receipts preserve original identities and notes"},
+  "limits": {"request_bytes": 262144, "selected": 100, "note_characters": 2000, "versions_per_publication": 10000},
+  "errors": {"denied": "401 portal_access_denied", "conflict": "409 version_conflict, idempotency_conflict, publication_unavailable or property_not_published", "invalid": "400 invalid_proposal or proposal_capacity", "database_error": "propagate and refuse; never return cached success"},
+  "host_requirements": [
+    "Read and save use read-write transactions because authorization locks the portal row. Commit before returning a receipt.",
+    "Tour List ports unwrap receipt.selection. Save additionally binds the host's exact publication_version, which is not a client-chosen deal/client selector.",
+    "Reject unexpected request keys. Do not forward client identity selectors. Read no internal records on behalf of a portal session.",
+    "Retired entries must be shown with their original IDs and notes. The retained app parser needs host integration for tombstones; it currently accepts only current candidate IDs. Do not silently remap or discard retired notes.",
+    "Use the retained portal HTTP adapter's CSRF, origin, body deadline, rate and concurrency limits. This producer has no public HTTP route. Rank 6 owns public wiring; rank 5 owns partner review and acceptance.",
+    "Use finite statement and connection deadlines, no automatic retry, no persistent cache. A failed or uncertain save retries only its frozen request.",
+    "The proposal is a client suggestion, never a scheduled Tour. Only later partner acceptance may modify a cart, route or deal."
+  ]
+}

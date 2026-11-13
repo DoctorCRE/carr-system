@@ -3,8 +3,8 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID, createHash } from "node:crypto";
-import { acquireDisposablePostgres } from "./helpers/disposable-postgres.mjs";
-import { readMigration } from "./migration-source.testhelper.mjs";
+import { acquireDisposablePostgres } from "./helpers/disposable-postgres.ts";
+import { readMigration } from "./migration-source.testhelper.ts";
 
 import { digest } from "../src/artifact-trust.js";
 import { ORGANIZATION_TENANT_ID } from "../src/identity.js";

@@ -64,9 +64,12 @@ def ci_fixture():
         for name in ("pipelines", "exporters", "lib", "generators", "shared",
                      "fill-engine", "hooks", "migrations", "mcp-server"):
             (root / name).mkdir()
-            if name not in {"migrations", "mcp-server"}:
+            if name not in {"migrations", "mcp-server", "lib"}:
                 (root / name / (name.replace("-", "_") + "_fixture.py")).write_text("value: int = 1\n")
-        (root / "ops/scac-mutation-inventory.mjs").write_text("// Check the synthetic registry.\n")
+        (root / "ops/scac-mutation-inventory.ts").write_text("// Check the synthetic registry.\n")
+        for name in ("release_reader.py", "release-reader-marker.json"):
+            shutil.copy2(REPO / "lib" / name, root / "lib" / name)
+        (root / "ops/migration-depth1.py").write_text("print('synthetic depth-1 acceptance passed')\n")
         (root / "ops/config/ci-check-scope.json").write_text('{}')
         requirements = "synthetic-package>=1\n"
         (root / "requirements.txt").write_text(requirements)
@@ -76,7 +79,8 @@ def ci_fixture():
         tsc = REPO / "mcp-server/node_modules/typescript/bin/tsc"
         (root / "mcp-server/package.json").write_text(json.dumps({
             "private": True,
-            "scripts": {"typecheck": f"node {shlex.quote(str(tsc))} --noEmit --allowJs --checkJs fixture.js"},
+            "scripts": {"typecheck": f"node {shlex.quote(str(tsc))} --noEmit --allowJs --checkJs fixture.js",
+                        "check:staged": "node -e \"process.stdout.write(\'synthetic staged gate\\n\')\""},
         }))
         (root / "mcp-server/fixture.js").write_text("const value = 1;\n")
         mypy = REPO / ".venv/bin/mypy"
@@ -494,20 +498,25 @@ def test_gates_build_hxprobe_before_parallel_selftests():
                      "ci-secret-scan.py", "pii_guard.py"):
             shutil.copy2(REPO / "ops" / name, root / "ops" / name)
         shutil.copy2(REPO / "bin/with-timeout.py", root / "bin/with-timeout.py")
-        (root / "ops/scac-mutation-inventory.mjs").write_text("// Check the synthetic registry.\n")
+        (root / "ops/scac-mutation-inventory.ts").write_text("// Check the synthetic registry.\n")
         (root / "ops/config/ci-check-scope.json").write_text('{}')
         (root / "vendor/hxprobe/Cargo.toml").touch()
         (root / "ops/probe-selftest.py").write_text(
+            "import os\n"
             "from pathlib import Path\n"
+            "binary = Path(os.environ['CARR_HXPROBE_TEST_BINARY'])\n"
+            "assert binary.is_file() and binary.parent.parent != Path('vendor/hxprobe/target').resolve()\n"
             "assert Path('worker-built').exists(), 'worker not built before pool'\n"
             "Path('gate-ran').touch()\n")
         (root / "hooks").mkdir()
         (root / "hooks/gate-integrity.py").write_text("raise SystemExit(0)\n")
         cargo = root / "bin/cargo"
         cargo.write_text("#!/bin/sh\n"
-                         'test "$*" = "build --locked" || exit 9\n'
+                         'test "$1 $2 $3" = "build --locked --target-dir" || exit 9\n'
+                         'test -d "$4" || exit 11\n'
                          'test "$PWD" = "$CARR_TEST_ROOT/vendor/hxprobe" || exit 10\n'
                          'test "$CARR_BUILD_FAIL" = 0 || exit 1\n'
+                         'mkdir -p "$4/debug" && touch "$4/debug/hxprobe"\n'
                          'touch "$CARR_TEST_ROOT/worker-built"\n')
         cargo.chmod(0o755)
         env = fixture_env()
@@ -664,7 +673,7 @@ def test_hosted_migration_ownership():
           and "GH_TOKEN" in wf["jobs"]["fast"]["steps"][-1]["env"])
     check("hosted migration partitions cover all independent proof groups",
           set(wf["jobs"]["migration-fixtures"].get("strategy", {}).get("matrix", {}).get("part", []))
-          == {"reconstruction", "equivalence", "shadow", "gates", "acceptance"}
+          == {"fixtures", "gates", "acceptance"}
           and "--migration-part proofs" in runner["run"])
     check("required aggregate waits for independent fixtures", "migration-fixtures" in wf["jobs"]["checks"]["needs"])
     aggregate = next(st for st in wf["jobs"]["checks"]["steps"] if st.get("name") == "Fail unless every class group succeeded")
@@ -681,7 +690,7 @@ def test_hosted_migration_ownership():
                                     env={**scrubbed_env(), "PATH": str(pathlib.Path(sys.executable).parent) + os.pathsep + os.environ["PATH"],
                                          "CI_DRAFT": draft, "GITHUB_STEP_SUMMARY": str(pathlib.Path(directory) / "summary"),
                                          "CI_NEEDS": json.dumps({"scope": {"result": "success", "outputs": {"full": full}},
-                                                                 "unit-coverage": {"result": "success"}, "classes": {"result": classes},
+                                                                 "unit": {"result": "success"}, "classes": {"result": classes},
                                                                  "migration-fixtures": {"result": fixtures}})})
             check(f"aggregate scope={full!r} fixtures={fixtures} classes={classes}", result.returncode == expected)
     record = next(st for st in wf["jobs"]["checks"]["steps"] if st.get("name") == "Record the tested tree and class contract")
@@ -842,8 +851,16 @@ def test_types_class_catches_a_seeded_type_error():
 
         (root / fixture).write_text(original)
         rc, out = run(["--only", "types"], root=root)
-    check("removing the seed turns the types class green again", rc == 0,
-          f"rc={rc} out={out[-400:]}")
+        check("removing the seed turns the types class green again", rc == 0,
+              f"rc={rc} out={out[-400:]}")
+        package_path = root / "mcp-server/package.json"
+        package = json.loads(package_path.read_text())
+        package["scripts"]["check:staged"] = "node -e 'process.exit(7)'"
+        package_path.write_text(json.dumps(package))
+        rc, out = run(["--only", "types"], root=root)
+        check("types refuses a failing staged strict gate", rc == 1
+              and "staged strict TypeScript gate failed" in out,
+              f"rc={rc} out={out[-400:]}")
 
 UNCOLLECTED_BY_DECISION = {
     "docs/frontier-finding/breakglass_selftest.py":
@@ -1316,7 +1333,7 @@ def test_push_floor_defers_the_gates_class_instead_of_running_it():
     check("naming a deferred gate is not itself a failure", rc == 0, f"rc={rc}")
 
 def test_push_floor_distinguishes_imported_main_paths_from_branch_changes():
-    inherited_name = "mcp-server/test/doctorcre-v5-review.test.mjs"
+    inherited_name = "mcp-server/test/doctorcre-frozen-review.test.ts"
     inherited_gate = "hooks/zz-ci-fixture-inherited-gate.py"
     with _stub_git_answering_the_floor(
             [inherited_name, inherited_gate, FIXTURE_GATE],
@@ -1364,7 +1381,7 @@ def test_push_floor_reports_missing_atlas_packages_without_blaming_registry():
         source = "import 'atlas-fixture-dependency';\nthrow new Error('Atlas contract fixture failure');\n"
         for path in paths:
             path.write_text(source)
-        changed = ["mcp-server/src/scac-mutation-registry.current.generated.js"]
+        changed = ["mcp-server/src/scac-mutation-registry.current.generated.ts"]
         with _stub_git_answering_the_floor(changed) as stub_env:
             rc, out = run(["--only", "pushfloor"],
                           env={"CARR_CI_RANGE": FIXTURE_RANGE, **stub_env}, root=root)
@@ -1405,7 +1422,7 @@ def _hosted_workflow(filename="ci.yml"):
 def test_hosted_draft_lifecycle():
     """Keep required event wiring and execute the actual aggregate on bad results."""
     for filename, lanes, verdict_name, command in (
-            ("ci.yml", ("fast", "gates", "secret", "unit-coverage", "scope", "classes", "migration-fixtures"),
+            ("ci.yml", ("fast", "secret", "unit", "scope", "classes", "migration-fixtures"),
              "checks", "verdict"),
             ("doc-drift.yml", ("check",), "verdict", "drift-verdict")):
         wf = _hosted_workflow(filename)
@@ -1432,8 +1449,7 @@ def test_hosted_draft_lifecycle():
         verdict = jobs.get(verdict_name, {})
         expected_needs = set(lanes) | ({"select", "lint", "unit", "launchd-python39"} if filename == "ci.yml" else set())
         check(f"{filename}: verdict always evaluates and waits for every lane",
-              (verdict.get("if") == "${{ always() }}" if filename != "ci.yml" else
-               verdict.get("if") == "${{ always() && !(github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null) }}")
+              verdict.get("if") == "${{ always() }}"
               and set(verdict.get("needs", [])) == expected_needs)
         if not verdict:
             continue
@@ -1442,12 +1458,12 @@ def test_hosted_draft_lifecycle():
         if "scope" in needs:
             needs["scope"]["outputs"] = {"full": "true"}
         if filename == 'ci.yml':
-            from ci_scope import PRODUCT_CLASSES, PR_JOBS
+            from ci_scope import PR_FAST_CLASSES, PR_JOBS
             needs.update({name: {'result': 'success'} for name in ('lint', 'unit', 'launchd-python39')})
             needs['select'] = {'result': 'success', 'outputs': {
-                'classes': json.dumps(sorted(PRODUCT_CLASSES)), 'full': 'false',
+                'classes': json.dumps(sorted(PR_FAST_CLASSES)), 'full': 'false',
                 **{job: 'true' for job in PR_JOBS}}}
-            for name in ('scope', 'classes', 'migration-fixtures'):
+            for name in ('scope', 'classes', 'migration-fixtures', 'unit', 'launchd-python39'):
                 needs[name]['result'] = 'skipped'
         with tempfile.TemporaryDirectory() as directory:
             for draft in (False, True):
@@ -1458,7 +1474,7 @@ def test_hosted_draft_lifecycle():
                     text=True, capture_output=True, timeout=10)
                 check(f"{filename}: draft={draft} verdict is explicit",
                       result.returncode == (1 if draft else 0))
-            for lane in (tuple(n for n in lanes if n not in ("fast", "gates", "secret")) if filename == "ci.yml" else lanes):
+            for lane in (tuple(n for n in lanes if n not in ("fast", "secret")) if filename == "ci.yml" else lanes):
                 for state in ("failure", "cancelled", "skipped", "timed_out", "missing"):
                     broken = {name: dict(value) for name, value in needs.items()}
                     if filename == 'ci.yml':
@@ -1489,14 +1505,15 @@ def test_hosted_draft_lifecycle():
 
 
 def test_hosted_zsh_setup_does_not_refresh_working_indexes():
-    wf = _hosted_workflow()
-    setup = next(st for st in wf["jobs"]["classes"]["steps"] if st.get("name") == "Install zsh")
-    check("hosted zsh setup uses the shared installer", setup["run"] == "ops/ci-zsh.sh")
     for filename in ("ci.yml", "main-canary.yml", "unit-shards.yml"):
         for job in _hosted_workflow(filename)["jobs"].values():
-            for step in job.get("steps", []):
-                if step.get("name") == "Install zsh":
-                    check(f"{filename} bounds zsh setup", step.get("timeout-minutes") == 12)
+            if job.get("container"):
+                check(f"{filename} reaps orphaned PostgreSQL processes",
+                      "--init" in job["container"].get("options", ""))
+                check(f"{filename} uses baked zsh instead of package acquisition",
+                      not any("ci-zsh.sh" in step.get("run", "") and step.get("if") !=
+                              "matrix.classes != 'unit' && matrix.classes != 'gates' && matrix.classes != 'migration' && matrix.classes != 'dependency'"
+                              for step in job.get("steps", [])))
     _exercise_zsh_installer()
 
 
@@ -1542,14 +1559,35 @@ if "--no-download" in args:
     assert archive.read_bytes() == b"trusted-zsh-package"
     assert root != original.parent
     assert archive.stat().st_mode & 0o777 == 0o444
+    if mode == "partial-cache":
+        print("E: Unable to fetch some archives", file=sys.stderr)
+    if mode == "cached-dpkg-error":
+        print("dpkg: error processing package zsh (--configure)", file=sys.stderr)
+        sys.exit(100)
     sys.exit(124 if mode == "cached-timed-out" else 100 if mode == "partial-cache" else 0)
-if mode == "timed-out":
+attempt = sum("install" in call and "--no-download" not in call for call in calls)
+if mode in ("dpkg-error", "dependencies", "held-packages", "unknown-error") or (mode == "fatal-second" and attempt == 2) or (mode == "fatal-third" and attempt == 3):
+    print({"dependencies": "E: Unmet dependencies", "held-packages": "E: Unable to correct problems, you have held broken packages.", "unknown-error": "E: Unknown apt error"}.get(mode, "dpkg: error processing package zsh (--configure): post-installation script returned error exit status 1"), file=sys.stderr)
+    sys.exit(100)
+if mode == "timed-out" or (mode == "transient-timeout" and len(calls) == 1) or (mode in ("success-third", "fatal-second", "fatal-third") and attempt < 3):
     sys.exit(124)
+network_errors = {
+    "dns-error": "Temporary failure resolving archive.ubuntu.com",
+    "resolve-error": "Could not resolve archive.ubuntu.com",
+    "fetch-error": "E: Failed to fetch http://archive.ubuntu.com/zsh.deb 404 Not Found",
+    "connection-timeout": "Connection timed out [IP: 1.2.3.4 80]",
+    "connection-refused": "Could not connect to archive.ubuntu.com:80 Connection refused",
+    "http-error": "503 Service Unavailable http://archive.ubuntu.com/ubuntu",
+}
+if mode in network_errors and attempt == 1:
+    print(network_errors[mode], file=sys.stderr)
+    sys.exit(100)
 if mode == "native-error":
     sys.exit(42)
 if mode in ("cached", "cache-replaced"):
     sys.exit("network must not be used on a verified cache hit")
 if mode in ("unavailable", "refresh-failed") or (mode == "stale" and not any("update" in c for c in calls)):
+    print("E: Failed to fetch http://archive.ubuntu.com/zsh.deb Temporary failure resolving archive.ubuntu.com", file=sys.stderr)
     sys.exit(100)
 if not archive.exists():
     archive.write_bytes(b"trusted-zsh-package")
@@ -1559,29 +1597,44 @@ if not archive.exists():
             path = fixture / name
             path.write_text(source)
             path.chmod(0o755)
-        for mode, expected, success in (
-            ("preinstalled", [], True),
-            ("cached", ["offline"], True),
-            ("cached-timed-out", ["offline"], False),
-            ("cache-replaced", ["offline"], True),
-            ("cold", ["install"], True),
-            ("tampered", ["install"], True),
-            ("partial-cache", ["offline", "install"], True),
-            ("stale", ["install", "update", "install"], True),
-            ("unavailable", ["install", "update", "install"], False),
-            ("refresh-failed", ["install", "update"], False),
-            ("metadata-error", [], False),
-            ("metadata-deadline", [], False),
-            ("timed-out", ["install"], False),
-            ("native-error", ["install"], False),
-            ("publish-error", ["install"], False),
-            ("old-version", ["install"], True),
-            ("symlink", ["install"], True),
+        for mode, expected, exit_code in (
+            ("preinstalled", [], 0),
+            ("cached", ["offline"], 0),
+            ("cached-timed-out", ["offline"], 124),
+            ("cached-dpkg-error", ["offline"], 100),
+            ("cache-replaced", ["offline"], 0),
+            ("cold", ["install"], 0),
+            ("tampered", ["install"], 0),
+            ("partial-cache", ["offline", "install"], 0),
+            ("stale", ["install", "update", "install"], 0),
+            ("unavailable", ["install", "update", "install", "install"], 75),
+            ("refresh-failed", ["install", "update"], 100),
+            ("metadata-error", [], 1),
+            ("metadata-deadline", [], 1),
+            ("timed-out", ["install", "install", "install"], 75),
+            ("transient-timeout", ["install", "install"], 0),
+            ("native-error", ["install"], 42),
+            ("publish-error", ["install"], 1),
+            ("old-version", ["install"], 0),
+            ("symlink", ["install"], 0),
+            ("dns-error", ["install", "update", "install"], 0),
+            ("resolve-error", ["install", "update", "install"], 0),
+            ("fetch-error", ["install", "update", "install"], 0),
+            ("connection-timeout", ["install", "update", "install"], 0),
+            ("connection-refused", ["install", "update", "install"], 0),
+            ("http-error", ["install", "update", "install"], 0),
+            ("dpkg-error", ["install"], 100),
+            ("dependencies", ["install"], 100),
+            ("held-packages", ["install"], 100),
+            ("unknown-error", ["install"], 100),
+            ("success-third", ["install", "install", "install"], 0),
+            ("fatal-second", ["install", "install"], 100),
+            ("fatal-third", ["install", "install", "install"], 100),
         ):
             archives = fixture / mode
             archives.mkdir()
             archive = archives / "zsh_1_amd64.deb"
-            if mode in ("cached", "cache-replaced", "partial-cache", "tampered", "metadata-error", "old-version", "cached-timed-out", "metadata-deadline"):
+            if mode in ("cached", "cache-replaced", "partial-cache", "tampered", "metadata-error", "old-version", "cached-timed-out", "metadata-deadline", "cached-dpkg-error"):
                 archive.write_bytes(b"altered-zsh-package" if mode == "tampered" else b"trusted-zsh-package")
             if mode == "old-version":
                 archive.rename(archives / "zsh_2_amd64.deb")
@@ -1601,11 +1654,14 @@ if not archive.exists():
             actions = [("download" if "--download-only" in c else "offline" if "--no-download" in c
                         else "update" if "update" in c else "install") for c in calls]
             check(f"zsh {mode} follows the package-manager path", actions == expected, actions)
-            check(f"zsh {mode} propagates setup success or failure", (ran.returncode == 0) == success,
+            check(f"zsh {mode} returns the exact setup exit", ran.returncode == exit_code,
                   {"rc": ran.returncode, "stderr": ran.stderr})
             for call in calls:
                 private = pathlib.Path(next(a.split("=", 1)[1] for a in call if a.startswith("Dir::Cache::archives=")))
                 check(f"zsh {mode} removes private archives", not private.exists())
+            if mode in ("unavailable", "timed-out"):
+                check(f"zsh {mode} explains exhausted retries",
+                      f"zsh installation failed after 3 attempts; last cause exit {124 if mode == 'timed-out' else 100}" in ran.stderr, ran.stderr)
             if mode == "tampered":
                 check("zsh quarantines unauthenticated cache bytes",
                       (archives / "quarantine" / archive.name).read_bytes() == b"altered-zsh-package")
@@ -1652,12 +1708,65 @@ def test_worktree_python_selection():
                 marker.unlink(missing_ok=True)
 
 
+def test_hosted_queue_demand_contract():
+    import copy
+    from collections import Counter
+    from ci import CLASS_DESCRIPTIONS
+    from ci_scope import PR_FAST_CLASSES
+    wf = _hosted_workflow()
+
+    def full_contract(workflow):
+        jobs = workflow['jobs']
+        matrix = jobs['classes']['strategy']['matrix']
+        counts = Counter(name for group in matrix['classes'] for shard in matrix['gate_shard']
+                         if {'classes': group, 'gate_shard': shard} not in matrix['exclude']
+                         for name in group.split())
+        return (set(counts) == set(CLASS_DESCRIPTIONS)
+                and all(count == (2 if name == 'gates' else 1) for name, count in counts.items())
+                and workflow['concurrency']['cancel-in-progress'] ==
+                "${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main') }}"
+                and {'merge_group', 'push'} <= set(workflow['on'])
+                and workflow['on']['push']['branches'] == ['main']
+                and jobs['checks']['name'] == 'ops/ci.sh --strict'
+                and {'select', 'unit', 'scope', 'classes', 'migration-fixtures', 'launchd-python39'} <= set(jobs['checks']['needs'])
+                and any('ci_unit_shards.py verify' in step.get('run', '')
+                        and step.get('if') == "github.event_name != 'pull_request'"
+                        for step in jobs['checks']['steps'])
+                and jobs['classes']['if'] == "${{ !cancelled() && (github.event_name != 'pull_request' || needs.select.outputs.full == 'true') }}"
+                and jobs['migration-fixtures']['strategy']['matrix']['part'] == ['fixtures', 'gates', 'acceptance'])
+
+    check('merge groups retain all classes, shard coverage and uncancelled required result', full_contract(wf))
+    for missing in CLASS_DESCRIPTIONS:
+        broken = copy.deepcopy(wf)
+        matrix = broken['jobs']['classes']['strategy']['matrix']
+        matrix['classes'] = [' '.join(name for name in group.split() if name != missing)
+                             for group in matrix['classes']]
+        check(f'queue contract detects missing {missing}', not full_contract(broken))
+    broken = copy.deepcopy(wf)
+    broken['concurrency']['cancel-in-progress'] = True
+    check('queue contract detects cancellable merge groups', not full_contract(broken))
+    check('runs group by workflow, event, PR or ref, and tested SHA', wf['concurrency']['group'] ==
+          '${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event.pull_request.head.sha || github.sha }}')
+    with tempfile.TemporaryDirectory() as directory:
+        output = pathlib.Path(directory) / 'outputs'
+        result = subprocess.run([sys.executable, str(REPO / 'ops/ci_scope.py'), '--hosted'],
+                                env={**os.environ, 'GITHUB_EVENT_NAME': 'pull_request',
+                                     'GITHUB_EVENT_PATH': '/does/not/exist', 'GITHUB_OUTPUT': str(output)},
+                                capture_output=True, text=True, timeout=15)
+        selection = json.loads(result.stdout)
+        check('every PR uses the named fast subset even for unknown diffs', result.returncode == 0
+              and set(selection['classes']) == PR_FAST_CLASSES and not selection['full']
+              and set(selection['jobs']) == {'lint', 'fast', 'secret'})
+        check('selector workflow uses the hosted subset policy', any(
+            step.get('run') == 'python3 ops/ci_scope.py --hosted' for step in wf['jobs']['select']['steps']))
+
+
 def main(argv=None):
     if (sys.argv[1:] if argv is None else argv) == ["--collection-only"]:
         test_every_test_file_in_the_tree_is_collected()
         test_each_class_runs_in_exactly_one_hosted_group()
         return 1 if any(not ok for _, ok, _ in RESULTS) else 0
-    for fn in (test_changed_path_selection, test_artifact_requires_native_rule_projection_and_tests,
+    for fn in (test_hosted_queue_demand_contract, test_changed_path_selection, test_artifact_requires_native_rule_projection_and_tests,
                test_controller_selection_and_invalid_arguments,
                test_doc_drift_keeps_its_argument_and_interpreter_handoff,
                test_migration_requires_newline_terminated_verdict,

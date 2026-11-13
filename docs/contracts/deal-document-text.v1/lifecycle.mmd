@@ -1,0 +1,36 @@
+stateDiagram-v2
+state Retention {
+  state Lifecycle {
+    [*] --> Absent
+    Absent --> Produced: Text layer retained
+    Absent --> Unavailable: No extractable text
+    Produced --> Produced: Same source retried
+    Unavailable --> Unavailable: Same source retried
+    Produced --> Superseded: Original bytes replaced
+    Unavailable --> Superseded: Original bytes replaced
+    Superseded --> Produced: New text retained
+    Superseded --> Unavailable: New source has no text
+    Absent --> Deleted: Attachment removed
+    Produced --> Deleted: Attachment removed
+    Unavailable --> Deleted: Attachment removed
+    Superseded --> Deleted: Attachment removed
+  }
+  --
+  state Viewer {
+    [*] --> Unreadable
+    Unreadable --> Readable: Text layer retained
+    Unreadable --> Unreadable: No extractable text
+    Readable --> Readable: Same source retried
+    Unreadable --> Unreadable: Same source retried
+    Readable --> Unreadable: Original bytes replaced
+    Unreadable --> Unreadable: Original bytes replaced
+    Unreadable --> Readable: New text retained
+    Unreadable --> Unreadable: New source has no text
+    Readable --> Unreadable: Attachment removed
+    Unreadable --> Unreadable: Attachment removed
+  }
+}
+%% never NoDeletedText: Deleted & Readable -- Deleted attachments cannot be read
+%% never NoStaleText: Superseded & Readable -- Old text cannot serve changed original bytes
+%% never NoAbsentText: Absent & Readable -- Missing derivatives cannot claim text
+%% never NoUnavailableText: Unavailable & Readable -- Missing text layers cannot claim text

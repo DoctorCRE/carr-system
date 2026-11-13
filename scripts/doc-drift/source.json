@@ -2,11 +2,30 @@
   "repository": "jbookout/software-factory",
   "revision": "42b5fbd61cbbb7b6d780086b6c363aa828c104ea",
   "files": {
-    "scripts/doc-drift/check.py": "60b63d7cc23ec9df91e83ccc1f8986542ecc8c3449cc6c7fea8bf2e4fe9796e9",
+    "scripts/doc-drift/check.py": "b4131a03251900848738b64dd1d29ff01a6b9086f5b09d33c778967bc8b86a01",
     "scripts/doc-drift/requirements.txt": "0969da99a0bc2a1b71ed50584560f4588a37567ac63af3ddbaf3c4617ca5621a",
     "scripts/doc-drift/ci.py": "3904481467ce9f238b930e455b872b4c8e73d990ce80cb5bc6fa441c20870f7e",
-    "scripts/doc-drift/README.md": "17e71e7805ec958c3dcdbc949acfb5920bdb90f2acfd36f3062e97c4c1c474e3",
+    "scripts/doc-drift/README.md": "4315832b2933f6ffed2155d6667d55fe2effcd458a069fedf94d155211f52492",
     "test/doc_drift/test_ci.py": "71cc810d1e47395e8ba9c612d7d7ff7d7cf6fd7eb9f0497010f0f1507145f076",
-    "test/doc_drift/test_checker.py": "328895616c39a8b255db8f0adf43f1c20a9d7b0559ad648d86668b65aea63b03"
-  }
+    "test/doc_drift/test_checker.py": "03deb3a800fea49a25ede3133f20f607c45f42f1f05d3fab679523682418f160"
+  },
+  "local_patches": [
+    {
+      "card": "WR622.S13.J70",
+      "description": "CARR repository references resolve through its runtime registry; upstream revision remains the imported base.",
+      "upstream_sha256": {
+        "scripts/doc-drift/check.py": "60b63d7cc23ec9df91e83ccc1f8986542ecc8c3449cc6c7fea8bf2e4fe9796e9",
+        "test/doc_drift/test_checker.py": "328895616c39a8b255db8f0adf43f1c20a9d7b0559ad648d86668b65aea63b03"
+      }
+    },
+    {
+      "card": "WR622.S13.J189",
+      "description": "Snapshot-only unverified suggestions replace rename-history lookup; upstream revision remains the imported base.",
+      "upstream_sha256": {
+        "scripts/doc-drift/check.py": "610ce52fa8ae57406166f312a9e3dde026f4957f7d50f2d10733048a3231fdd8",
+        "scripts/doc-drift/README.md": "17e71e7805ec958c3dcdbc949acfb5920bdb90f2acfd36f3062e97c4c1c474e3",
+        "test/doc_drift/test_checker.py": "93ef900ec54168c09527acaf1262c09cad68d92e129a6fc679ea015632c69734"
+      }
+    }
+  ]
 }

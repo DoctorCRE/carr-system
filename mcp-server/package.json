@@ -5,38 +5,52 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "npm run generate:types && node run-tests.mjs",
-    "generate:types": "npm run check:registry && node generate-verb-types.mjs && node generate-worker-types.mjs",
-    "typecheck": "npm run generate:types && tsc --project tsconfig.json",
+    "test": "npm run generate:types && node run-tests.ts",
+    "generate:types": "npm run check:registry && node generate-verb-types.ts && node generate-worker-types.ts && python3 ../ops/strict-projects.py",
+    "typecheck": "npm run generate:types && tsc --build tsconfig.node-compat.json && tsc --project tsconfig.json",
     "test:routing-replay": "node test/doctrine-routing-replay.mjs",
     "portal-parity": "node portal-parity/cli.mjs",
     "generate:registry": "python3 ../tools/regen.py registry",
-    "check:registry": "node ../ops/scac-mutation-inventory.mjs"
+    "check:registry": "node ../ops/scac-mutation-inventory.ts",
+    "check:staged": "python3 ../ops/strict-projects.py && node typescript/check.ts && node --test typescript/*.test.ts",
+    "check": "npm run typecheck && npm run check:staged && node run-tests.ts",
+    "fix": "biome check --write ."
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
     "@babel/parser": "7.28.5",
+    "@babel/types": "7.29.11",
+    "@biomejs/biome": "2.6.6",
+    "@cloudflare/workers-types": "5.20261109.1",
+    "@types/node": "26.6.6",
+    "@types/pg": "8.23.1",
     "esbuild": "0.28.1",
     "json-schema-to-typescript": "16.0.0",
+    "knip": "6.44.2",
     "neonctl": "2.38.5",
     "pg": "8.13.1",
     "playwright-core": "1.63.0",
     "typescript": "7.0.2",
-    "wrangler": "^4.115.0"
+    "wrangler": "4.149.0"
   },
   "dependencies": {
+    "@block65/webcrypto-web-push": "2.0.0",
     "@cfworker/json-schema": "4.1.1",
-    "@cloudflare/workers-oauth-provider": "^0.8.3",
-    "@neondatabase/serverless": "^1.1.0",
+    "@cloudflare/workers-oauth-provider": "0.8.3",
+    "@neondatabase/serverless": "1.1.0",
     "@pdf-lib/fontkit": "1.1.1",
     "@typesafe-ai/sdk": "0.7.0",
     "maplibre-gl": "6.4.1",
     "pdf-lib": "1.17.1"
   },
   "overrides": {
-    "@hono/node-server": "^2.0.10",
-    "hono": "4.13.11"
+    "@hono/node-server": "2.1.1",
+    "hono": "4.13.11",
+    "@apidevtools/json-schema-ref-parser": "13.0.5"
+  },
+  "engines": {
+    "node": ">=26"
   }
 }

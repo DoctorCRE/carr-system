@@ -1,5 +1,6 @@
 """Exercise proof transport admission and outgoing release request behavior."""
 import importlib.util
+import hashlib
 from http.server import ThreadingHTTPServer
 import threading
 from pathlib import Path
@@ -86,6 +87,54 @@ class ProofTransportTest(unittest.TestCase):
                     self.assertEqual(guard.violations(source, path), [])
                     self.assertTrue(guard.violations(source + '\n# changed', path))
 
+    def test_deadline_helper_requires_matching_runner_and_helper_pins(self):
+        guard = load(ROOT / 'ops/proof-transport-check.py')
+        source = 'from lib.proof_deadline import proof_deadline'
+        path = 'tools/prove-synthetic.py'
+        declaration = {'sha256': hashlib.sha256(source.encode()).hexdigest(),
+                       'commands': ['audited read'], 'helpers': {
+                           'lib.proof_deadline.proof_deadline': hashlib.sha256(
+                               (ROOT / 'lib/proof_deadline.py').read_bytes()).hexdigest()}}
+        with patch.dict(guard.PROCESSES, {path: declaration}):
+            self.assertEqual(guard.violations(source, path), [])
+            self.assertTrue(guard.violations(source + '\n', path))
+            declaration['helpers']['lib.proof_deadline.proof_deadline'] = 'changed'
+            self.assertTrue(guard.violations(source, path))
+
+    def test_refresh_changes_only_selected_audited_runner(self):
+        guard = load(ROOT / 'ops/proof-transport-check.py')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'tools').mkdir()
+            selected = 'tools/prove-selected.py'
+            (root / selected).write_text('pass\n')
+            manifest = root / 'manifest.json'
+            import json
+            manifest.write_text(json.dumps({selected: {'sha256': 'old', 'commands': ['audited']},
+                                            'other': {'sha256': 'unchanged'}}))
+            with patch.object(guard, 'ROOT', root), patch.object(guard, 'MANIFEST', manifest):
+                guard.refresh_scripts([selected])
+                value = json.loads(manifest.read_text())
+                self.assertEqual(value['other'], {'sha256': 'unchanged'})
+                self.assertEqual(value[selected]['sha256'], hashlib.sha256(b'pass\n').hexdigest())
+                before = manifest.read_bytes()
+                with self.assertRaises(ValueError):
+                    guard.refresh_scripts(['tools/prove-unknown.py'])
+                self.assertEqual(manifest.read_bytes(), before)
+
+    def test_record_call_requires_pinned_process_declaration(self):
+        guard = load(ROOT / 'ops/proof-transport-check.py')
+        import hashlib
+        source = 'from lib.record_call import call_verb, _run_process'
+        path = 'tools/prove-synthetic.py'
+        self.assertTrue(guard.violations(source, path))
+        with patch.dict(guard.PROCESSES, {path: {
+            'sha256': hashlib.sha256(source.encode()).hexdigest(),
+            'commands': ['declared wrapper call read-only verbs'],
+        }}):
+            self.assertEqual(guard.violations(source, path), [])
+            self.assertTrue(guard.violations(source + '\n# changed', path))
+
     def test_socket_url_and_dynamic_classes_cannot_be_process_declared(self):
         guard = load(ROOT / 'ops/proof-transport-check.py')
         import hashlib
@@ -159,6 +208,35 @@ class ProofTransportTest(unittest.TestCase):
                 self.assertTrue(guard.violations(source.replace("'call'", "'fetch'"), name)
                                 if "'call'" in source else
                                 guard.violations(source + '\nother_command = "curl"', name))
+
+    def test_pure_parser_admission_binds_runner_symbol_and_helper_source(self):
+        guard = load(ROOT / 'ops/proof-transport-check.py')
+        for name in ['calendar-snapshot-strict-instants', 'lease-comparison-tiny-rate-stability']:
+            path = f'tools/prove-{name}.py'
+            source = (ROOT / path).read_text()
+            with self.subTest(runner=name):
+                self.assertEqual(guard.violations(source, path), [])
+                self.assertTrue(guard.violations(source, 'tools/prove-unregistered.py'))
+                for addition in ['\nimport socket', '\nimport urllib.request',
+                                 '\nfrom proof_release import other_symbol']:
+                    changed = source + addition
+                    declaration = dict(guard.PROCESSES[path],
+                                       sha256=hashlib.sha256(changed.encode()).hexdigest())
+                    with patch.dict(guard.PROCESSES, {path: declaration}):
+                        self.assertTrue(guard.violations(changed, path))
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    (root / 'tools').mkdir()
+                    helper = root / 'tools/proof_release.py'
+                    original = (ROOT / 'tools/proof_release.py').read_text()
+                    (root / 'lib').mkdir()
+                    (root / 'lib/proof_deadline.py').write_bytes((ROOT / 'lib/proof_deadline.py').read_bytes())
+                    with patch.object(guard, 'ROOT', root):
+                        self.assertTrue(guard.violations(source, path))
+                        helper.write_text(original)
+                        self.assertEqual(guard.violations(source, path), [])
+                        helper.write_text(original + '\nimport socket\n')
+                        self.assertTrue(guard.violations(source, path))
 
     def test_shared_reader_caps_success_and_errors_without_following_redirects(self):
         from lib.release_reader import read, USER_AGENT
@@ -246,6 +324,53 @@ class ProofTransportTest(unittest.TestCase):
             self.assertEqual(headers, original)
             self.assertEqual(seen[0]['User-Agent'], 'caller-proof/1')
             self.assertEqual(seen[0]['Cookie'], 'synthetic')
+        finally:
+            server.shutdown()
+            thread.join()
+            server.server_close()
+
+    def test_fixture_requires_marker_on_every_path_before_scenario_dispatch(self):
+        from http.client import HTTPConnection
+        from tools.proof_release_fixture import MARKER
+
+        seen = []
+
+        class Handler(ReleaseFixtureHandler):
+            def release_GET(self):
+                seen.append(self.path)
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(self.path.encode())
+
+            def log_message(self, *_args):
+                pass
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            for path in ['/', '/release', '/unexpected', '/release?probe=1']:
+                for values in [[], ['wrong'], [MARKER['value'], MARKER['value']], [MARKER['value']]]:
+                    with self.subTest(path=path, values=values):
+                        before = seen.copy()
+                        connection = HTTPConnection('127.0.0.1', server.server_port, timeout=2)
+                        try:
+                            connection.putrequest('GET', path)
+                            for value in values:
+                                connection.putheader(MARKER['header'], value)
+                            connection.endheaders()
+                            response = connection.getresponse()
+                            body = response.read()
+                            if values == [MARKER['value']]:
+                                self.assertEqual(response.status, 200)
+                                self.assertEqual(body, path.encode())
+                                self.assertEqual(seen, before + [path])
+                            else:
+                                self.assertEqual(response.status, 403)
+                                self.assertEqual(body, MARKER['refusal'].encode())
+                                self.assertEqual(seen, before)
+                        finally:
+                            connection.close()
         finally:
             server.shutdown()
             thread.join()

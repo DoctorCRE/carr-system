@@ -44,8 +44,9 @@ ACCEPTANCE_ENV = {
 
 PROOFS = (
     Proof(
-        "mcp-server/test/tour-deal-access.test.mjs",
+        "mcp-server/test/tour-deal-access.test.ts",
         "Tour deal authorization and HTTP PostgreSQL acceptance failed",
+        log="tour-deal-access",
         env={"CARR_TOUR_DEAL_TEST_DATABASE_URL": "{dsn}"},
     ),
     Proof(
@@ -140,10 +141,6 @@ PROOFS = (
         optional=True,
     ),
     Proof(
-        "mcp-server/test/governed-correspondence-store-postgres.sql",
-        "V5-J103 governed correspondence store PostgreSQL acceptance failed",
-    ),
-    Proof(
         "mcp-server/test/record-source-authority-live-pg.v5.test.mjs",
         "V5-F01 record-source-authority PostgreSQL acceptance failed",
         log="record-source-authority-live-pg",
@@ -202,13 +199,6 @@ PROOFS = (
         "mcp-server/test/dispatch-spine.test.mjs",
         "the dispatch-spine database acceptance proof failed",
         log="dispatch-spine-db",
-        env=ACCEPTANCE_ENV,
-        optional=True,
-    ),
-    Proof(
-        "mcp-server/test/governed-correspondence-thread-postgres.test.mjs",
-        "the governed-correspondence-thread-postgres database acceptance proof failed",
-        log="governed-correspondence-thread-postgres-db",
         env=ACCEPTANCE_ENV,
         optional=True,
     ),
@@ -529,6 +519,11 @@ class Migration:
             tail=None,
         )
         if self.part in ("all", "core", "proofs"):
+            self.py(
+                "migration-depth1",
+                "ops/migration-depth1.py",
+                "fresh depth-1 migration acceptance failed",
+            )
             self.py(
                 "migration-baseline",
                 "-m",

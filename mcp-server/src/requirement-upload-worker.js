@@ -1,5 +1,5 @@
 // Separate CPU budget; invoked by the app's existing share route through a service binding.
-import { Pool } from '@neondatabase/serverless';
+import { Pool } from './postgres.ts';
 import { createRequirementUploadHandler } from './requirement-upload.js';
 
 export default {

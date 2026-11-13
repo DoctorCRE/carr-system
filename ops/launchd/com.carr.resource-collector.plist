@@ -16,7 +16,7 @@
     override. See tools/resource-collector.py's own header for why.
 
     DEFINITION-ONLY, deliberately. This ships with no trigger key
-    (StartCalendarInterval/RunAtLoad/etc): ops/scac-mutation-inventory.mjs's launchd
+    (StartCalendarInterval/RunAtLoad/etc): ops/scac-mutation-inventory.ts's launchd
     inventory (isDefinitionOnlyLaunchd) requires a registered
     ops/config/services.json entry for any launchd row that WOULD fire if
     loaded, and this change does not register one — registering the

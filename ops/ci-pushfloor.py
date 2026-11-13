@@ -6,14 +6,13 @@ stderr; the one stdout line is the verdict text. Exit 0 passes the class, 1 fail
 Each check writes <logdir>/pushfloor-<name>.log and .rc, which ci.sh's exit trap
 keeps only for failures.
 
---pre-pr [--body FILE] is ./run.sh pre-pr: the three checks hosted CI failed on in the
+--pre-pr is ./run.sh pre-pr: the source safety checks identified in the
 2026-10-28 retro (#2623, #2629, #2636, #2637), each costing a full CI round. It prints one
 line per failure saying what to do and exits 1 on any failure.
 """
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import os
 import re
 import subprocess
@@ -27,7 +26,7 @@ MIGRATION_STRUCTURE = re.compile(
     r"|ops/migration-order-gate\.py$)")
 TEST_COLLECTION = re.compile(r"(^ops/ci\.(sh|py)$|(^|/)(test[^/]*|[^/]*selftest[^/]*)\.(py|sh|mjs|js)$)")
 SCAC_ATLAS = re.compile(
-    r"^(migrations/[0-9]+_.*scac.*\.sql|mcp-server/src/scac-mutation-registry\.current\.generated\.js|mcp-server/src/tool-families/[^/]+\.js|tools/regen\.py"
+    r"^(migrations/[0-9]+_.*scac.*\.sql|mcp-server/src/scac-mutation-registry\.current\.generated\.ts|mcp-server/src/tool-families/[^/]+\.js|tools/regen\.py"
     r"|ops/config/scac-registry-.*\.json)$")
 GATE_SURFACE = re.compile(
     r"^(hooks/[^/]+\.py|ops/ci\.(sh|py)|ops/githooks/|ops/config/codex-hooks\.json|ops/[^/]+-selftest\.py)")
@@ -213,30 +212,9 @@ def check(floor, diff_range, gates_deferred):
                   " · durable fix: add ops/<gate>-selftest.py", file=sys.stderr, flush=True)
 
 
-def pull_request_files(span):
-    """The changed-file records the review gate reads from GitHub, built from git."""
-    result = subprocess.run(["git", "diff", "--name-status", "-z", "-M", span],
-                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    if result.returncode:
-        return []
-    fields = iter(result.stdout.decode(errors="surrogateescape").split("\0")[:-1])
-    files = []
-    for status in fields:
-        path = next(fields)
-        files.append({"filename": next(fields), "previous_filename": path} if status[0] in "RC"
-                     else {"filename": path})
-    return files
-
-
-def pre_pr(python, body_file):
-    """Failure lines for the leak guard, gate integrity and the review gate's Card line."""
+def pre_pr(python):
+    """Failure lines for the leak guard and gate integrity."""
     failures = []
-    body = None
-    if body_file is not None:
-        try:
-            body = Path(body_file).read_text()
-        except (OSError, UnicodeError):
-            failures.append("cannot read PR body: pass a readable UTF-8 file with --body")
     os.chdir(Path(__file__).resolve().parents[1])
     base, head = git_lines("merge-base", "origin/main", "HEAD"), git_lines("rev-parse", "HEAD")
     if not base or not head:
@@ -248,24 +226,6 @@ def pre_pr(python, body_file):
     integrity = subprocess.run([python, "hooks/gate-integrity.py", "--strict"], capture_output=True)
     if integrity.returncode:
         failures.append("gate integrity failed: inspect findings with python3 hooks/gate-integrity.py --strict")
-    if body_file is None:
-        try:
-            view = subprocess.run(["gh", "pr", "view", "--json", "body", "--jq", ".body"],
-                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-            body = view.stdout if view.returncode == 0 else None
-        except OSError:
-            pass
-    if body is None and body_file is None:
-        failures.append("no PR body to check and no open PR for this branch: write the body to a file "
-                        "and rerun ./run.sh pre-pr --body <file>")
-    elif body is not None:
-        spec = importlib.util.spec_from_file_location("review_gate", "ops/review-gate.py")
-        gate = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(gate)
-        files = pull_request_files(span)
-        if not gate.card_allowed({"body": body, "changed_files": len(files), "user": {}}, files):
-            failures.append("PR body needs a line that is exactly Card: WR<n>.S<n>.J<n> with nothing "
-                            "before or after it: add your brief's card line on its own line")
     return failures
 
 
@@ -274,12 +234,11 @@ def main(argv=None):
     parser.add_argument("--logdir")
     parser.add_argument("--pre-pr", action="store_true",
                         help="check this branch the way hosted CI will before git push / gh pr create")
-    parser.add_argument("--body", help="with --pre-pr: PR body file (default: the open PR's body via gh)")
     parser.add_argument("--gates-deferred", action="store_true",
                         help="the gates class is not selected in this run")
     args = parser.parse_args(argv)
     if args.pre_pr:
-        failures = pre_pr(sys.executable, args.body)
+        failures = pre_pr(sys.executable)
         print("\n".join(failures), end="\n" if failures else "")
         return int(bool(failures))
     if not args.logdir:

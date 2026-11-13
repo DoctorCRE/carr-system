@@ -15,13 +15,25 @@ def snapshot_key(schema, baseline=False):
         with path.open('rb') as source:
             for chunk in iter(lambda: source.read(1024 * 1024), b''):
                 digest.update(chunk)
+    if not baseline:
+        revision = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=root,
+                                  text=True, capture_output=True)
+        if revision.returncode == 0:
+            digest.update(revision.stdout.strip().encode())
+        for relative in ('ops/sync_control_catalog.py', 'ops/config/rule-enforcement-map.json',
+                         'ops/config/control-enforcement-classes.v1.json',
+                         'mcp-server/suite-inventory.json', 'tools/migrate.py'):
+            path = root / relative
+            if path.is_file():
+                digest.update(relative.encode() + b'\0' + path.read_bytes())
     return digest.hexdigest() + (':baseline' if baseline else ':current')
 
 
 def migrate_snapshot(schema, dsn):
     root = Path(schema).parent.parent
     result = subprocess.run([sys.executable, str(root / 'tools/migrate.py'), '--apply', '--yes'],
-        cwd=root, env={**os.environ, 'DATABASE_URL': dsn}, capture_output=True, text=True, timeout=180)
+        cwd=root, env={**{key: value for key, value in os.environ.items()
+                         if not key.startswith('PG') or key == 'PGPASSWORD'}, 'DATABASE_URL': dsn}, capture_output=True, text=True, timeout=180)
     if result.returncode:
         raise RuntimeError('snapshot migrations failed: ' + (result.stdout + result.stderr)[-4000:])
 

@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-import subprocess
+import os
+import time
+from urllib.parse import urlencode, parse_qsl, urlsplit
 from collections.abc import Callable
 from migration_number_contract import SLOT_RE
 
@@ -11,9 +13,37 @@ REPO = 'DoctorCRE/carr-system'
 
 
 def github(path: str) -> list:
-    result = subprocess.run(['gh', 'api', '--paginate', '--slurp', path],
-                            capture_output=True, text=True, check=True, timeout=120)
-    return json.loads(result.stdout)
+    from lib import release_reader
+
+    token = os.environ.get('GITHUB_TOKEN') or os.environ.get('GH_TOKEN')
+    if not token:
+        raise ValueError('GitHub token required to verify migration claims')
+    parts = urlsplit(path)
+    if parts.scheme or parts.netloc or not parts.path.startswith(f'repos/{REPO}/pulls'):
+        raise ValueError('invalid migration claims endpoint')
+    query = dict(parse_qsl(parts.query))
+    pages = []
+    deadline = time.monotonic() + 120
+    for page in range(1, 101):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ValueError('migration claims read deadline exceeded')
+        query.update(per_page='100', page=str(page))
+        reply = release_reader.read(
+            'https://api.github.com/' + parts.path + '?' + urlencode(query),
+            headers={'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json',
+                     'X-GitHub-Api-Version': '2022-11-28'},
+            timeout=min(15, remaining), max_bytes=8 * 1024 * 1024)
+        if reply.status != 200 or len(reply.body) > 8 * 1024 * 1024:
+            raise ValueError(f'cannot read migration claims: HTTP {reply.status} or oversized response')
+        data = json.loads(reply.body)
+        if not isinstance(data, list):
+            raise ValueError('migration claims response is not a page list')
+        pages.append(data)
+        link = next((value for key, value in reply.headers.items() if key.lower() == 'link'), '')
+        if 'rel="next"' not in link and len(data) < 100:
+            return pages
+    raise ValueError('migration claims pagination limit exceeded; no partial result returned')
 
 
 @dataclass

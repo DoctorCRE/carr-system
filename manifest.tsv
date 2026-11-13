@@ -79,7 +79,7 @@ shared/fill-engine/fill_deal_template.py	DNA/Deal Management/fill-engine/fill_de
 #   Promote to shared/ -> DNA/ when Joe says so. Fixtures + baseline live with it.
 # workflows/*.workflow.js are repo-only (agent-graph orchestration, invoked by local Claude Code sessions via the Workflow tool; SOP pointers live in the vault files that own each job)
 # diff-salesforce-deals.py is repo-only (its INPUT capture + the SOP live in the vault)
-# capture-salesforce-report.js is repo-only (browser-pasted; the SOP that drives it lives in the vault)
+# capture-salesforce-report.ts is repo-only (browser-pasted; the SOP that drives it lives in the vault)
 lib/sheets.py	Automation/sheets.py
 lib/sheets.py	Automation/radar/sheets.py
 lib/sheets.py	DNA/Team/sheets.py

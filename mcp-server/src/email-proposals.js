@@ -1,8 +1,9 @@
 // Expose and resolve email-derived proposals.
-import { lockEmailIdentity, capturedEmail } from './email-identity.js';
+import { lockEmailIdentity, capturedEmail } from './email-identity.ts';
 import { sha256 } from './sha256.ts';
 import { mailboxOwnerForActor, partnerAuthoritySlugForActor } from './partner-authority.js';
-import { suspected } from './untrusted-text.js';
+import { suspected } from './untrusted-text.ts';
+import { buildActionLink } from './action-links.js';
 const LIMIT = 200;
 const SUMMARY_VERSION = 'email-summary.v1';
 const summaryHash = row => 'sha256:' + sha256(JSON.stringify([row.summary, row.detail ?? row.body, row.email_context]));
@@ -926,6 +927,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             suspected_instruction: suspected(row.evidence_quote),
             source: { activity_id: row.activity_id, sender: named?.[1] ?? null, subject: named?.[2] ?? row.summary,
               evidence_quote: row.evidence_quote, occurred_at: new Date(row.occurred_at).toISOString() },
+            ...(pending && row.kind === 'reply_draft' && recipients && !previewError ? {
+              action_link: buildActionLink({ kind: 'reply_draft', id: row.id, owner: row.owner, version: row.version }),
+            } : {}),
             confirm_verb: pending && !(row.kind === 'reply_draft' && (!recipients || previewError)) ? KINDS[row.kind].confirm : null, preview: shown, preview_error: previewError });
         }
         return { schema_version: 'email-proposals.v1', proposals, send: false,

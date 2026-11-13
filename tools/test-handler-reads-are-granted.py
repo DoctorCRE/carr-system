@@ -57,6 +57,9 @@ GRANT_FULL = re.compile(
 # An entry here is a claim that a table is only ever read on the writer or
 # authority connection — write it with the verb that does it, or fix the grant.
 READER_EXEMPT: dict[str, str] = {
+    "ops.tour_cheat_sheet_revision":
+        "read on the writer connection by GET /api/tours/cheat-sheet/history/v1 "
+        "through tour-runtime internalRead and its canonical Tour deal-access check",
     "ops.notification":
         "read only on the writer connection by morning-assurance-queue; the brief uses the sealed reader definer",
     "ops.notification_read":

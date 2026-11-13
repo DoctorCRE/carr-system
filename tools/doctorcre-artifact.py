@@ -18,6 +18,9 @@ import urllib.request
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.repository_identity import canonical_repository, repository_for_name
+
 MAX_ARCHIVE_BYTES = 32 * 1024 * 1024
 MAX_FILE_BYTES = 8 * 1024 * 1024
 SHA256 = frozenset("0123456789abcdef")
@@ -52,7 +55,7 @@ def load_pin(path: Path) -> dict[str, Any]:
         raise ValueError("DoctorCRE pin fields do not match the v1 contract")
     if pin["schema"] != "carr-doctorcre-artifact-pin.v1":
         raise ValueError("unsupported DoctorCRE pin schema")
-    if pin["repository"] != "jbookout/doctorcre-app":
+    if canonical_repository(pin["repository"]) != repository_for_name("doctorcre-app"):
         raise ValueError("DoctorCRE pin names an unexpected repository")
     if not isinstance(pin["release_tag"], str) or not pin["release_tag"].startswith("app-v"):
         raise ValueError("DoctorCRE release tag is invalid")
@@ -114,12 +117,30 @@ def artifact_inputs(pin: dict[str, Any], archive_path: Path | None = None,
     if (archive_path is None) != (manifest_path is None):
         raise ValueError("--archive and --manifest must be supplied together")
     if archive_path is None:
-        return (download(pin["archive_url"], pin["archive_bytes"]),
-                download(pin["manifest_url"], pin["manifest_bytes"]))
+        cache = (Path.home() / ".cache/doctorcre-artifact" /
+                 pin["archive_sha256"] / pin["manifest_sha256"])
+        archive_path = cache / "doctorcre-app.tar"
+        manifest_path = cache / "doctorcre-app.manifest.json"
+        if not (archive_path.exists() and manifest_path.exists()):
+            archive = download(pin["archive_url"], pin["archive_bytes"])
+            manifest = download(pin["manifest_url"], pin["manifest_bytes"])
+            verify(pin, archive, manifest)
+            cache.mkdir(parents=True, exist_ok=True)
+            for destination, content in ((archive_path, archive), (manifest_path, manifest)):
+                with tempfile.NamedTemporaryFile(dir=cache, delete=False) as temporary:
+                    temporary_path = Path(temporary.name)
+                    try:
+                        temporary.write(content)
+                        temporary.flush()
+                        os.replace(temporary_path, destination)
+                    finally:
+                        temporary_path.unlink(missing_ok=True)
+            return archive, manifest
     archive = archive_path.read_bytes()
     manifest = manifest_path.read_bytes()  # type: ignore[union-attr]
     if len(archive) != pin["archive_bytes"] or len(manifest) != pin["manifest_bytes"]:
         raise ValueError("local DoctorCRE artifact byte count does not match the pin")
+    verify(pin, archive, manifest)
     return archive, manifest
 
 

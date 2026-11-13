@@ -17,6 +17,7 @@ PRODUCT_CLASSES = {'lint', 'pushfloor', 'unit', 'types', 'gates', 'secret', 'bin
 PATH_CLASSES = (
     ('practice-plugin/', PRODUCT_CLASSES),
 )
+PR_FAST_CLASSES = {'lint', 'pushfloor', 'types', 'secret', 'binding', 'artifact'}
 PR_JOBS = {
     'lint': {'lint'},
     'fast': {'pushfloor', 'unit', 'types', 'binding', 'artifact'},
@@ -91,8 +92,11 @@ def main():
     from ci import CLASS_DESCRIPTIONS
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base')
+    parser.add_argument('--hosted', action='store_true')
     args = parser.parse_args()
-    result = selection(CLASS_DESCRIPTIONS, base=args.base)
+    result = ({'classes': sorted(PR_FAST_CLASSES), 'reason': 'PR fast subset; full suite guards main'}
+              if args.hosted and os.environ.get('GITHUB_EVENT_NAME') == 'pull_request'
+              else selection(CLASS_DESCRIPTIONS, base=args.base))
     result['full'] = set(result['classes']) == set(CLASS_DESCRIPTIONS)
     result['jobs'] = required_jobs(result['classes'])
     print(json.dumps(result, sort_keys=True))

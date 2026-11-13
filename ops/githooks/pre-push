@@ -139,9 +139,9 @@ PYEOF
     fi
 
     if [ -n "$CARR_CI_RANGE" ]; then
-      echo "  pre-push: checking $CARR_CI_RANGE — $FLOOR_CLASSES (full strict suite runs hosted)…" >&2
+      echo "  pre-push: checking $CARR_CI_RANGE — $FLOOR_CLASSES (full strict suite runs hosted on merge groups/main)…" >&2
     else
-      echo "  pre-push: running $FLOOR_CLASSES (full strict suite runs hosted)…" >&2
+      echo "  pre-push: running $FLOOR_CLASSES (full strict suite runs hosted on merge groups/main)…" >&2
     fi
     # STRIP THE HOOK'S GIT ENVIRONMENT BEFORE RUNNING CI, and this is not hygiene —
     # it is the fix for a bug that destroyed local main on 2026-08-14.
@@ -215,7 +215,7 @@ PYEOF
       ops/ci.sh --list
 
   This is the LOCAL FLOOR — the classes the diff implicates, scoped to
-  what this push changes. The full strict suite runs hosted and is the
+  what this push changes. The full strict suite runs hosted on merge groups/main and is the
   gate on the merge. The floor exists because the classes that actually
   go red (types, gates) are the ones cheapest to catch right here.
 

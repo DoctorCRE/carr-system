@@ -1,16 +1,22 @@
 // Register MCP tools and their shared write envelope.
 import { FUTURE_WORK_WRITES, workRequestLinkSchema, linkFutureWork } from "./future-work.js";
-import { findExactPostCallAction, withPostCallActionComparisons } from "./post-call-action-match.js";
+import { findExactPostCallAction, withPostCallActionComparisons } from "./post-call-action-match.ts";
 import { leadAdvice, leadFollowUpTools } from "./lead-follow-up.ts";
+import { clientNeedTools } from "./client-needs.ts";
 import censusInventoryFamily from "./tool-families/census-inventory.js";
 import practiceOriginationFamily from "./tool-families/practice-origination.js";
 import scheduleBoardFamily from "./tool-families/schedule-board.js";
+import clientAnniversaryFamily from "./tool-families/client-anniversary-read.js";
 import vendorMeetingsFamily from "./tool-families/vendor-meetings.js";
 import subjectWatchesFamily from "./tool-families/subject-watches.js";
+import callOutcomesOutputSchema from "../contracts/read-call-outcomes.v1.json" with { type: "json" };
+const REVIEW_CALL_OUTCOME_LEGACY_SUNSET = Date.parse("2026-12-09T06:00:00Z");
 const mailRecipientAddress = /^[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}$/;
 const recordedEmailAddresses = email => [...new Set((email?.split(/[\s,;<>]+/u) ?? [])
   .filter(address => /^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$/u.test(address)).map(address => address.toLowerCase()))];
-const toolFamilies = [censusInventoryFamily, practiceOriginationFamily, scheduleBoardFamily, vendorMeetingsFamily, subjectWatchesFamily];
+import activityDealAttributionFamily from "./tool-families/activity-deal-attribution.js";
+import mailNeedsPartnerFamily from "./tool-families/mail-needs-partner.js";
+const toolFamilies = [mailNeedsPartnerFamily, activityDealAttributionFamily, clientAnniversaryFamily, censusInventoryFamily, practiceOriginationFamily, scheduleBoardFamily, vendorMeetingsFamily, subjectWatchesFamily];
 import { homeWaitingTools } from "./home-waiting.ts";
 import { peopleDirectoryTools } from "./people-directory.ts";
 import { homeInboxTools, HOME_INBOX_WRITES } from "./home-inbox.js";
@@ -23,6 +29,7 @@ import { invoiceTrackerTools } from "./invoice-tracker.ts";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.ts";
 import { readDealChecklist } from "./deal-checklist.ts";
+import { dealDocumentTextTools } from "./deal-document-text.ts";
 import { dealExtractionTools } from "./deal-extraction.ts";
 import { factGenerationTools } from "./fact-generation.ts";
 import { factReviewTools } from "./fact-review.ts";
@@ -31,7 +38,7 @@ import { factObservationTools } from "./fact-observations.ts";
 import { actionClosureTools } from "./action-closure.ts";
 import { requirementReplyTools } from "./requirement-replies.js";
 import { requirementRequestTools } from "./requirement-requests.js";
-import { dealDeliverableTools } from "./deal-deliverables.js";
+import { dealDeliverableTools, authorizeDeliverable } from "./deal-deliverables.js";
 import { dealFileTools } from "./deal-files.js";
 import { dealItemTools, readDealItems, shortDealHeading, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.ts";
 import { bindReferralDeal } from "./relationship-network.ts";
@@ -46,7 +53,7 @@ import { readLeadWorkspace, LEAD_WORKSPACE_SCHEMA, validateStageReview, lockLead
 // The doctrine store's verbs (P2, decision 82a2fb62) live in doctrine.js as a
 // factory over this file's envelope machinery, merged at the bottom.
 import { doctrineTools } from "./doctrine.js";
-import { orgConventionTools, conventionProposals } from "./org-conventions.js";
+import { orgConventionTools, conventionProposals } from "./org-conventions.ts";
 import { situationRetrievalTools } from "./situation-retrieval.js";
 import { investigationTools } from "./investigation.js";
 import { docConversationTools } from "./doc-conversation.js";
@@ -54,6 +61,8 @@ import { docSuggestionTools } from "./doc-suggestions.ts";
 import { docActivityTools } from "./doc-activity.js";
 import { whatsNewTools } from "./whats-new.js";
 import { MEETING_MODE_WRITE_VERBS, meetingModeTools } from "./meeting-mode.js";
+import { webPushConfigTools } from "./web-push-config.ts";
+import { webPushTools } from "./web-push-subscriptions.ts";
 import { notificationTools } from "./notifications.ts";
 import { sessionIdentityTools } from "./session-identity.ts";
 import { dispatchSpineTools } from "./dispatch-spine.ts";
@@ -61,9 +70,10 @@ import { workShapeTools } from "./work-shape.ts";
 import { workQueueTools } from "./work-queue.js";
 import { workRequestIntakeTools } from "./work-request-intake.js";
 import { workPortfolioTools } from "./work-portfolio.js";
-import { leaseTermComparisonTools } from "./lease-term-comparison.js";
+import { leaseTermComparisonTools } from "./lease-term-comparison.ts";
 import { partnerRoomTools } from "./partner-room.js";
-import { agentProfileTools } from "./agent-profiles.js";
+import { agentProfileTools } from "./agent-profiles.ts";
+import { clientPublicationTools } from "./client-publications.ts";
 import { clientPortalTools } from "./client-portal.ts";
 import { memoryTools } from "./memory.js";
 import { sessionCheckpointTools, SESSION_CHECKPOINT_VERBS } from './session-checkpoints.js';
@@ -76,7 +86,7 @@ import { derivedIdempotencyKey } from "./derived-key.ts";
 import { DURABLE_KEY_SHAPES, REPLAY_WINDOW, durableReceipt, replayReceipt } from "./replay-receipt.ts";
 import { emailNextStepTools } from "./email-next-step.ts";
 import { EMAIL_TOUCH_SCHEMA, emailTouchBinding, guardEmailTouch, emailTouchReader } from "./email-touch.js";
-import { EMAIL_IDENTITY_SCHEMA, lockEmailIdentity, capturedEmail, guardEmailAction } from "./email-identity.js";
+import { EMAIL_IDENTITY_SCHEMA, lockEmailIdentity, capturedEmail, guardEmailAction } from "./email-identity.ts";
 import { emailProposalTools, resolveEmailProposal } from "./email-proposals.js";
 import { clearTheDeckTools } from "./clear-the-deck.js";
 import { addCalendarMeetingPrep } from "./calendar-meeting-prep.js";
@@ -84,22 +94,25 @@ import { CALENDAR_AGENDA_BOARD, calendarSection, addCalendarContacts, addCalenda
 import { emailLeadProposalTools } from "./email-lead-proposal.ts";
 import { leadAutomationTools } from "./lead-automation.js";
 import { actionLinkTools } from "./action-links.js";
+import { actionCardTargetTools } from "./action-card-targets.ts";
 import { workflowCutoverTools } from "./workflow-cutover.v5.ts";
 import { engineeringRuntimeTools } from "./engineering-runtime.js";
 import { tourRightsProjectionTools } from "./tour-rights-projection.js";
 import { tourPropertyJurisdictionTools } from "./tour-property-jurisdiction.js";
 import { tourDomainTools } from "./tour-domain.js";
-import { tourPropertySearchTools } from "./tour-property-search.js";
+import { tourPropertySearchTools, tourPropertySearchInputSchema, normalizeTourPropertySearch } from "./tour-property-search.js";
+import { installTourDealAccess } from "./tour-deal-access.js";
+import { dealSpaceSearchTools } from "./deal-space-searches.ts";
 import { tourSharingTools } from "./tour-sharing.js";
 import { tourMapPromotionTools } from "./tour-map-promotion.js";
 import { tourArtifactTools } from "./tour-artifacts.js";
 import { DEAL_ROOM_FIELDS, assertDealRoomField, stripDealPlaceholders } from "./dealroom.ts";
 import { authenticatedIdentity, authorizationClassForActor, organizationTenantForActor,
          permittedActionOwnerSlugs, personalScopeForActor } from "./identity.js";
-import { automaticApplyHold } from "./call-auto-apply.js";
+import { automaticApplyHold } from "./call-auto-apply.ts";
 import { canExercisePartnerAuthority, partnerAuthoritySlugForActor } from "./partner-authority.js";
 import { isPersonalRecordOwner } from "./personal-record-ownership.ts";
-import { assertRegisteredOperation, mutationManifestIdentity, MutationRegistryRefusal } from "./mutation-registry.js";
+import { assertRegisteredOperation, mutationManifestIdentity, MutationRegistryRefusal } from "./mutation-registry.ts";
 import { readRuleEnforcementCoverage } from "./lifecycle-assurance.v5.js";
 import { recordSourceAuthorityStoreTools } from "./record-source-authority-store.v5.js";
 // V5-J102's healthcare CRE lifecycle door: every verb on the writer connection
@@ -115,14 +128,13 @@ import { salesforceReadRunStoreTools } from "./salesforce-read-run-store-rw02.v5
 // seam below (shadow until Joe approves enforcement), and their read projection.
 import { V5BoundaryDoorRefusal, globalBoundariesDoorTools, passBoundaryDoor } from
   "./global-boundaries-door.v5.js";
-import { governedCorrespondenceStoreTools } from "./governed-correspondence-store.v5.js";
 import { assuranceHealthStoreTools } from "./assurance-health-store.v5.ts";
 import { ruleContextRuntimeTools } from "./rule-context-runtime.v5.js";
 import { systemWorkTools } from "./system-work-census.v5.js";
 import { BOARD_ANSWER_WRITE_VERBS, boardAnswerTools } from "./board-answers.js";
 import { RESEARCH_SITE_WRITE_VERBS, researchSiteTools } from "./research-sites.ts";
-import { partyIdentityTools } from "./party-identity.js";
-import { partyDuplicateCandidateTools } from "./party-duplicate-candidates.js";
+import { partyIdentityTools } from "./party-identity.ts";
+import { partyDuplicateCandidateTools } from "./party-duplicate-candidates.ts";
 import { briefQueuePage, readBriefLoops, briefLoopKey, briefNeedsJoeKey, briefAssuranceKey } from "./brief-queues.ts";
 import { readBriefAssurance } from "./brief-assurance.ts";
 import { readNeedsJoe } from "./needs-joe.js";
@@ -133,136 +145,12 @@ export { canExercisePartnerAuthority, partnerAuthoritySlugForActor };
 // Defined in a leaf module so modules tools.js depends on can throw typed,
 // self-naming failures too; re-exported here so existing imports keep working.
 import { ToolError } from "./tool-error.ts";
+import { assertRequiredArgs, coerceArgsToSchema } from "./input-validation.ts";
 export { ToolError };
 import { parksADecision, classifyLoopText, needsDecider, loopRowText,
          ESCALATION_REASON, BLOCKER_DECIDER_REASON } from "./verb-gate-checks.ts";
 
-// DEFECT 2, HALF (b) (found 2026-08-13, decision 7026246b): a write whose bad
-// input reaches the database raw (an enum this file never learned to validate,
-// a foreign key nobody checked first) throws a driver error, not a ToolError —
-// and mcp.js's top-level catch used to flatten EVERY non-ToolError into a bare
-// {"error":"internal error"} with no field, no constraint, no allowed values.
-// Half (a) closes the specific gap (marker, domain, above); this is the
-// backstop for every OTHER enum/FK this file has not yet learned to check —
-// Postgres SQLSTATE class 23 (integrity_constraint_violation) always names the
-// constraint and usually the column, so that much can be surfaced honestly
-// without ever touching the connection string (which lives in env bindings,
-// never in a query or its error — nothing here reads or forwards env).
-// Deliberately narrow: anything outside class 23 (a real connection or driver
-// fault) returns null and falls through to the generic handler unchanged,
-// because this is a translator for bad input, not a catch-all.
-const PG_VIOLATION_KIND = Object.freeze({
-  "23514": "check_violation",       // e.g. marker/kind fails its CHECK
-  "23503": "foreign_key_violation", // e.g. domain names no row in loop_domain
-  "23505": "unique_violation",
-  "23502": "not_null_violation",
-});
-const CONNSTR_RE = /\b\w+:\/\/[^\s'"]+/gi; // defense in depth; pg errors don't carry one today
-function redact(s) {
-  return typeof s === "string" ? s.replace(CONNSTR_RE, "[redacted]") : s;
-}
-
-// THE TWO CLASSES THAT COST THE MOST ON 2026-08-21, neither of which is a
-// constraint violation, so neither was translated and both reached the caller
-// as a bare "internal error" naming nothing:
-//
-//   42501 insufficient_privilege — complete-capability-project took a row lock
-//   on an append-only table the serving role holds only insert/select on. Row
-//   locks need UPDATE. Every completion since the verb shipped died here, which
-//   is why the AI Engineering Suite read 0 complete of 51 while six of its
-//   projects were finished. Hours went into it because the error named nothing.
-//
-//   22P02 invalid_text_representation — a short id or a "#213"-style reference
-//   reaching a uuid column. Hit twice in one session, on close-loop's successor
-//   field and on update-decision, both of which document the human-readable
-//   form in their own hints. Two defects filed under one class.
-//
-// A permission or a type mismatch is not less actionable than a CHECK
-// violation, and it is far more likely to be a bug in the verb rather than in
-// the caller's arguments — which is exactly why hiding it is expensive.
-const PG_FAULT_KIND = Object.freeze({
-  "42501": "insufficient_privilege",
-  "22P02": "invalid_text_representation",
-  "42703": "undefined_column",
-  "42P01": "undefined_table",
-  "42883": "undefined_function",
-});
-const PG_FAULT_HINT = Object.freeze({
-  "42501": "the database refused this to the role the server connects as — the grant is missing, " +
-           "or the statement takes a row lock (select ... for update) on a table this role may only " +
-           "read. Read the handler's SQL before assuming a server fault; do not widen the grant " +
-           "without checking whether the lock is needed at all.",
-  "22P02": "a value did not parse as its column's type — most often a short id, a '#123' reference " +
-           "or a name where a uuid is required. Check which form this field actually accepts; the " +
-           "verb's own description may name a friendlier form than the code accepts.",
-  "42703": "the statement names a column that does not exist — a schema change and this code have drifted.",
-  "42P01": "the statement names a table that does not exist — a migration is missing on this database.",
-  "42883": "the statement calls a function that does not exist — a migration is missing on this database.",
-});
-
-// A CHECK THAT SPANS MORE THAN ONE COLUMN REPORTS `column: null`, and 219 of
-// this database's constraints do. Postgres is not being unhelpful -- it cannot
-// name one column for a rule about several -- but the caller is then told that
-// a rule broke without being told which of their inputs broke it, which is the
-// difference between a refusal they can act on and a dead end. Measured
-// 2026-09-18: 219 multi-column constraints, of which 86 leave the field
-// completely unidentifiable and 212 leave the required fix unknowable.
-//
-// The catalog knows the answer. pg_constraint.conkey holds exactly the columns
-// the rule is about, and pg_get_constraintdef prints the rule itself, so one
-// lookup keyed on the constraint name the error already carries turns
-// `column: null` into the list of fields involved plus the condition they must
-// satisfy. That is a read of the system catalogs only -- no row of anyone's
-// data is touched -- and it runs on the connection the failed statement was
-// already using, after its rollback, so it costs no new connection.
-const CONSTRAINT_COLUMNS_SQL = `
-  select t.relname as table_name,
-         pg_get_constraintdef(c.oid) as definition,
-         coalesce(array_agg(a.attname order by a.attname)
-                    filter (where a.attname is not null), '{}') as columns
-    from pg_constraint c
-    join pg_class t on t.oid = c.conrelid
-    left join pg_attribute a
-      on a.attrelid = c.conrelid and a.attnum = any(c.conkey) and not a.attisdropped
-   where c.conname = $1
-   group by t.relname, c.oid
-   limit 1`;
-
-/** Add the columns and the rule text to a constraint refusal, when we can.
- *
- * Deliberately best-effort: the refusal is already correct and already useful
- * without this, so a catalog lookup that fails must NOT replace a precise
- * refusal with a database error about the lookup. Any failure returns the
- * refusal untouched.
- */
-export async function describeConstraint(client, refusal) {
-  const name = refusal?.payload?.constraint;
-  if (!client || typeof name !== "string" || !name) return refusal;
-  let row;
-  try {
-    const out = await client.query(CONSTRAINT_COLUMNS_SQL, [name]);
-    row = out?.rows?.[0];
-  } catch {
-    return refusal;   // see the doc comment: never trade a good refusal for this
-  }
-  if (!row) return refusal;
-  const columns = Array.isArray(row.columns) ? row.columns : [];
-  if (columns.length === 0) return refusal;
-  refusal.payload.table = refusal.payload.table || row.table_name || null;
-  refusal.payload.columns = columns;
-  refusal.payload.rule = redact(row.definition) || null;
-  // Only overwrite the hint when the original was the unhelpful case: a rule
-  // broke and no field was named. A single-column violation already told the
-  // caller which field, and that hint is better than this one.
-  if (!refusal.payload.column) {
-    refusal.payload.hint =
-      `this rule is about ${columns.length} fields together (${columns.join(", ")}), which is why ` +
-      `no single field is named: the database cannot attribute a multi-column rule to one column. ` +
-      `\`rule\` is the exact condition your values must satisfy. Check the combination, not each ` +
-      `field on its own -- each may be individually valid.`;
-  }
-  return refusal;
-}
+import { pgConstraintError } from "./constraint-errors.ts";
 
 const PERSON_TITLES = new Set("DR DOCTOR MR MISTER MRS MISS MS MX PROF PROFESSOR REV REVEREND FR FATHER SIR DAME HON HONORABLE RABBI IMAM PASTOR".split(" "));
 const PERSON_SUFFIXES = new Set("MD DO DDS DMD DPM DC OD PHD PSYD DPT PT PA PAC NP RN APRN CRNA MBA MHA MPH JD ESQ CPA JR SR II III IV V".split(" "));
@@ -285,27 +173,6 @@ export function assertFullPersonName(name) {
   if (!normalized || normalized.includes("@") || digits.length > letters.length
       || (!unspaced && whole.length < 2))
     throw new ToolError({ error: "full_person_name_required" });
-}
-
-export function pgConstraintError(e) {
-  const code = e && e.code;
-  if (typeof code !== "string") return null;
-  if (PG_VIOLATION_KIND[code]) {
-    return new ToolError({ error: "invalid_field_value", violation: PG_VIOLATION_KIND[code],
-      constraint: e.constraint || null, table: e.table || null, column: e.column || null,
-      detail: redact(e.detail) || null,
-      hint: "a value failed a database constraint — check it against this verb's documented " +
-            "enum or required fields; this is the constraint the value actually violated, not a stack trace" });
-  }
-  if (PG_FAULT_KIND[code]) {
-    return new ToolError({ error: "database_refused_the_statement", fault: PG_FAULT_KIND[code],
-      sqlstate: code,
-      table: e.table || null, column: e.column || null,
-      message: redact(e.message) || null,
-      detail: redact(e.detail) || null,
-      hint: PG_FAULT_HINT[code] });
-  }
-  return null;
 }
 
 // [ORDER 34 review, blocker 1] The old array-replacer form of JSON.stringify
@@ -405,10 +272,10 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || verb === "record-email-lifecycle" || ["confirm-requirement-reply", "reject-requirement-reply", "dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread", "undo-email-thread-filing", "clear-the-deck-apply"].includes(verb) || verb === "undo-call" || ["add-deal-note", "review-deal-update", "set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist", "complete-doc-request"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "append-work-request-scope" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || verb === "record-email-lifecycle" || ["confirm-requirement-reply", "reject-requirement-reply", "dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread", "undo-email-thread-filing", "clear-the-deck-apply"].includes(verb) || verb === "undo-call" || ["add-deal-note", "review-deal-update", "set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist", "complete-doc-request"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "append-work-request-scope" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || ["save-deal-space-search-v1", "run-deal-space-search-v1"].includes(verb) || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
 
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
-  if (FEATURE_SWITCH_WRITES.has(verb) || HOME_INBOX_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
+  if (verb === "review-call-outcome" || FEATURE_SWITCH_WRITES.has(verb) || HOME_INBOX_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
   // A receipt older than REPLAY_WINDOW is not a replay: the key is unknown and the
   // write runs as new (tool_call_expire frees the key on insert). A durable
   // receipt is read back by key elsewhere and keeps replaying.
@@ -833,235 +700,6 @@ export function compareVersion(current, baseVersion) {
     return { ok: false, kind: "invalid_base_version" };
   if (cv !== bv) return { ok: false, kind: "conflict" };
   return { ok: true };
-}
-
-// THE OTHER HALF OF THE SAME DEFECT (found 2026-08-13, loop 353). compareVersion
-// above fixed ONE field, base_version, against mistyped arrival. The cause it
-// names — "MCP tool-call arguments are never validated against inputSchema
-// server-side" — was never field-specific, and leaving it at one field meant the
-// next mistyped argument was only a matter of which verb got called.
-//
-// It got called. `teach` decides a rule's SCOPE with `args.personal ? ... : null`
-// (loose truthiness) and echoes it back with `args.personal === true` (strict).
-// A boolean that arrived as the STRING "false" is truthy at the first line and
-// false at the second, so the verb stored a SHARED rule as PERSONAL while
-// reporting personal_requested:false. That is not a cosmetic disagreement: scope
-// decides WHO a taught rule binds, the response said the caller got what it
-// asked for, and only a hand comparison of two exported files caught it. Twice
-// in one session.
-//
-// Fixing teach alone would have been the same mistake a second time: a sweep
-// found 17 sites reading a declared boolean or number with loose truthiness or
-// bare arithmetic, SEVEN of which write the wrong value straight to the database
-// (drift_critical on add-loop and update-loop, also_listing_side on add-premises,
-// found and internal on record-finding, close on score-campaign), and eight more
-// that silently skip a dedup or plausibility gate. So the coercion happens ONCE,
-// at the choke point every verb passes through, and no handler has to remember.
-//
-// STRICTLY SCHEMA-DRIVEN, NEVER VALUE-SNIFFING. Only a property whose declared
-// type is exactly "boolean", "integer" or "number" is touched. A field declared
-// "string" is never inspected, so free text that happens to read "true" (a
-// human_quote, a note, a rationale) is untouchable by construction. A union
-// (oneOf, anyOf, or type given as an array) is skipped rather than guessed at —
-// log-decision's `about` takes string OR array, and patch-deal-field has
-// nullable strings.
-//
-// IT THROWS RATHER THAN GUESSING. "true"/"false" and numeric strings map
-// cleanly; anything else in a typed field is a caller error and now fails
-// loudly, in the same spirit as invalid_base_version. Silently leaving an
-// unmappable value in place is what produced this defect in the first place.
-//
-// Recursive, because two of the affected flags are not top-level: add-premises
-// carries also_listing_side inside ownership[] and force_new one level deeper
-// inside ownership[].new_party.
-// ── THE MARKUP WRITE DOOR (2026-08-14) ───────────────────────────────────────
-// ops/store-markup-scan.py has been catching this AFTER the fact for weeks: a
-// caller composes several long fields as one block of text, a field swallows its
-// own closing tag, and every parameter after that tag is stored NULL. Six active
-// shared rules carried it on 2026-08-13, the oldest four days old, five with a
-// partner's verbatim quote absorbed into the rule statement.
-//
-// A detector cannot un-write a NULL, and this record layer refuses to edit a
-// closed row on purpose — "a closed loop is history" — so damage that lands and
-// is then closed is permanent. The write door is the only place it can actually
-// be stopped, which is here.
-//
-// CORRUPTION vs MENTION is the same structural test ops/store-markup-scan.py's
-// classify() uses, deliberately, because two doors disagreeing about one row is
-// worse than either rule alone: the field swallowed ITS OWN closing tag, or it
-// carries a bare marker that ate whatever should have followed. Markers quoted
-// in backticks on one line are prose ABOUT the defect — the rule documenting it,
-// the loops that tracked the cleanup, this comment — and must stay writable.
-const TOOL_CALL_MARKERS = ["<parameter", "</parameter", "<invoke", "</invoke"];
-
-export function looksLikeToolCallMarkup(field, value) {
-  if (typeof value !== "string" || value === "") return false;
-  // close_outcome's own closing tag is </outcome>; the scan strips the close_
-  // prefix the same way, and the two must not disagree about the same row.
-  const ownCloser = `</${String(field).replace(/^close_/, "")}>`;
-  if (value.includes(ownCloser)) return true;
-  for (const marker of TOOL_CALL_MARKERS) {
-    let idx = value.indexOf(marker);
-    while (idx !== -1) {
-      const before = value.lastIndexOf("`", idx);
-      const after = value.indexOf("`", idx);
-      const quoted = before !== -1 && after !== -1
-        && !value.slice(before, after).includes("\n");
-      if (!quoted) return true;
-      idx = value.indexOf(marker, idx + 1);
-    }
-  }
-  return false;
-}
-
-// REQUIRED ARGUMENTS, ENFORCED AT THE DOOR (2026-08-14).
-//
-// Every verb declares `required` in its inputSchema and, until this existed,
-// nothing checked it. mcp.js hands rpc.params.arguments through untouched and
-// the local CLI path does the same, so a required field that was misspelled or
-// simply absent arrived as undefined and the handler ran regardless.
-//
-// WHAT THAT PRODUCED, measured live rather than imagined. search-doctrine builds
-// websearch_to_tsquery('english', undefined), which Postgres does not treat as
-// an error — it matches nothing:
-//
-//     search-doctrine {"query":"HIPAA"}  ->  ok:true, hits:[], total:0
-//     search-doctrine {}                 ->  ok:true, hits:[], total:0
-//     search-doctrine {"q":"HIPAA"}      ->  20 hits
-//
-// A call with NO ARGUMENTS AT ALL came back clean and empty.
-//
-// AN EMPTY RESULT IS INDISTINGUISHABLE FROM A GENUINE ABSENCE, which is what
-// makes this worse than a crash. On 2026-08-14 a session searched doctrine for a
-// settled council ruling, got total:0, concluded the ruling did not exist, and
-// filed a defect claiming the doctrine read path was broken. The ruling was
-// there; the parameter name was wrong. Rule c53beeaa already says an ok:true
-// confirms the call PARSED and never that the values landed — this enforces that
-// at the boundary instead of hoping each of a hundred handlers remembers.
-//
-// It sits beside coerceArgsToSchema deliberately, per the same 2026-08-13 ruling
-// that put coercion at the choke point rather than in seventeen handlers.
-//
-// PRESENCE, not truthiness: `false` and `0` are arguments a caller meant. `null`
-// and `""` are what an unfilled template produces and carry no instruction.
-//
-// The near-miss hint is not decoration. The observed failure was a caller who
-// HAD the schema and still sent `query` for `q`, so the error names the field it
-// wanted and echoes the unrecognised keys that were sent instead.
-export function assertRequiredArgs(schema, args) {
-  const required = schema && Array.isArray(schema.required) ? schema.required : null;
-  if (!required || !required.length) return args;
-  const bag = (args && typeof args === "object" && !Array.isArray(args)) ? args : {};
-  // A field the schema DECLARES nullable (type ["string","null"], or an anyOf /
-  // oneOf branch of type "null") takes null as a real answer: "no appointment",
-  // "no prior route version". Refusing it made such verbs uncallable, since the
-  // key is required AND its only honest value was null (append-tour-route-stop,
-  // append-tour-route-stop-transition, search-tour-properties, 2026-09-23).
-  // Absent keys and "" stay missing for every field.
-  const props = (schema && schema.properties) || {};
-  const nullable = (k) => {
-    const p = props[k];
-    if (!p || typeof p !== "object") return false;
-    if (p.type === "null" || (Array.isArray(p.type) && p.type.includes("null"))) return true;
-    return [p.anyOf, p.oneOf].some((alts) => Array.isArray(alts) && alts.some((a) => a && a.type === "null"));
-  };
-  const missing = required.filter((k) => {
-    const v = bag[k];
-    if (v === null && nullable(k)) return false;
-    return v === undefined || v === null || v === "";
-  });
-  if (!missing.length) return args;
-  const known = new Set(Object.keys(schema.properties || {}));
-  const unrecognised = Object.keys(bag).filter((k) => !known.has(k));
-  const payload = {
-    error: "missing_required",
-    missing,
-    hint: `this verb requires ${missing.map((m) => JSON.stringify(m)).join(", ")}`,
-  };
-  if (unrecognised.length) {
-    payload.unrecognised = unrecognised;
-    payload.hint += `; it received ${unrecognised.map((u) => JSON.stringify(u)).join(", ")}` +
-      `, which it does not accept — check the argument NAME against the schema before` +
-      ` concluding the verb is broken or the answer is empty`;
-  }
-  throw new ToolError(payload);
-}
-
-
-export function coerceArgsToSchema(schema, args, path = "") {
-  if (!schema || !args || typeof args !== "object" || Array.isArray(args)) return args;
-  const props = schema.properties;
-  if (!props) return args;
-  for (const [key, spec] of Object.entries(props)) {
-    if (!spec || !Object.prototype.hasOwnProperty.call(args, key)) continue;
-    const v = args[key];
-    if (v === undefined || v === null) continue;
-    const where = path ? `${path}.${key}` : key;
-    // Refused BEFORE any coercion or type branch: a leaked tag makes the value
-    // wrong whatever its declared type, and the fields this lands in (body,
-    // source_note, outcome) are plain strings that would otherwise sail through
-    // untouched. The error names the field and the fix, because the caller that
-    // does this is mid-way through composing several long fields and needs to be
-    // told which one ran into the next.
-    if (looksLikeToolCallMarkup(key, v)) {
-      throw new ToolError({
-        error: "tool_call_markup_in_value", field: where,
-        hint: `${where} contains tool-call markup (a leaked </${String(key).replace(/^close_/, "")}> `
-          + `or <parameter …> tag). The field ran into the one after it, and every field `
-          + `after the leak would be stored empty. Pass each field as its own argument `
-          + `rather than composing them as one block of text, then retry. Prose ABOUT `
-          + `this defect is allowed when the markers are quoted in backticks.`,
-      });
-    }
-    // A union is ambiguous by design; coercing one would destroy the other.
-    if (spec.oneOf || spec.anyOf || Array.isArray(spec.type)) continue;
-    if (spec.type === "boolean") {
-      if (typeof v === "boolean") continue;
-      if (typeof v === "string") {
-        const s = v.trim().toLowerCase();
-        if (s === "true") { args[key] = true; continue; }
-        if (s === "false") { args[key] = false; continue; }
-      }
-      throw new ToolError({ error: "invalid_boolean", field: where, got: typeof v === "string" ? v : typeof v,
-        hint: `${where} is declared boolean; pass true or false, not a quoted or numeric value` });
-    }
-    if (spec.type === "integer" || spec.type === "number") {
-      if (typeof v === "number") continue;
-      if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v.trim()))) {
-        args[key] = Number(v.trim());
-        continue;
-      }
-      throw new ToolError({ error: "invalid_number", field: where, got: typeof v === "string" ? v : typeof v,
-        hint: `${where} is declared ${spec.type}; pass a number` });
-    }
-    if (spec.type === "object") { coerceArgsToSchema(spec, v, where); continue; }
-    // A JSON-STRING ARRAY IS STILL AN ARRAY ARGUMENT, and until 2026-08-15 it fell
-    // straight through here uncoerced, because this branch required Array.isArray
-    // BEFORE it would look at anything. What that cost, live: doctrine-sections
-    // measured `.length` on an ~80-character string and answered
-    // "batch_too_large, max 50" for a batch of two, while a single id slipped
-    // under the limit and died casting a string to uuid[]. claim-doctrine-sections
-    // iterated the same string into characters, so no session could claim a
-    // doctrine section and the single-writer write path was down for hours.
-    //
-    // Parsed HERE rather than in the handlers, per the 2026-08-13 ruling that put
-    // coercion at the choke point instead of in seventeen of them. Every verb
-    // taking an array gets this, not only the three that happened to be caught.
-    let value = v;
-    if (spec.type === "array" && typeof value === "string") {
-      const text = value.trim();
-      if (text.startsWith("[")) {
-        try {
-          const parsed = JSON.parse(text);
-          if (Array.isArray(parsed)) { args[key] = value = parsed; }
-        } catch { /* leave it; the handler's own validation refuses it by name */ }
-      }
-    }
-    if (spec.type === "array" && Array.isArray(value) && spec.items) {
-      value.forEach((item, i) => coerceArgsToSchema(spec.items, item, `${where}[${i}]`));
-    }
-  }
-  return args;
 }
 
 // AUTO-REBASE FOR A PURE VERSION-NUMBER RACE (WR-000019 slice S6, CONFLICT
@@ -3937,10 +3575,10 @@ export const TOOLS = {
                   'due_on',to_jsonb(i.due_on)#>>'{}','status',i.status,'bullets',i.item_bullets,'source_ref',i.source_ref)
                   order by i.created_order,i.id) from v_deal_room_action i where i.deal_id=b.id
                   and i.item_title is not null and i.status not in ('dropped', 'expired')),'[]'::jsonb) as items,
-                coalesce((select jsonb_agg(jsonb_build_object('id', n.id, 'owner', n.owner,
+                coalesce((select jsonb_agg(jsonb_build_object('id', n.id, 'item_id', n.item_id, 'owner', n.owner,
                   'description', n.description, 'due_on', to_jsonb(n.due_on)#>>'{}')
                   order by n.due_on nulls last, n.id)
-                  from (select id, owner, description, due_on from v_deal_room_action
+                  from (select id, item_id, owner, description, due_on from v_deal_room_action
                          where deal_id=b.id and status='open' and item_title is null
                          order by due_on nulls last, id limit 3) n), '[]'::jsonb) as open_actions,
                 (select jsonb_build_object('kind', step.kind, 'summary', step.summary,
@@ -9349,6 +8987,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "doc-activity": "mcp-server/src/doc-activity.js",
   "meeting-mode": "mcp-server/src/meeting-mode.js",
   "notifications": "mcp-server/src/notifications.ts",
+  "web-push-subscriptions": "mcp-server/src/web-push-subscriptions.ts",
   "home-inbox": "mcp-server/src/home-inbox.js",
   "home-review": "mcp-server/src/home-review.js",
   "session-identity": "mcp-server/src/session-identity.ts",
@@ -9357,14 +8996,15 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "work-shape": "mcp-server/src/work-shape.ts",
   "work-queue": "mcp-server/src/work-queue.js",
   "work-request-intake": "mcp-server/src/work-request-intake.js",
-  "lease-term-comparison": "mcp-server/src/lease-term-comparison.js",
+  "lease-term-comparison": "mcp-server/src/lease-term-comparison.ts",
   "fact-review": "mcp-server/src/fact-review.ts",
   "market-terms": "mcp-server/src/market-terms.ts",
   "fact-generation": "mcp-server/src/fact-generation.ts",
   "deal-extraction": "mcp-server/src/deal-extraction.ts",
+  "deal-document-text": "mcp-server/src/deal-document-text.ts",
   "fact-observations": "mcp-server/src/fact-observations.ts",
   "partner-room": "mcp-server/src/partner-room.js",
-  "agent-profile": "mcp-server/src/agent-profiles.js",
+  "agent-profile": "mcp-server/src/agent-profiles.ts",
   "client-portal": "mcp-server/src/client-portal.ts",
   "resource-observation": "mcp-server/src/resource-observation.v5.ts",
   "lead-automation": "mcp-server/src/lead-automation.js",
@@ -9387,6 +9027,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "tour-property-jurisdiction": "mcp-server/src/tour-property-jurisdiction.js",
   "tour-domain": "mcp-server/src/tour-domain.js",
   "tour-property-search": "mcp-server/src/tour-property-search.js",
+  "deal-space-searches": "mcp-server/src/deal-space-searches.ts",
   "tour-map-promotion": "mcp-server/src/tour-map-promotion.js",
   "tour-sharing": "mcp-server/src/tour-sharing.js",
   "tour-artifacts": "mcp-server/src/tour-artifacts.js",
@@ -9395,15 +9036,14 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "salesforce-reconciliation-rw02": "mcp-server/src/salesforce-reconciliation-store-rw02.v5.js",
   "salesforce-read-run-rw02": "mcp-server/src/salesforce-read-run-store-rw02.v5.js",
   "global-boundaries-door": "mcp-server/src/global-boundaries-door.v5.js",
-  "governed-correspondence-store": "mcp-server/src/governed-correspondence-store.v5.js",
   "assurance-health-store": "mcp-server/src/assurance-health-store.v5.ts",
   "rule-context-runtime": "mcp-server/src/rule-context-runtime.v5.js",
   "system-work-census": "mcp-server/src/system-work-census.v5.js",
   "board-answers": "mcp-server/src/board-answers.js",
-  "org-conventions": "mcp-server/src/org-conventions.js",
+  "org-conventions": "mcp-server/src/org-conventions.ts",
   "research-sites": "mcp-server/src/research-sites.ts",
-  "party-identity": "mcp-server/src/party-identity.js",
-  "party-duplicate-candidates": "mcp-server/src/party-duplicate-candidates.js",
+  "party-identity": "mcp-server/src/party-identity.ts",
+  "party-duplicate-candidates": "mcp-server/src/party-duplicate-candidates.ts",
   "doc-suggestions": "mcp-server/src/doc-suggestions.ts",
   "whats-new": "mcp-server/src/whats-new.js",
   "invoice-tracker": "mcp-server/src/invoice-tracker.ts",
@@ -10414,12 +10054,14 @@ registerTools({
   // change with its evidence, plus every card still open) stays on record and
   // on Home until a partner has looked it over, in case one was wrong.
   "read-call-outcomes": {
+    outputSchema: callOutcomesOutputSchema,
     writerConnection: true,
-    description: "Pipeline-call outcomes not yet reviewed: for each call, every change applied automatically (deal, change, transcript evidence quote, applied_at, undone_at, and the deal's current version for undo-call-change) and every card still waiting on Joe or Dell. Assigned task cards include existing_action_comparison (post-call-action-comparison.v2): exact_match previews acceptance; related_open_tasks lists up to five newest open tasks on the same deal as neutral context, with no similarity claim; related_open_task_total counts all open tasks on the deal. Closed history is excluded from context. An unavailable assignee or failed read must never be presented as no match. Nothing here sends anything.",
+    description: "Pipeline-call outcomes not yet reviewed: each call includes its canonical source_version for review-call-outcome.expected_source_version, every change applied automatically (deal, change, transcript evidence quote, applied_at, undone_at, and the deal's current version for undo-call-change) and every card still waiting on Joe or Dell. Assigned task cards include existing_action_comparison (post-call-action-comparison.v2): exact_match previews acceptance; related_open_tasks lists up to five newest open tasks on the same deal as neutral context, with no similarity claim; related_open_task_total counts all open tasks on the deal. Closed history is excluded from context. An unavailable assignee or failed read must never be presented as no match. Nothing here sends anything.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     handler: async (c) => {
       const sessions = (await c.query(`
         select s.id as session_id, a.slug as recorder, to_jsonb(s.started_at)#>>'{}' as started_at,
+               ops.post_call_review_target(s.id)->>'source_version' as source_version,
                (s.started_at at time zone 'America/Chicago')::date::text as call_date
           from capture_session s join actor a on a.id=s.actor_id
          where s.post_call and s.outcome_reviewed_at is null
@@ -10460,26 +10102,47 @@ registerTools({
   },
 
   "review-call-outcome": {
-    write: true,
+    write: true, humanOnly: true,
     description: "Mark one pipeline call's outcome reviewed by a partner, so it leaves Home. Applied changes stay applied and still undoable from the deal; open cards stay open.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       idempotency_key: { type: "string" }, session_id: { type: "string" },
+      expected_source_version: { type: "string", minLength: 1, description: "Canonical card source_version the partner reviewed. Required at and after the legacy omission sunset; supplied versions are always enforced." },
     }, required: ["idempotency_key", "session_id"] },
-    handler: async (c, actor, args) => withEnvelope(c, actor, "review-call-outcome", args, async () => {
-      if (!canExercisePartnerAuthority(actor)) throw new ToolError({ error: "partner_required" });
-      const row = (await c.query(
-        `update capture_session set outcome_reviewed_at=now(), outcome_reviewed_by=$2
-          where id=$1 and post_call and outcome_reviewed_at is null returning id
-          /* call-outcome:review */`, [args.session_id, actor.id])).rows[0];
-      if (!row) {
-        const known = (await c.query("select outcome_reviewed_at from capture_session where id=$1 and post_call", [args.session_id])).rows[0];
-        if (!known) throw new ToolError({ error: "not_found", table: "capture_session", id: args.session_id });
-        return { ok: true, session_id: args.session_id, already: "reviewed" };
-      }
-      await writeEvent(c, actor, "review-call-outcome", "actor", actor.id, {
-        new: { session_id: args.session_id, reviewed: true }, idempotency_key: args.idempotency_key });
-      return { ok: true, session_id: args.session_id, reviewed: true };
-    }),
+    handler: async (c, actor, args) => {
+      const legacyOmission = args.expected_source_version === undefined;
+      if (legacyOmission && Date.now() >= REVIEW_CALL_OUTCOME_LEGACY_SUNSET)
+        throw new ToolError({ error: "missing_required", missing: ["expected_source_version"],
+          hint: 'this verb requires "expected_source_version"' });
+      const result = await withEnvelope(c, actor, "review-call-outcome", args, async () => {
+        if (!canExercisePartnerAuthority(actor)) throw new ToolError({ error: "partner_required" });
+        // The parent lock also blocks new candidate FK references. Child locks
+        // cover edits/deletes; a separate statement sees edits committed while waiting.
+        const session = (await c.query(`select id from capture_session
+          where id=$1 and post_call for update /* call-outcome:review-session-lock */`, [args.session_id])).rows[0];
+        if (!session) throw new ToolError({ error: "not_found", table: "capture_session", id: args.session_id });
+        await c.query("select id from capture_candidate where session_id=$1 order by id for update", [args.session_id]);
+        await c.query("select id from capture_post_call_candidate where session_id=$1 order by id for update", [args.session_id]);
+        const current = (await c.query(`select ops.post_call_review_target($1)->>'source_version' as source_version
+          /* call-outcome:review-version */`, [args.session_id])).rows[0];
+        if (!legacyOmission && current?.source_version !== args.expected_source_version)
+          throw new ToolError({ error: "source_version_changed" });
+        const row = (await c.query(
+          `update capture_session set outcome_reviewed_at=now(), outcome_reviewed_by=$2
+            where id=$1 and post_call and outcome_reviewed_at is null returning id
+            /* call-outcome:review */`, [args.session_id, actor.id])).rows[0];
+        if (!row) {
+          const known = (await c.query("select outcome_reviewed_at from capture_session where id=$1 and post_call", [args.session_id])).rows[0];
+          if (!known) throw new ToolError({ error: "not_found", table: "capture_session", id: args.session_id });
+          return { ok: true, session_id: args.session_id, already: "reviewed" };
+        }
+        await writeEvent(c, actor, "review-call-outcome", "actor", actor.id, {
+          new: { session_id: args.session_id, reviewed: true }, idempotency_key: args.idempotency_key });
+        return { ok: true, session_id: args.session_id, reviewed: true };
+      });
+      if (legacyOmission) console.info(JSON.stringify({ event: "review_call_outcome_legacy_omission",
+        actor_kind: authorizationClassForActor(actor) }));
+      return result;
+    },
   },
 
   "undo-call": {
@@ -10989,6 +10652,8 @@ registerTools(meetingModeTools({ withEnvelope, writeEvent, ToolError,
 // WR-000113: the R03 notification feed and its acknowledgement receipt.
 // acknowledge-notification writes ops.notification_read and nothing else, which
 // is why a session may never report it as having moved a task.
+registerTools(webPushTools({ ToolError }), "web-push-subscriptions");
+registerTools(webPushConfigTools({ ToolError }), "mcp-server/src/web-push-config.ts");
 registerTools(notificationTools({ withEnvelope, writeEvent, ToolError }), "notifications");
 registerTools(homeWaitingTools({ withEnvelope }), "mcp-server/src/home-waiting.ts");
 registerTools(peopleDirectoryTools(), "mcp-server/src/people-directory.ts");
@@ -11048,11 +10713,19 @@ registerTools(marketTermsTools(), "market-terms");
 registerTools(leadFollowUpTools(), "lead-follow-up");
 registerTools(factGenerationTools({ withEnvelope, writeEvent }), "fact-generation");
 registerTools(dealExtractionTools(), "deal-extraction");
+registerTools(dealDocumentTextTools(), "deal-document-text");
 
 // The partner room (Idea 78): shared AI-to-AI transcript both Macs poll; raw
 // turns, server-derived attribution, human-watchable. See src/partner-room.js.
 registerTools(partnerRoomTools({ withEnvelope, ToolError }), "partner-room");
 registerTools(agentProfileTools(), "agent-profile");
+export async function authorizeClientPublication(c, actor, deal) {
+  const sponsor = partnerAuthoritySlugForActor(actor);
+  if (!sponsor) throw new ToolError({ error: "deliverable_denied" });
+  await authorizeDeliverable(c, { ...actor, human: true, slug: sponsor }, deal);
+  return sponsor;
+}
+registerTools(clientPublicationTools({ withEnvelope, writeEvent, authorizeDeal: authorizeClientPublication }), "mcp-server/src/client-publications.ts");
 registerTools(clientPortalTools({ withEnvelope, writeEvent, resolveSubject }), "client-portal");
 // DoctorCRE v5 V5-UX-C02/C06: the resource-metering read contract and the
 // one write door the local, credential-less collector uses. See
@@ -11074,7 +10747,8 @@ const invoices=invoiceAutomation({withEnvelope,writeEvent,ToolError,lockDealFiel
   invoicingMailbox:process.env.CARR_INVOICING_MAILBOX});
 registerTools(invoices.tools,"invoice-automation");
 registerTools(leadAutomationTools({ withEnvelope, writeEvent, ToolError, invoices }), "lead-automation");
-registerTools(actionLinkTools({ ToolError }), "action-links");
+registerTools(actionLinkTools({ ToolError, readTool: executeRegisteredTool }), "action-links");
+registerTools(actionCardTargetTools({ ToolError, readTool: executeRegisteredTool }), "mcp-server/src/action-card-targets.ts");
 // DoctorCRE V5-R02: workflow cutover, caller migration and retirement
 // readiness. Reads historical acceptance and native retirement evidence rather than
 // duplicating their evidence; retire-workflow-cutover-plan is authority-only.
@@ -11121,6 +10795,9 @@ registerTools(tourDomainTools({ withEnvelope, writeEvent, ToolError }), "tour-do
 // Tour Operations delivery surfaces: governed property search and cart,
 // confidential sharing, and deterministic PDF request/review records.
 registerTools(tourPropertySearchTools({ withEnvelope, writeEvent, ToolError }), "tour-property-search");
+registerTools(dealSpaceSearchTools({ withEnvelope, writeEvent, criteria: tourPropertySearchInputSchema,
+  organizationTenantForActor, partnerAuthoritySlugForActor,
+  normalizeCriteria: input => normalizeTourPropertySearch(input, ToolError) }), "deal-space-searches");
 registerTools(tourMapPromotionTools({ withEnvelope, writeEvent, ToolError }), "tour-map-promotion");
 registerTools(tourSharingTools({ withEnvelope, writeEvent, ToolError }), "tour-sharing");
 registerTools(tourArtifactTools({ withEnvelope, writeEvent, ToolError }), "tour-artifacts");
@@ -11133,15 +10810,6 @@ registerTools(recordSourceAuthorityStoreTools({ withEnvelope, ToolError }),
 // V5-S01: read-only projection of the settled global boundaries and the
 // dispatch door's mode and shadow counters. No database access.
 registerTools(globalBoundariesDoorTools({ ToolError }), "global-boundaries-door");
-// DoctorCRE V5-J103: the governed correspondence store. Two reads
-// (correspondence-readiness, read-correspondence-thread) and the humanOnly
-// consent pair, each partner only for their own carr.us mailbox. There is no
-// send verb and no draft verb: a draft can never dispatch from here, and sends
-// go through Joe's own accounts when he asks (decision 41906a30). Reads
-// answer unavailable until the F10 local-store adapter lands with a reviewed
-// grant for the read-receipt writer.
-registerTools(governedCorrespondenceStoreTools({ withEnvelope, writeEvent, ToolError }),
-  "governed-correspondence-store");
 registerTools(assuranceHealthStoreTools({ withEnvelope, ToolError }), "assurance-health-store");
 // DoctorCRE V5-F05: authenticated, actor-scoped rule-universe read plus the
 // Joe-authority typed-contract binder. The read uses the writer connection only
@@ -11152,6 +10820,8 @@ registerTools(ruleContextRuntimeTools({ withEnvelope, ToolError }), "rule-contex
 
 const overdueUpdates = dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds, lockDealField, dealNextStepStatus, ToolError });
 registerTools(overdueUpdates.tools, "deal-update-resolution");
+
+registerTools(clientNeedTools({ withEnvelope, writeEvent, partnerAuthoritySlugForActor }), "mcp-server/src/client-needs.ts");
 
 for (const family of toolFamilies) {
   registerTools(family.createTools({ withEnvelope, writeEvent, ToolError, resolveSubject,

@@ -1,6 +1,11 @@
 // Tests deterministic Tour packet rendering and public fact validation.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { projectTourClientPacket } from "../src/tour-sharing.js";
+import { renderTourPacketPdf } from "../src/tour-pdf-renderer.js";
+import { tourPacketPresentation } from "../src/tour-packet-template.ts";
 import { formatApprovedMetric, renderTourPacket, TourPacketRenderError } from "../src/tour-packet-render.js";
 
 const refs = {
@@ -26,22 +31,22 @@ test("Tour packet rendering is deterministic in immutable route order with publi
   assert.equal((first.html.match(/data-property-ref=/g) || []).length, 2);
   assert.ok(first.html.indexOf("Alpha Health Center") < first.html.indexOf("Zeta Medical Plaza"));
   assert.match(first.html, /data-route-sequence="10"/);
-  assert.match(first.html, /data-template-version="1\.1\.0"/);
+  assert.match(first.html, /data-template-version="2\.0\.0"/);
   assert.match(first.html, /#002F6C/);
   assert.match(first.html, /#F57F29/);
   assert.equal((first.html.match(/<main\b/g) || []).length, 1);
   assert.match(first.html, /break-after: page/);
   assert.match(first.html, /page-break-after: always/);
   assert.match(first.html, /height: 9\.9in/);
-  assert.doesNotMatch(first.html, /<section[^>]*(?:overview|cover)/i);
+  assert.match(first.html, /<section[^>]*overview/i);
 });
 
 test("Tour packet preserves allowlisted structured metrics with deterministic formatting", () => {
   const result = renderTourPacket(packet);
   assert.deepEqual(result.facts.properties[0].asking_economics, { value: "24.00", currency: "USD", period: "NNN" });
   assert.deepEqual(result.facts.properties[1].size, { value: 4200, unit: "SF" });
-  assert.equal(formatApprovedMetric({ min: 20, max: 25, currency: "USD", unit: "SF", period: "NNN", label: "Rate" }), "Rate: USD 20–25 SF / NNN");
-  assert.match(result.html, /USD 24\.00 \/ NNN/);
+  assert.equal(formatApprovedMetric({ min: 20, max: 25, currency: "USD", unit: "SF", period: "NNN", label: "Rate" }), "USD 20 to 25 SF per NNN");
+  assert.match(result.html, /USD 24\.00 per NNN/);
   assert.match(result.html, /4200 SF/);
   assert.throws(() => renderTourPacket({ ...packet, properties: [{ ...packet.properties[0], size: { value: 4200, provider: "private" } }] }), error => error instanceof TourPacketRenderError && error.code === "tour_packet_forbidden_field");
   assert.throws(() => renderTourPacket({ ...packet, properties: [{ ...packet.properties[0], size: { value: { nested: "no" } } }] }), error => error instanceof TourPacketRenderError && error.code === "tour_packet_invalid_text");
@@ -99,4 +104,41 @@ test("Tour packet accepts the database's timestamptz JSON shape and normalizes i
   for (const bad of ["2026-02-30T12:00:00+00:00", "2026-09-24T04:40:00+24:00", "2026-09-24T04:40:00+0000", "2026-09-24 04:40:00+00:00", "2026-09-24T04:40:00"]) {
     assert.throws(() => renderTourPacket({ ...packet, as_of: bad }), error => error instanceof TourPacketRenderError && error.code === "tour_packet_invalid_as_of", bad);
   }
+});
+
+// Recorded synthetic packet from doctorcre-app PR 836 at 32714087, with address labels sanitized.
+test("recorded 2.1.0 appointments display readable Central times and preserve packet facts", async () => {
+  const recorded = JSON.parse(await readFile(new URL("./fixtures/tour-packet-2.1.0.json", import.meta.url), "utf8"));
+  const rendered = renderTourPacket(recorded);
+  assert.equal(rendered.presentation.stops[0].appointment, "Tue, Mar 4, 8:00 to 8:30 AM CST");
+  assert.equal(rendered.presentation.stops[1].appointment, null);
+  const shared = projectTourClientPacket({ stops: recorded.properties });
+  assert.deepEqual(shared.presentation, rendered.presentation);
+  assert.equal(shared.stops[0].appointment_start, recorded.properties[0].appointment_start);
+  assert.equal(rendered.facts.properties[0].appointment_start, recorded.properties[0].appointment_start);
+  assert.equal(rendered.facts.properties[0].appointment_end, recorded.properties[0].appointment_end);
+  assert.match(rendered.html, /Tue, Mar 4, 8:00 to 8:30 AM CST/);
+  assert.doesNotMatch(rendered.html, /123456|\+00:00/);
+  const pdf = await renderTourPacketPdf(recorded, {
+    regular: new Uint8Array(await readFile(new URL("../assets/lato-regular.ttf", import.meta.url))),
+    bold: new Uint8Array(await readFile(new URL("../assets/lato-bold.ttf", import.meta.url))),
+  });
+  const extracted = spawnSync("pdftotext", ["-", "-"], { input: pdf.bytes, encoding: "utf8" });
+  assert.equal(extracted.status, 0, extracted.stderr);
+  assert.equal(extracted.stdout.split("Tue, Mar 4, 8:00 to 8:30 AM CST").length - 1, 2);
+  assert.doesNotMatch(extracted.stdout, /123456|\+00:00/);
+});
+
+test("appointment display handles start only, unknowns, dates, meridiems and DST", () => {
+  const display = (start, end) => tourPacketPresentation([{ ...packet.properties[0], appointment_start: start, appointment_end: end }]).stops[0].appointment;
+  assert.equal(display("2026-11-12T20:30:00.123456+00:00", "2026-11-12T21:15:00.123456+00:00"), "Thu, Nov 12, 2:30 to 3:15 PM CST");
+  assert.equal(display("2026-11-12T20:30:00Z", null), "Thu, Nov 12, 2:30 PM CST");
+  assert.equal(display("2027-01-01T05:30:00Z", "2027-01-01T06:15:00Z"), "Thu, Dec 31, 2026, 11:30 PM CST to Fri, Jan 1, 2027, 12:15 AM CST");
+  assert.equal(display(null, null), null);
+  assert.equal(display(undefined, undefined), null);
+  assert.equal(display(null, "2026-11-12T21:15:00Z"), null);
+  assert.equal(display("2026-11-01T06:30:00Z", "2026-11-01T07:30:00Z"), "Sun, Nov 1, 1:30 AM CDT to 1:30 AM CST");
+  assert.equal(display("2026-03-08T07:30:00Z", "2026-03-08T08:30:00Z"), "Sun, Mar 8, 1:30 AM CST to 3:30 AM CDT");
+  assert.equal(display("2026-11-12T17:30:00Z", "2026-11-12T18:15:00Z"), "Thu, Nov 12, 11:30 AM to 12:15 PM CST");
+  assert.equal(display("2026-11-13T05:30:00Z", "2026-11-13T06:15:00Z"), "Thu, Nov 12, 11:30 PM CST to Fri, Nov 13, 12:15 AM CST");
 });

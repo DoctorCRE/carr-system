@@ -4,13 +4,15 @@ A proof may need two clusters to demonstrate role isolation. Hold the host-wide
 budget before initializing its first cluster and through final shutdown. Nested
 fixtures in that proof reuse the lease; unrelated processes wait for teardown.
 The primary CI database is outside this lease because its child proofs need it.
+Bulk memory uses mmap and dynamic memory uses POSIX. PostgreSQL still allocates
+one small SysV control segment per live server, released by the supervisor's
+shutdown. See https://www.postgresql.org/docs/current/kernel-resources.html.
 """
 from contextlib import contextmanager
 import atexit
 import fcntl
 import json
 import os
-import pwd
 from pathlib import Path
 import shutil
 import signal
@@ -41,6 +43,25 @@ def postgres_bin_dir(names=('initdb', 'pg_ctl', 'createdb', 'psql', 'postgres'))
             return directory
     raise FileNotFoundError('PostgreSQL client/server binaries were not found')
 
+
+def fixture_root_from_line(line: str, prefix: str) -> Path:
+    """Reject child output that cannot name an owned temporary fixture root."""
+    root = Path(line.strip())
+    if not prefix or not root.is_absolute() or root.is_symlink():
+        raise ValueError('fixture child returned an unsafe root')
+    try:
+        resolved = root.resolve(strict=True)
+        temporary_roots = (Path(tempfile.gettempdir()).resolve(), Path('/tmp').resolve())
+        if (not resolved.name.startswith(prefix) or not resolved.is_dir()
+                or resolved.stat().st_uid != os.getuid()
+                or not any(resolved != temporary and resolved.is_relative_to(temporary)
+                           for temporary in temporary_roots)):
+            raise ValueError('fixture child returned an unsafe root')
+    except (OSError, RuntimeError) as error:
+        raise ValueError('fixture child returned an unsafe root') from error
+    return resolved
+
+
 LOCK_PATH = Path('/tmp') / f'carr-disposable-postgres-{os.getuid()}.lock'
 _thread_lock = threading.RLock()
 _depth = 0
@@ -50,93 +71,13 @@ _pending_signal = None
 _supervising = False
 
 
-def _fixture_segment_ids(directory, prefix):
-    segments = set()
-    for root in directory.iterdir():
-        if not root.name.startswith(prefix) or root.is_symlink() or not root.is_dir():
-            continue
-        if root.stat().st_uid != os.getuid():
-            continue
-        for pid_file in root.rglob('postmaster.pid'):
-            try:
-                if pid_file.is_symlink() or not pid_file.resolve().is_relative_to(root):
-                    continue
-                fields = pid_file.read_text().splitlines()[6].split()
-                if len(fields) == 2 and all(field.isdecimal() for field in fields):
-                    segments.add(str(int(fields[1])))
-            except (OSError, UnicodeError, IndexError):
-                continue
-    return segments
-
-
-def _orphan_segments(directory, prefix):
-    candidates = _fixture_segment_ids(directory, prefix)
-    rows = {}
-    columns = set()
-    commands = [['ipcs', '-m', '-a']] if sys.platform == 'darwin' else [
-        ['ipcs', '-m'], ['ipcs', '-m', '-p']]
-    for command in commands:
-        result = subprocess.run(command, capture_output=True, text=True,
-                                timeout=5, check=True, env={**os.environ, 'LC_ALL': 'C'})
-        header = []
-        for line in result.stdout.splitlines():
-            fields = line.split()
-            names = [field.lower() for field in fields]
-            if 'owner' in names and ('id' in names or 'shmid' in names):
-                header = ['id' if field == 'shmid' else field for field in names]
-                columns.update(header)
-                continue
-            if not header or len(fields) <= max(header.index('id'), header.index('owner')):
-                continue
-            row = dict(zip(header, fields))
-            if not row['id'].isdigit():
-                continue
-            previous = rows.setdefault(row['id'], row)
-            if previous['owner'] != row['owner']:
-                raise ValueError('shared-memory owner changed during inspection')
-            previous.update(row)
-    if not {'id', 'owner', 'nattch', 'cpid'} <= columns:
-        raise ValueError('unrecognized shared-memory table')
-    owner = pwd.getpwuid(os.getuid()).pw_name
-    orphans = set()
-    for ident, row in rows.items():
-        if ident not in candidates:
-            continue
-        if row['owner'] not in (owner, str(os.getuid())) or row.get('nattch') != '0':
-            continue
-        creator = int(row.get('cpid', '0'))
-        if creator <= 0:
-            continue
-        try:
-            os.kill(creator, 0)
-        except ProcessLookupError:
-            orphans.add((ident, creator))
-        except PermissionError:
-            pass
-    return orphans
-
-
-def _reclaim_orphan_segments(directory, prefix):
-    try:
-        for ident, creator in _orphan_segments(directory, prefix):
-            if (ident, creator) in _orphan_segments(directory, prefix):
-                subprocess.run(['ipcrm', '-m', ident], capture_output=True, text=True,
-                               timeout=5, check=True)
-    except (OSError, ValueError, subprocess.SubprocessError) as exc:
-        print(f'disposable PostgreSQL shared-memory preflight unavailable: {exc}', file=sys.stderr)
-
-
-def _diagnose_shared_memory_failure(output, directory, prefix):
+def _diagnose_shared_memory_failure(output):
     output = str(output).lower()
-    if 'no space left on device' not in output or not any(
+    if 'no space left on device' in output and any(
             term in output for term in ('shared memory', 'shared-memory', 'shmget')):
-        return
-    try:
-        count = f'{len(_orphan_segments(directory, prefix))} orphan segments (owned, unattached, dead creator)'
-    except (OSError, ValueError, subprocess.SubprocessError):
-        count = 'orphan segment count unavailable'
-    raise RuntimeError(
-        f'disposable PostgreSQL environment fault: System V shared-memory exhaustion; {count}; {output}')
+        raise RuntimeError(
+            'disposable PostgreSQL environment fault: System V shared-memory exhaustion; '
+            'mmap still requires a small control segment per server; ' + output)
 
 
 def _close_all():
@@ -248,7 +189,16 @@ class DisposablePostgres:
                 arg.startswith('-E') or arg == '--encoding'
                 or arg.startswith('--encoding=') for arg in args[1:]):
             args.append('--encoding=UTF8')
-        launch = Path(args[0]).name == 'initdb' or (Path(args[0]).name == 'pg_ctl' and 'start' in args)
+        initializing = Path(args[0]).name == 'initdb'
+        starting = Path(args[0]).name == 'pg_ctl' and 'start' in args
+        if initializing and not self._supervisor:
+            args.extend(['-c', 'shared_memory_type=mmap', '-c', 'dynamic_shared_memory_type=posix'])
+        if starting and not self._supervisor:
+            # mmap still needs PostgreSQL's tiny SysV control segment. Prevent
+            # bulk/dynamic SysV allocations even when callers override config.
+            args.remove('start')
+            args.extend(['-o', '-c shared_memory_type=mmap -c dynamic_shared_memory_type=posix', 'start'])
+        launch = initializing or starting
         if launch:
             self.register(args[args.index('-D') + 1])
         main_launch = launch and threading.current_thread() is threading.main_thread()
@@ -265,25 +215,20 @@ class DisposablePostgres:
                 if launch and self._supervisor:
                     result = self._supervised(args, kwargs)
                     if result.returncode:
-                        _diagnose_shared_memory_failure(f'{result.stdout} {result.stderr}',
-                                                        self.root.parent, self._prefix)
+                        _diagnose_shared_memory_failure(f'{result.stdout} {result.stderr}')
                     return result
-                if launch:
-                    _reclaim_orphan_segments(self.root.parent, self._prefix)
                 try:
                     result = (self.runner or subprocess.run)(args, **kwargs)
                 except Exception as exc:
                     if launch:
                         _diagnose_shared_memory_failure(
                             self._failure_output(args,
-                                f'{exc} {getattr(exc, "stdout", "")} {getattr(exc, "stderr", "")}'),
-                            self.root.parent, self._prefix)
+                                f'{exc} {getattr(exc, "stdout", "")} {getattr(exc, "stderr", "")}'))
                     raise
                 if launch and result.returncode:
                     _diagnose_shared_memory_failure(
                         self._failure_output(args,
-                            f'{getattr(result, "stdout", "")} {getattr(result, "stderr", "")}'),
-                        self.root.parent, self._prefix)
+                            f'{getattr(result, "stdout", "")} {getattr(result, "stderr", "")}'))
                 return result
             finally:
                 if main_launch:

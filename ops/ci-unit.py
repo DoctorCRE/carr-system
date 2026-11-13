@@ -2,12 +2,13 @@
 """Execute every required Node package and refuse unmeasured success."""
 import argparse
 import json
-from ci_unit_shards import COUNT, plan
+from ci_unit_shards import durations, estimate, plan
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 
 from node_test_summary import FIELDS, test_counts
 
@@ -20,10 +21,18 @@ def main():
     args = parser.parse_args()
     shard = os.environ.get('CARR_CI_UNIT_SHARD')
     selected = None
+    predicted_ms = None
     if shard:
-        if args.part != 'mcp' or shard not in tuple(map(str, range(1, COUNT + 1))):
-            parser.error(f'CARR_CI_UNIT_SHARD requires --part mcp and shard 1 through {COUNT}')
-        selected = plan()[int(shard) - 1]
+        if args.part != 'mcp' or not shard.isdigit():
+            parser.error('CARR_CI_UNIT_SHARD requires --part mcp and a positive shard number')
+        try:
+            shards = plan()
+        except ValueError as error:
+            parser.exit(1, f'{error}\n')
+        if int(shard) not in range(1, len(shards) + 1):
+            parser.error(f'CARR_CI_UNIT_SHARD requires shard 1 through {len(shards)}')
+        selected = shards[int(shard) - 1]
+        predicted_ms = estimate(selected, *durations(ROOT))
     packages = {'fast': ('practice-plugin',), 'mcp': ('mcp-server',),
                 'practice': ('practice-plugin',), 'all': PACKAGES}[args.part]
     failed = False
@@ -36,7 +45,7 @@ def main():
                 failed = True
                 continue
             env = dict(os.environ)
-            preload = (ROOT / 'ops/ci-node-file.mjs').as_uri()
+            preload = (ROOT / 'ops/ci-node-file.mts').as_uri()
             env['NODE_OPTIONS'] = f"{env.get('NODE_OPTIONS', '')} --import={preload}"
             if package == 'mcp-server':
                 env['F03_PARITY_REQUIRE_PYTHON'] = '1'
@@ -44,13 +53,16 @@ def main():
                     env['CARR_CI_UNIT_SUITES'] = json.dumps(selected)
             log = Path(directory) / f'{package}.log'
             try:
+                started = time.monotonic()
                 with log.open('w') as output:
                     result = subprocess.run(
                         [sys.executable, str(ROOT / 'bin/with-timeout.py'), '600' if shard else '1200',
                          *(['node', '--test', 'practice-plugin/test/calculators.test.mjs',
-                            'practice-plugin/test/verticals.test.mjs'] if args.part == 'fast' else
+                            'practice-plugin/test/verticals.test.mjs',
+                            'practice-plugin/test/evidence.test.ts'] if args.part == 'fast' else
                            ['npm', '--prefix', package, 'test'])], cwd=ROOT,
                         env=env, stdout=output, stderr=subprocess.STDOUT)
+                elapsed_ms = int((time.monotonic() - started) * 1000)
                 output = log.read_text(errors='replace')
                 for line in output.splitlines():
                     if line.startswith('suite-timing: '):
@@ -89,13 +101,17 @@ def main():
                     if selected is not None:
                         destination = Path(os.environ['CARR_CI_UNIT_RECEIPT'])
                         destination.write_text(json.dumps({'shard': int(shard), 'suites': completed}))
+                        if elapsed_ms > predicted_ms:
+                            print(f'::warning::CI timing refresh needed: shard {shard} observed {elapsed_ms}ms '
+                                  f'> predicted {predicted_ms}ms; delivery coordinator: regenerate the advisory '
+                                  'snapshot from a successful full main run (docs/ci-path-selection.md).')
                     for name in FIELDS:
                         totals[name] += counts[name]
                     print(f"OK unit {package}: {counts['tests']} tests, "
                           f"{counts['pass']} passed, {counts['skipped']} skipped")
                     continue
-                print(f'FAIL unit {package}: {reason}')
                 print(output)
+                print(f'FAIL unit {package}: {reason}')
             except (OSError, ValueError, TypeError) as exc:
                 print(f'FAIL unit {package}: required check could not complete ({type(exc).__name__})')
             failed = True

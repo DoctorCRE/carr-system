@@ -13,14 +13,17 @@ import re
 import subprocess
 import zipfile
 
-from ci_unit_shards import COUNT
+from ci_unit_shards import MAX_COUNT, plan
 
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACT = 'ci-tree-evidence'
 
 
 def class_groups(root=ROOT):
-    text = (root / '.github/workflows/ci.yml').read_text()
+    return workflow_groups((root / '.github/workflows/ci.yml').read_text())
+
+
+def workflow_groups(text):
     block = text.split('        classes:\n', 1)[1].split('    #', 1)[0]
     return re.findall(r'^          - "([^"]+)"', block, re.M)
 
@@ -55,7 +58,7 @@ def hosted_verdict(*, drift=False):
         return 1
     needs = json.loads(os.environ['CI_NEEDS'])
     fast = not drift and os.environ.get('CI_EVENT') == 'pull_request'
-    lanes = ('check',) if drift else ('scope', 'classes', 'migration-fixtures', 'unit-coverage')
+    lanes = ('check',) if drift else ('scope', 'classes', 'migration-fixtures', 'unit')
     if fast:
         from ci import CLASS_DESCRIPTIONS
         from ci_scope import required_jobs
@@ -69,7 +72,7 @@ def hosted_verdict(*, drift=False):
         lanes = tuple(required_jobs(classes))
         for name in set(('lint', 'fast', 'gates', 'secret', 'unit', 'unit-coverage',
                          'launchd-python39', 'scope', 'classes', 'migration-fixtures')) - set(lanes):
-            if needs[name]['result'] != 'skipped':
+            if needs.get(name, {'result': 'skipped'})['result'] != 'skipped':
                 return 1
     results = {name: needs[name]['result'] for name in lanes}
     allowed = {name: {'success'} for name in lanes}
@@ -107,21 +110,21 @@ def canary_verdict():
 def contract_digest(root=ROOT):
     digest = hashlib.sha256()
     for name in ('.github/workflows/ci.yml', 'ops/ci-evidence.py', 'ops/ci.sh', 'ops/ci.py', 'ops/ci_scope.py', 'ops/ci-unit.py',
-                 '.github/workflows/unit-shards.yml', 'mcp-server/suite-discovery.mjs', 'mcp-server/suite-inventory.json', 'ops/config/ci-unit-durations.json', 'ops/config/hosted-suite-exceptions.json', 'ops/ci_unit_shards.py', 'mcp-server/run-tests.mjs', 'ops/ci-pushfloor.py', 'ops/ci-migration.py', 'ops/ci-gates.py', 'ops/ci-secret.py',
+                 '.github/workflows/unit-shards.yml', 'mcp-server/suite-discovery.ts', 'mcp-server/suite-inventory.json', 'ops/config/ci-unit-durations.json', 'ops/config/ci-execution-budgets.json', 'ops/config/hosted-suite-exceptions.json', 'ops/ci_unit_shards.py', 'mcp-server/run-tests.ts', 'ops/ci-pushfloor.py', 'ops/ci-migration.py', 'ops/ci-gates.py', 'ops/ci-secret.py',
                  'ops/node_test_summary.py',
-                 'ops/ci-node-file.mjs',
+                 'ops/ci-node-file.mts',
                  'requirements.lock',
                  'mcp-server/package-lock.json', '.nvmrc', '.python-version'):
         digest.update(name.encode() + b'\0' + (root / name).read_bytes() + b'\0')
     return digest.hexdigest()
 
 
-def can_reuse(run, jobs, receipt, *, tree, head_tree, tested_tree, contract, groups):
-    required = {'ops/ci.sh --strict', 'unit-coverage',
-                *(f'unit / MCP unit shard {n} of {COUNT}' for n in range(1, COUNT + 1)),
+def can_reuse(run, jobs, receipt, *, tree, head_tree, tested_tree, contract, groups, shard_count):
+    required = {'ops/ci.sh --strict', 'unit / plan',
+                *(f'unit / MCP unit shard {n} of {shard_count}' for n in range(1, shard_count + 1)),
                 *('ops/ci.sh --strict --only ' + g for g in groups)}
     green = {j.get('name') for j in jobs if j.get('conclusion') == 'success'}
-    return (run.get('name') == 'CI' and run.get('event') == 'merge_group'
+    return (1 <= shard_count <= MAX_COUNT and run.get('name') == 'CI' and run.get('event') == 'merge_group'
             and run.get('status') == 'completed' and run.get('conclusion') == 'success'
             and required <= green and receipt.get('schema') == 'carr-ci-evidence/v1'
             and receipt.get('event') == run.get('event') and receipt.get('draft') is False
@@ -154,7 +157,7 @@ class GitHub:
             return json.loads(archive.read('ci-evidence.json'))
 
 
-def resolve(github, sha, tree, contract, groups):
+def resolve(github, sha, tree, contract, groups, shard_count):
     candidates = []
     seen = set()
     for run in github.api('actions/workflows/ci.yml/runs?event=merge_group&per_page=100')['workflow_runs']:
@@ -174,7 +177,7 @@ def resolve(github, sha, tree, contract, groups):
         jobs = github.api(f'actions/runs/{run["id"]}/jobs?per_page=100')['jobs']
         if can_reuse(run, jobs, receipt, tree=tree, head_tree=head_tree,
                      tested_tree=github.tree(receipt['tested_sha']),
-                     contract=contract, groups=groups):
+                     contract=contract, groups=groups, shard_count=shard_count):
             return {'reused': True, 'source_run_id': run['id'],
                     'source_run_attempt': run.get('run_attempt', 1),
                     'source_pr': pr_number, 'source_head_sha': head,
@@ -213,12 +216,163 @@ def git(value, root=ROOT):
     return subprocess.check_output(['git', 'rev-parse', value], cwd=root, text=True).strip()
 
 
+class InsufficientEvidence(ValueError):
+    pass
+
+
+def conversion_query(pr=None, merge_sha=None):
+    commit = '''oid tree { oid } checkSuites(first:100) {
+      pageInfo { hasNextPage } nodes { app { slug } status conclusion
+      workflowRun { event url workflow { name } }
+      checkRuns(first:100) { pageInfo { hasNextPage } nodes { name status conclusion } }
+    }}'''
+    selection = ('pullRequest(number:%d) { merged mergeCommit { %s } }' % (pr, commit)
+                 if pr else 'object(expression:"%s") { ... on Commit { %s } }' % (merge_sha, commit))
+    return '{ repository(owner:"DoctorCRE",name:"carr-system") { ' + selection + ' }}'
+
+
+def conversion_commit(snapshot, pr):
+    if snapshot.get('errors'):
+        raise InsufficientEvidence('github_errors')
+    repo = snapshot['data']['repository']
+    if pr:
+        if repo['pullRequest']['merged'] is not True:
+            raise InsufficientEvidence('pr_not_merged')
+        return repo['pullRequest']['mergeCommit']
+    return repo['object']
+
+
+def conversion_ci(commit, workflow):
+    suites = commit['checkSuites']
+    if suites['pageInfo']['hasNextPage']:
+        raise InsufficientEvidence('truncated_suites')
+    groups = workflow_groups(workflow)
+    if not groups:
+        raise InsufficientEvidence('workflow_class_contract_unreadable')
+    required = {'ops/ci.sh --strict', 'unit / plan', 'launchd-python39',
+                *('ops/ci.sh --strict --only ' + g for g in groups)}
+    if re.search(r'^  unit-coverage:', workflow, re.M):
+        required.add('unit-coverage')
+    if 'Gates selftests shard 2 of 2' in workflow:
+        required.add('Gates selftests shard 2 of 2')
+    failed = False
+    for suite in suites['nodes']:
+        run = suite.get('workflowRun')
+        if (suite['app']['slug'] != 'github-actions' or not run
+                or run['event'] != 'merge_group' or run['workflow']['name'] != 'CI'
+                or suite['status'] != 'COMPLETED' or suite['checkRuns']['pageInfo']['hasNextPage']):
+            continue
+        jobs = suite['checkRuns']['nodes']
+        names = [j['name'] for j in jobs]
+        if len(names) != len(set(names)):
+            continue
+        shards = [re.fullmatch(r'unit / MCP unit shard (\d+) of (\d+)', n) for n in names]
+        shards = [m for m in shards if m]
+        totals = {int(m[2]) for m in shards}
+        if len(totals) != 1:
+            continue
+        count = totals.pop()
+        if not 1 <= count <= MAX_COUNT:
+            continue
+        expected = required | {f'unit / MCP unit shard {n} of {count}' for n in range(1, count + 1)}
+        if not expected <= set(names):
+            continue
+        selected = [j for j in jobs if j['name'] in expected]
+        if any(j['status'] != 'COMPLETED' or j['conclusion'] is None for j in selected):
+            continue
+        if suite['conclusion'] == 'SUCCESS' and all(j['conclusion'] == 'SUCCESS' for j in selected):
+            return run['url']
+        failed = True
+    if failed:
+        raise AssertionError('merge_group_strict_failed')
+    raise InsufficientEvidence('merge_group_strict_evidence_unavailable')
+
+
+def prove_conversion(*, pr=None, merge_sha=None, timeout=45, root=ROOT):
+    import sys
+    import time
+    sys.path.insert(0, str(ROOT))
+    from lib.release_reader import read
+    from lib.proof_deadline import proof_deadline
+
+    deadline = time.monotonic() + timeout
+
+    def remaining():
+        budget = deadline - time.monotonic()
+        if budget <= 0:
+            raise InsufficientEvidence('deadline')
+        return budget
+
+    def command(argv, *, check=True):
+        return subprocess.run(argv, cwd=root, text=True, capture_output=True,
+                              check=check, timeout=remaining())
+
+    def http(path):
+        reply = read('https://api.doctorcre.com/' + path, timeout=remaining(), max_bytes=1048576)
+        if len(reply.body) > 1048576:
+            raise InsufficientEvidence(path + '_too_large')
+        return reply.status, json.loads(reply.body)
+
+    def valid_sha(value):
+        if not isinstance(value, str) or not re.fullmatch('[0-9a-f]{40}', value):
+            raise InsufficientEvidence('invalid_commit_identity')
+        return value
+
+    identity = {}
+    try:
+        if not 0 < timeout <= 120 or (pr is None) == (merge_sha is None):
+            raise InsufficientEvidence('invalid_arguments')
+        if (pr is not None and (not isinstance(pr, int) or pr <= 0)):
+            raise InsufficientEvidence('invalid_pr')
+        if merge_sha is not None:
+            valid_sha(merge_sha)
+        with proof_deadline(remaining(), InsufficientEvidence, 'deadline'):
+            snapshot = json.loads(command(['gh', 'api', 'graphql', '-f',
+                'query=' + conversion_query(pr, merge_sha)]).stdout)
+            commit = conversion_commit(snapshot, pr)
+            merge = valid_sha(commit['oid'])
+            valid_sha(commit['tree']['oid'])
+            status, release = http('release')
+            if status != 200 or release['ok'] is not True or release['env']['value'] != 'production':
+                raise InsufficientEvidence('production_release_unavailable')
+            observed = valid_sha(release['git_sha']['value'])
+            identity = {'merge_sha': merge, 'release_sha': observed}
+            for sha in dict.fromkeys((merge, observed)):
+                if command(['git', '--no-replace-objects', 'cat-file', '-e', sha + '^{commit}'], check=False).returncode:
+                    command(['git', 'fetch', '--no-tags', 'origin', sha])
+            if command(['git', 'rev-parse', '--is-shallow-repository']).stdout.strip() != 'false':
+                raise InsufficientEvidence('shallow_ancestry')
+            if command(['git', '--no-replace-objects', 'merge-base', '--is-ancestor', merge, observed],
+                       check=False).returncode:
+                raise InsufficientEvidence('release_does_not_contain_merge')
+            workflow = command(['git', '--no-replace-objects', 'show', merge + ':.github/workflows/ci.yml']).stdout
+            run = conversion_ci(commit, workflow)
+            status, health = http('health')
+            if status != 200 or health.get('ok') is not True:
+                raise AssertionError('production_health_failed')
+            remaining()
+        print(json.dumps({'ok': True, 'merge_sha': merge, 'release_sha': observed, 'ci_run': run}))
+        return 0
+    except AssertionError as error:
+        print(json.dumps({**identity, 'ok': False, 'classification': 'assertion_failure', 'reason': str(error)}))
+        return 1
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError, subprocess.SubprocessError) as error:
+        print(json.dumps({**identity, 'ok': False, 'classification': 'insufficient_evidence', 'reason': type(error).__name__ + ': ' + str(error)[:180]}))
+        return 78
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['record', 'resolve', 'verdict', 'drift-verdict', 'canary-verdict', 'programs'])
+    parser.add_argument('action', choices=['record', 'resolve', 'verdict', 'drift-verdict', 'canary-verdict', 'programs', 'prove-conversion'])
     parser.add_argument('--output')
     parser.add_argument('--rows', type=Path)
+    target = parser.add_mutually_exclusive_group()
+    target.add_argument('--pr', type=int)
+    target.add_argument('--merge-sha')
+    parser.add_argument('--timeout', type=float, default=45)
     args = parser.parse_args()
+    if args.action == 'prove-conversion':
+        return prove_conversion(pr=args.pr, merge_sha=args.merge_sha, timeout=args.timeout)
     if args.action == 'programs':
         if not (args.output and args.rows):
             parser.error('programs needs --rows and --output')
@@ -250,7 +404,7 @@ def main():
                   'tested_sha': sha, 'tree_sha': tree, 'contract': contract, 'groups': groups}
     else:
         try:
-            result = resolve(GitHub(os.environ['GITHUB_REPOSITORY']), sha, tree, contract, groups)
+            result = resolve(GitHub(os.environ['GITHUB_REPOSITORY']), sha, tree, contract, groups, len(plan()))
         except (OSError, ValueError, KeyError, subprocess.SubprocessError, zipfile.BadZipFile):
             result = {'reused': False, 'reason': 'source evidence unavailable; run classes'}
         result.update(main_sha=sha, tree_sha=tree, contract=contract, groups=groups)

@@ -1,0 +1,509 @@
+{
+  "$comment": "Post-call review clients copy card.source_version into review-call-outcome.expected_source_version and retain one idempotency_key per review intent. The atomic write, replay and source_version_changed refusal contract is review-call-outcome.v1.json. Supplied versions are always enforced; the registered write accepts legacy omissions only before its coded sunset. Post-call source versions share the session-only ops.post_call_review_target derivation with the outcome reader; recorder revocation does not change historical content identity. Resolver authorization is unchanged.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "ref",
+    "card"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "action-link-resolve.v2"
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^al1_[A-Za-z0-9_-]{1,120}$",
+      "maxLength": 124
+    },
+    "card": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id",
+            "state",
+            "source_version",
+            "subject",
+            "body",
+            "to",
+            "cc",
+            "actions"
+          ],
+          "properties": {
+            "kind": {
+              "const": "reply_draft"
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "state": {
+              "enum": [
+                "pending_approval",
+                "stale"
+              ]
+            },
+            "source_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "subject": {
+              "type": "string"
+            },
+            "body": {
+              "type": "string"
+            },
+            "to": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1,
+              "items": {
+                "type": "string",
+                "format": "email"
+              }
+            },
+            "cc": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1,
+              "items": {
+                "type": "string",
+                "format": "email"
+              }
+            },
+            "actions": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "action",
+                  "verb",
+                  "args"
+                ],
+                "properties": {
+                  "action": {
+                    "const": "approve"
+                  },
+                  "verb": {
+                    "const": "submit-email-draft"
+                  },
+                  "args": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "proposal_id",
+                      "base_version",
+                      "subject",
+                      "body",
+                      "to",
+                      "cc"
+                    ],
+                    "properties": {
+                      "proposal_id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "base_version": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "subject": {
+                        "type": "string"
+                      },
+                      "body": {
+                        "type": "string"
+                      },
+                      "to": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 1,
+                        "items": {
+                          "type": "string",
+                          "format": "email"
+                        }
+                      },
+                      "cc": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 1,
+                        "items": {
+                          "type": "string",
+                          "format": "email"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "state": {
+                    "enum": [
+                      "stale",
+                      "retired",
+                      "resolved"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "actions": {
+                    "maxItems": 0
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "state": {
+                    "const": "pending_approval"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "actions": {
+                    "minItems": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id",
+            "state",
+            "source_version",
+            "actions"
+          ],
+          "properties": {
+            "kind": {
+              "const": "reply_draft"
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "state": {
+              "enum": [
+                "resolved",
+                "retired"
+              ]
+            },
+            "source_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "actions": {
+              "type": "array",
+              "maxItems": 0
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id",
+            "state",
+            "source_version",
+            "detail",
+            "actions"
+          ],
+          "properties": {
+            "kind": {
+              "const": "post_call_review"
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "state": {
+              "enum": [
+                "pending_review",
+                "resolved",
+                "stale",
+                "retired"
+              ]
+            },
+            "source_version": {
+              "type": "string"
+            },
+            "detail": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": false,
+              "required": [
+                "session_id",
+                "started_at",
+                "reviewed",
+                "candidates",
+                "changes"
+              ],
+              "properties": {
+                "session_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "started_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "reviewed": {
+                  "type": "boolean"
+                },
+                "candidates": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                },
+                "changes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            "actions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "action",
+                  "verb",
+                  "args"
+                ],
+                "properties": {
+                  "action": {
+                    "const": "review"
+                  },
+                  "verb": {
+                    "const": "review-call-outcome"
+                  },
+                  "args": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "session_id"
+                    ],
+                    "properties": {
+                      "session_id": {
+                        "type": "string",
+                        "format": "uuid"
+                      }
+                    }
+                  }
+                }
+              },
+              "maxItems": 1
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "state": {
+                    "enum": [
+                      "stale",
+                      "retired",
+                      "resolved"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "actions": {
+                    "maxItems": 0
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "state": {
+                    "const": "pending_review"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "actions": {
+                    "minItems": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id",
+            "state",
+            "source_version",
+            "detail",
+            "actions"
+          ],
+          "properties": {
+            "kind": {
+              "const": "feedback_event"
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "state": {
+              "enum": [
+                "resolved",
+                "stale",
+                "retired"
+              ]
+            },
+            "source_version": {
+              "type": "string"
+            },
+            "detail": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": false,
+              "required": [
+                "event_id",
+                "projection_id",
+                "share_grant_id",
+                "property_id",
+                "action",
+                "shortlisted",
+                "comment",
+                "created_at"
+              ],
+              "properties": {
+                "event_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "projection_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "share_grant_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "property_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "action": {
+                  "enum": [
+                    "shortlist",
+                    "comment"
+                  ]
+                },
+                "shortlisted": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "comment": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "actions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "action",
+                  "verb",
+                  "args"
+                ],
+                "properties": {
+                  "action": {
+                    "const": "review"
+                  },
+                  "verb": {
+                    "const": "review-call-outcome"
+                  },
+                  "args": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "session_id"
+                    ],
+                    "properties": {
+                      "session_id": {
+                        "type": "string",
+                        "format": "uuid"
+                      }
+                    }
+                  }
+                }
+              },
+              "maxItems": 0
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "state": {
+                    "enum": [
+                      "stale",
+                      "retired",
+                      "resolved"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "actions": {
+                    "maxItems": 0
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

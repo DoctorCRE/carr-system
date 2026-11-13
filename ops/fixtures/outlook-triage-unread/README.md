@@ -82,7 +82,7 @@ outcome detail and the persisted report for 12-to-64-character hex values.
 Run from the repository root with Java, tla2tools and the statechart skill installed.
 
 ```sh
-TLA2TOOLS=/tmp/j58-tla2tools.jar JAVA=/tmp/j58-java/Contents/Home/bin/java node /Users/booko/.claude/plugins/marketplaces/cursor-plugins/pstack/skills/statechart/scripts/statechart.mjs from-spec ops/fixtures/outlook-triage-unread/UnreadFix.tla --png
+TLA2TOOLS=/tmp/j58-tla2tools.jar JAVA=/tmp/j58-java/Contents/Home/bin/java node /Users/booko/.claude/plugins/marketplaces/cursor-plugins/pstack/skills/statechart/scripts/statechart.mjs from-spec ops/fixtures/outlook-triage-unread/UnreadFix.tla --map ops/fixtures/outlook-triage-unread/UnreadFix.map.mts --png
 python3 ops/outlook-triage-selftest.py
 ```
 

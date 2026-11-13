@@ -310,7 +310,7 @@ runpy.run_path(str(filer), run_name="__main__")
 class StdinTransportTests(unittest.TestCase):
     def test_required_source_frontier_remains_sealed(self):
         proc = subprocess.run(
-            ["node", "ops/scac-mutation-inventory.mjs", "--check-source-inventory-frontier"],
+            ["node", "ops/scac-mutation-inventory.ts", "--check-source-inventory-frontier"],
             cwd=ROOT, capture_output=True, text=True, timeout=30,
         )
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
@@ -323,7 +323,7 @@ class StdinTransportTests(unittest.TestCase):
             (root / "tools").mkdir()
             (root / "mcp-server").mkdir()
             shutil.copy2(ROOT / "tools/call-verb.py", root / "tools/call-verb.py")
-            for name in ("local-verb.mjs", "local-client-auth.mjs", "human-only-hint.mjs"):
+            for name in ("local-verb.mjs", "local-client-auth.ts", "human-only-hint.ts"):
                 shutil.copy2(ROOT / "mcp-server" / name, root / "mcp-server" / name)
             # Load source up to its parsed args; zero authority side effects.
             client = root / "mcp-server/local-verb.mjs"

@@ -40,7 +40,7 @@
 // two Worker vars.
 //
 // IT IS A LIBRARY, NOT AN ENTRYPOINT, and that is a registry fact rather than a
-// style choice. ops/scac-mutation-inventory.mjs enumerates every TRACKED file
+// style choice. ops/scac-mutation-inventory.ts enumerates every TRACKED file
 // that carries a shebang or a command-line main as a script entrypoint, and an
 // entrypoint is an INGRESS: admitting one moves the frozen source inventory,
 // which only a sealed registry successor and its migration may do. This module
@@ -59,9 +59,9 @@ const CANDIDATE_PATH = "mcp-server/src";
 const ENVIRONMENT_MANIFEST_PATH = "ops/config/environments.json";
 /** The sealed fixture set `evidence_scope: candidate-and-test` covers by name. */
 const SEALED_FIXTURE_SET_PATHS = Object.freeze([
-  "mcp-server/test/gate-zero-producer-stores.v5.fixture.mjs",
-  "mcp-server/test/gate-zero-seam-stores.v5.fixture.mjs",
-  "mcp-server/test/gate-zero-seam-stores.v5.receipt-fixture.mjs",
+  "mcp-server/test/gate-zero-producer-stores.v5.fixture.ts",
+  "mcp-server/test/gate-zero-seam-stores.v5.fixture.ts",
+  "mcp-server/test/gate-zero-seam-stores.v5.receipt-fixture.ts",
 ]);
 
 const REVISION = /^[0-9a-f]{40}$/;

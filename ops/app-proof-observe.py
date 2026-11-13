@@ -67,7 +67,7 @@ def observe(repo, merge_sha, assertions=(), human_steps=(), *, fetch=public_get)
     git_env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
     git_env.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull,
                    GIT_GRAFT_FILE=os.devnull, GIT_NO_LAZY_FETCH='1')
-    git = ['git', '--no-replace-objects', '-C', str(repo)]
+    git = ['git', '--no-replace-objects', '-c', 'core.useReplaceRefs=false', '-C', str(repo)]
     for sha in (merge_sha, served):
         result = subprocess.run([*git, 'cat-file', '-t', sha],
                                 env=git_env, capture_output=True, timeout=timeout())

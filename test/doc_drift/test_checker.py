@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 CHECKER = Path(__file__).resolve().parents[2] / "scripts/doc-drift/check.py"
@@ -18,6 +19,17 @@ except ModuleNotFoundError:
 
 
 class CheckerTest(unittest.TestCase):
+    def test_exact_transferred_repository_exemption(self):
+        import runpy
+        module = runpy.run_path(str(CHECKER))
+        # Path classification uses the registry for the transferred owner only.
+        canonical = module['canonical_repository']
+        for repo in ('DoctorCRE/doctorcre-app', 'jbookout/doctorcre-app'):
+            self.assertEqual(canonical(repo), 'DoctorCRE/doctorcre-app')
+            self.assertEqual(module['Tree'](self.root).path(repo, 'AGENTS.md')[1], 'cross-repository name')
+        self.assertIsNone(canonical('DoctorCRE/unrelated'))
+        self.assertNotEqual(module['Tree'](self.root).path('DoctorCRE/unrelated', 'AGENTS.md')[1], 'cross-repository name')
+
     def setUp(self):
         self.env = fixture_env()
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="doc-drift-fixture-")))
@@ -95,13 +107,42 @@ Example `path/to/file.py`.
         self.git("commit", "-qm", "unrelated")
         self.assertEqual(self.scan("--base", "HEAD~1")["files_checked"], [])
 
-    def test_rename_suggestion_comes_from_history(self):
-        self.write("README.md", "Run `bin/old.sh`.\n")
-        self.write("bin/old.sh", "echo safe\n")
-        self.git("commit", "-qm", "initial fixture")
-        self.git("mv", "bin/old.sh", "bin/new.sh")
-        self.git("commit", "-qm", "rename script")
-        self.assertEqual(self.scan()["findings"][0]["suggestion"], "bin/new.sh")
+    def test_missing_references_need_no_git_history(self):
+        import runpy
+        module = runpy.run_path(str(CHECKER))
+        self.write("README.md", "Run `bin/task-v1.sh` and `bin/unknown.sh`.\n")
+        self.write("bin/task-v2.sh", "echo safe\n")
+        tree = module['Tree'](self.root.resolve())
+        with patch.dict(module['check'].__globals__, git=lambda *args: self.fail('history accessed')):
+            findings = [module['check'](tree, c) for c in module['extract'](
+                tree, 'README.md', (self.root / 'README.md').read_text())]
+        self.assertEqual([f['target'] for f in findings], ['bin/task-v1.sh', 'bin/unknown.sh'])
+        self.assertEqual(findings[0]['suggestion'], 'bin/task-v2.sh')
+        self.assertEqual(findings[0]['suggestion_evidence'], 'name similarity, unverified')
+
+    def test_findings_equal_with_unrelated_rename_ref_and_depth_one_clone(self):
+        self.write("README.md", "Run `bin/old.sh` and `bin/unknown.sh`.\n")
+        self.write("bin/new.sh", "echo safe\n")
+        self.git("commit", "-qm", "snapshot")
+        expected = self.scan()['findings']
+        self.assertEqual([f['target'] for f in expected], ['bin/old.sh', 'bin/unknown.sh'])
+        branch = self.git('symbolic-ref', '--short', 'HEAD')
+        self.git('checkout', '-qb', 'unrelated')
+        self.git('mv', 'bin/new.sh', 'bin/old.sh')
+        self.git('commit', '-qm', 'unrelated old name')
+        self.git('mv', 'bin/old.sh', 'bin/new.sh')
+        self.git('commit', '-qm', 'unrelated rename')
+        self.git('checkout', '-q', branch)
+        self.assertEqual(self.scan()['findings'], expected)
+        clone = self.root / 'shallow'
+        subprocess.run(['git', 'clone', '--quiet', '--depth', '1', '--branch', branch,
+                        self.root.as_uri(), str(clone)], check=True, env=self.env)
+        result = subprocess.run([sys.executable, str(CHECKER), '--root', str(clone),
+                                 '--format', 'json'], text=True, capture_output=True, env=self.env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['findings'], expected)
+        self.assertEqual(subprocess.check_output(['git', '-C', str(clone), 'rev-list', '--count',
+                                                 'HEAD'], text=True, env=self.env).strip(), '1')
 
     def test_negated_planned_and_generated_references_are_not_stale(self):
         self.write("README.md", """Do not create `GLOSSARY.md`, `docs/adr/`.

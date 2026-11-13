@@ -11,7 +11,9 @@ import sys
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.proof_deadline import proof_deadline
 from lib.release_reader import read as read_http
+from proof_release import release_revision
 
 
 class Unavailable(Exception):
@@ -70,51 +72,43 @@ def observe(origin, wrapper, timeout):
             raise Unavailable("total deadline exceeded")
         return budget
 
-    def expired(_signum, _frame):
-        raise Unavailable("total deadline exceeded")
-
-    signal.signal(signal.SIGALRM, expired)
-    signal.setitimer(signal.ITIMER_REAL, timeout)
     try:
-        response = read_http(origin.rstrip("/") + "/release", timeout=remaining(), max_bytes=65536)
-        if response.status != 200:
-            raise OSError('release_unavailable')
-        release = json.loads(response.body)
-        if (not isinstance(release, dict) or not isinstance(release.get("git_sha"), str)
-                or len(release["git_sha"]) != 40):
-            raise Unavailable("release identity unavailable")
-        results = []
-        for rate in (1e-20, 0, 0.06):
-            process = subprocess.Popen(
-                [str(Path(wrapper).resolve()), "call", "compare-lease-terms", json.dumps(synthetic_input(rate))],
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, start_new_session=True)
-            try:
-                stdout, _ = process.communicate(timeout=remaining())
-            finally:
-                if process.poll() is None:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait()
-            if process.returncode != 0:
-                raise Unavailable("wrapper failed or authentication unavailable")
-            result = json.loads(stdout)
-            check_result(result)
-            results.append(result)
-        tiny, zero, ordinary = results
-        for side in ("long_term", "short_term"):
-            assert zero[side]["total_interest_on_tenant_ti"] == 0, "zero-rate interest differs"
-            assert ordinary[side]["total_interest_on_tenant_ti"] == 33224.6, "ordinary-rate control differs"
-            for key in ("total_interest_on_tenant_ti", "total_cost_of_buildout"):
-                assert abs(tiny[side][key] - zero[side][key]) < 0.005, "tiny-rate convergence differs"
-        assert tiny["comparison"] == zero["comparison"], "tiny-rate comparison differs"
-        return 0, dict(status="pass", release=release,
-                       assertions=["all economic outputs finite", "tiny rate converges to zero",
-                                   "zero and ordinary controls match"])
+        with proof_deadline(timeout, Unavailable):
+            response = read_http(origin.rstrip("/") + "/release", timeout=remaining(), max_bytes=65536)
+            if response.status != 200:
+                raise OSError('release_unavailable')
+            release = json.loads(response.body)
+            release_revision(release)
+            results = []
+            for rate in (1e-20, 0, 0.06):
+                process = subprocess.Popen(
+                    [str(Path(wrapper).resolve()), "call", "compare-lease-terms", json.dumps(synthetic_input(rate))],
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, start_new_session=True)
+                try:
+                    stdout, _ = process.communicate(timeout=remaining())
+                finally:
+                    if process.poll() is None:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        process.wait()
+                if process.returncode != 0:
+                    raise Unavailable("wrapper failed or authentication unavailable")
+                result = json.loads(stdout)
+                check_result(result)
+                results.append(result)
+            tiny, zero, ordinary = results
+            for side in ("long_term", "short_term"):
+                assert zero[side]["total_interest_on_tenant_ti"] == 0, "zero-rate interest differs"
+                assert ordinary[side]["total_interest_on_tenant_ti"] == 33224.6, "ordinary-rate control differs"
+                for key in ("total_interest_on_tenant_ti", "total_cost_of_buildout"):
+                    assert abs(tiny[side][key] - zero[side][key]) < 0.005, "tiny-rate convergence differs"
+            assert tiny["comparison"] == zero["comparison"], "tiny-rate comparison differs"
+            return 0, dict(status="pass", release=release,
+                           assertions=["all economic outputs finite", "tiny rate converges to zero",
+                                       "zero and ordinary controls match"])
     except AssertionError as error:
         return 1, dict(status="contradiction", release=release, reason=str(error))
     except (Unavailable, OSError, ValueError, subprocess.TimeoutExpired) as error:
         return 78, dict(status="unavailable", release=release, reason=type(error).__name__)
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
 
 
 def main():

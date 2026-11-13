@@ -174,7 +174,15 @@ function fakeReaderClientEnv({ readerRows = [] } = {}) {
   };
 }
 
-test("callTool read branch: never throws when DATABASE_URL_WRITER is absent, and the read itself still succeeds normally", async () => {
+test("callTool read branch: never throws when DATABASE_URL_WRITER is absent, and the read itself still succeeds normally", async t => {
+  const { neonConfig } = await import('../src/postgres.ts');
+  const previous = neonConfig.fetchFunction;
+  t.after(() => { neonConfig.fetchFunction = previous; });
+  neonConfig.fetchFunction = async (_url, options) => {
+    assert.equal(JSON.parse(options.body).query, 'select id from public.actor where slug=$1');
+    return Response.json({fields:[{name:'id',dataTypeID:25}],
+      rows:[['00000000-0000-4000-8000-000000000001']],rowCount:1,command:'SELECT',rowAsArray:true});
+  };
   // list-verbs is a read verb with no DB dependency in its handler, so this
   // exercises the wrapping try/finally without needing a real connection.
   const { env, waited } = fakeReaderClientEnv();

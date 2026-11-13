@@ -2,8 +2,8 @@
 import { App } from '@modelcontextprotocol/ext-apps';
 import { OpenAIExtensions } from '@openai/mcp-extensions/app';
 import { z } from 'zod';
-import { spaceInput, spaceResults, canonical, VERTICALS } from '../src/verticals.mjs';
-import { envelopeShape } from '../src/evidence.mjs';
+import { spaceInput, spaceResults, canonical, VERTICALS } from '../src/verticals.ts';
+import { envelopeShape } from '../src/evidence.ts';
 
 const app = new App({ name: 'Practice space planner', version: '0.2.0' }, { availableDisplayModes: ['inline', 'fullscreen'] });
 const extensions = new OpenAIExtensions(app);

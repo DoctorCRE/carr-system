@@ -89,7 +89,9 @@ class Lifecycle(unittest.TestCase):
                     log = root / 'pg.log'
                     self.fail(f'teardown timed out; postgres log:\n{log.read_text() if log.exists() else "missing"}')
                 self.assertEqual(child.returncode, 128 + signal.SIGTERM, stderr)
-                with self.assertRaises(ProcessLookupError):
+                state = subprocess.run(['ps', '-o', 'pid=,ppid=,stat=', '-p', str(pid)],
+                                       capture_output=True, text=True, timeout=5).stdout.strip()
+                with self.assertRaises(ProcessLookupError, msg=f'postmaster process after teardown: {state}'):
                     os.kill(pid, 0)
                 self.assertFalse(root.exists())
             finally:

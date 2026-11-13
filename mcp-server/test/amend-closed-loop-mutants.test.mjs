@@ -5,13 +5,13 @@
 // projection update (append-only, never the reverse).
 //
 // A refusal nobody has watched fail is indistinguishable from a refusal that
-// never ran (same discipline as global-boundaries-mutants.v5.test.mjs). For
+// never ran (same discipline as global-boundaries-mutants.v5.test.ts). For
 // each property this file plants one realistic bug in a COPY of tools.js,
 // loads the copy, and asserts the same probe that passes on the real source
 // FAILS against the mutant.
 
 import test from "node:test";
-import { relinkSourceImports } from "./helpers/relink-source-imports.mjs";
+import { relinkSourceImports } from "./helpers/relink-source-imports.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

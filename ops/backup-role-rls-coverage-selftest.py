@@ -32,7 +32,7 @@ TWO LAYERS, one file:
 
 This is a *-selftest.py (not a *-local-pg-acceptance.py) deliberately: it is a
 proof harness, not a wired mutation ingress, so it is excluded from the SCAC
-script-entrypoint census (ops/scac-mutation-inventory.mjs isScriptEntrypoint)
+script-entrypoint census (ops/scac-mutation-inventory.ts isScriptEntrypoint)
 and adds nothing to reseal. ci.sh runs the source contract; a reviewer runs the
 live proof with a disposable DSN. Committed evidence:
 ops/backup-role-rls-coverage-evidence.txt.

@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // V5-F05 durable rule-context seam against disposable loopback PostgreSQL.
 
@@ -6,10 +7,9 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 
 const DSN = await snapshotDatabase('rule-context-runtime-postgres-');
-const LOOPBACK = /@(localhost|127[.]0[.]0[.]1)[:/]|^postgres(ql)?:\/\/(localhost|\/)/;
 
 async function database(t) {
-  assert.ok(LOOPBACK.test(DSN), "REFUSED: F05 SQL fixtures require disposable loopback PostgreSQL");
+  assertDisposableDatabase(DSN);
   return (await import("pg")).default ?? (await import("pg"));
 }
 

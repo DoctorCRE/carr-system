@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -41,7 +42,7 @@ test('final installed fact-review functions preserve reviewed terms and extracti
   async t => {
   const dsn = SNAPSHOT_DSN;
   assert.ok(dsn, 'CARR_FACT_REVIEW_DATABASE_URL must name the migration lane database');
-  assert.ok(['localhost', '127.0.0.1'].includes(new URL(dsn).hostname), 'proof requires loopback PostgreSQL');
+  assertDisposableDatabase(dsn);
   const client = new pg.Client({ connectionString: dsn });
   await client.connect();
   try {

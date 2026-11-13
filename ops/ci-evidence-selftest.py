@@ -11,10 +11,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from ci_unit_shards import COUNT
 from git_env import fixture_env
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 spec = importlib.util.spec_from_file_location('ci_evidence', ROOT / 'ops/ci-evidence.py')
 assert spec is not None and spec.loader is not None
 evidence = importlib.util.module_from_spec(spec)
@@ -32,12 +32,22 @@ class ControllerContractTest(unittest.TestCase):
             self.assertNotEqual(before, evidence.contract_digest())
 
 
+    def test_execution_budgets_change_the_evidence_contract(self):
+        read_bytes = pathlib.Path.read_bytes
+        before = evidence.contract_digest()
+        def changed(path):
+            source = read_bytes(path)
+            return source + b"\n" if path == ROOT / 'ops/config/ci-execution-budgets.json' else source
+        with patch.object(pathlib.Path, 'read_bytes', changed):
+            self.assertNotEqual(before, evidence.contract_digest())
+
+
 class HostedVerdict(unittest.TestCase):
     def test_completed_needs_succeeds_without_contacting_github(self):
         with tempfile.TemporaryDirectory() as directory:
             summary = pathlib.Path(directory) / 'summary'
             needs = {'scope': {'result': 'success', 'outputs': {'full': 'true'}},
-                     'unit-coverage': {'result': 'success'}, 'classes': {'result': 'success'},
+                     'unit': {'result': 'success'}, 'classes': {'result': 'success'},
                      'migration-fixtures': {'result': 'success'}}
             with patch.dict(os.environ, CI_NEEDS=json.dumps(needs), CI_DRAFT='false',
                             GITHUB_REPOSITORY='DoctorCRE/carr-system',
@@ -90,7 +100,7 @@ class HostedVerdict(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             for fixtures, expected in (('false', 1), ('true', 1), ('', 1)):
                 needs = {'scope': {'result': 'success', 'outputs': {'full': 'true', 'fixtures': fixtures}},
-                         'unit-coverage': {'result': 'success'}, 'classes': {'result': 'success'}, 'migration-fixtures': {'result': 'skipped'}}
+                         'unit': {'result': 'success'}, 'classes': {'result': 'success'}, 'migration-fixtures': {'result': 'skipped'}}
                 with patch.dict(os.environ, CI_NEEDS=json.dumps(needs), CI_DRAFT='false',
                                 GITHUB_STEP_SUMMARY=str(pathlib.Path(directory) / 'summary')):
                     self.assertEqual(evidence.hosted_verdict(), expected)
@@ -98,7 +108,7 @@ class HostedVerdict(unittest.TestCase):
     def test_failed_scope_cannot_authorize_skipping_fixtures(self):
         with tempfile.TemporaryDirectory() as directory:
             needs = {'scope': {'result': 'failure', 'outputs': {'full': 'false'}},
-                     'unit-coverage': {'result': 'success'}, 'classes': {'result': 'success'}, 'migration-fixtures': {'result': 'skipped'}}
+                     'unit': {'result': 'success'}, 'classes': {'result': 'success'}, 'migration-fixtures': {'result': 'skipped'}}
             with patch.dict(os.environ, CI_NEEDS=json.dumps(needs), CI_DRAFT='false',
                             GITHUB_STEP_SUMMARY=str(pathlib.Path(directory) / 'summary')):
                 self.assertEqual(evidence.hosted_verdict(), 1)
@@ -119,7 +129,7 @@ class HostedVerdict(unittest.TestCase):
             for full, classes, fixtures, draft, expected in cases:
                 with self.subTest(full=full, classes=classes, fixtures=fixtures, draft=draft):
                     needs = {'scope': {'result': 'success', 'outputs': {'full': full}},
-                             'unit-coverage': {'result': 'success'}, 'classes': {'result': classes}, 'migration-fixtures': {'result': fixtures}}
+                             'unit': {'result': 'success'}, 'classes': {'result': classes}, 'migration-fixtures': {'result': fixtures}}
                     result = subprocess.run([sys.executable, str(ROOT / 'ops/ci-evidence.py'), 'verdict'],
                         env={**os.environ, 'CI_NEEDS': json.dumps(needs), 'CI_DRAFT': str(draft).lower(),
                              'GITHUB_STEP_SUMMARY': str(pathlib.Path(directory) / 'summary')},
@@ -133,6 +143,7 @@ class HostedVerdict(unittest.TestCase):
 
 class Reuse(unittest.TestCase):
     def setUp(self):
+        self.shard_count = 8
         self.tree = 'a' * 40
         self.run = {'id': 42, 'run_attempt': 2, 'head_sha': 'b' * 40, 'status': 'completed',
                     'conclusion': 'success', 'event': 'merge_group', 'name': 'CI'}
@@ -143,19 +154,20 @@ class Reuse(unittest.TestCase):
         self.jobs = [{'name': 'ops/ci.sh --strict', 'conclusion': 'success'},
                      {'name': 'ops/ci.sh --strict --only gates', 'conclusion': 'success'},
                      {'name': 'ops/ci.sh --strict --only migration', 'conclusion': 'success'},
+                     {'name': 'unit / plan', 'conclusion': 'success'},
                      {'name': 'unit-coverage', 'conclusion': 'success'},
-                     *[{'name': f'unit / MCP unit shard {n} of {COUNT}', 'conclusion': 'success'}
-                       for n in range(1, COUNT + 1)]]
+                     *[{'name': f'unit / MCP unit shard {n} of {self.shard_count}', 'conclusion': 'success'}
+                       for n in range(1, self.shard_count + 1)]]
     def eligible(self):
         return evidence.can_reuse(self.run, self.jobs, self.receipt,
                                   tree=self.tree, head_tree=self.tree,
                                   tested_tree=self.tree, contract='d' * 64,
-                                  groups=['gates', 'migration'])
+                                  groups=['gates', 'migration'], shard_count=self.shard_count)
     def test_exact_tree_success_records_source_run(self):
         self.assertTrue(self.eligible())
 
     def test_reuse_requires_every_mcp_shard_and_coverage(self):
-        proof_jobs = ['unit-coverage', *[f'unit / MCP unit shard {n} of {COUNT}' for n in range(1, COUNT + 1)]]
+        proof_jobs = ['unit / plan', 'ops/ci.sh --strict', *[f'unit / MCP unit shard {n} of {self.shard_count}' for n in range(1, self.shard_count + 1)]]
         self.assertTrue(self.eligible())
         for name in proof_jobs:
             for state in ('failure', 'cancelled', 'skipped', None):
@@ -163,11 +175,20 @@ class Reuse(unittest.TestCase):
                 next(job for job in jobs if job['name'] == name)['conclusion'] = state
                 self.assertFalse(evidence.can_reuse(self.run, jobs, self.receipt,
                     tree=self.tree, head_tree=self.tree, tested_tree=self.tree,
-                    contract='d'*64, groups=['gates', 'migration']))
+                    contract='d'*64, groups=['gates', 'migration'], shard_count=self.shard_count))
             jobs = [job for job in self.jobs if job['name'] != name]
             self.assertFalse(evidence.can_reuse(self.run, jobs, self.receipt,
                 tree=self.tree, head_tree=self.tree, tested_tree=self.tree,
-                contract='d'*64, groups=['gates', 'migration']))
+                contract='d'*64, groups=['gates', 'migration'], shard_count=self.shard_count))
+
+    def test_reuse_refuses_empty_or_over_cap_shard_counts(self):
+        for count in (0, 17):
+            jobs = [job for job in self.jobs if not job['name'].startswith('unit / MCP unit shard')]
+            jobs += [{'name': f'unit / MCP unit shard {index} of {count}', 'conclusion': 'success'}
+                     for index in range(1, count + 1)]
+            self.assertFalse(evidence.can_reuse(self.run, jobs, self.receipt,
+                tree=self.tree, head_tree=self.tree, tested_tree=self.tree,
+                contract='d'*64, groups=['gates', 'migration'], shard_count=count))
 
     def test_fast_pr_receipt_is_never_reusable(self):
         self.run['event'] = self.receipt['event'] = 'pull_request'
@@ -239,7 +260,7 @@ class Reuse(unittest.TestCase):
     def test_pr_head_and_tested_tree_must_both_equal_main(self):
         for key in ['head_tree','tested_tree']:
             args=dict(tree=self.tree,head_tree=self.tree,tested_tree=self.tree,
-                      contract='d'*64,groups=['gates','migration'])
+                      contract='d'*64,groups=['gates','migration'], shard_count=self.shard_count)
             args[key]='e'*40
             self.assertFalse(evidence.can_reuse(self.run,self.jobs,self.receipt,**args))
 
@@ -264,7 +285,7 @@ class Reuse(unittest.TestCase):
             def receipt(self, run): return test.receipt
         gh = GH()
         def resolve():
-            return evidence.resolve(gh, 'f'*40, self.tree, 'd'*64, ['gates', 'migration'])
+            return evidence.resolve(gh, 'f'*40, self.tree, 'd'*64, ['gates', 'migration'], self.shard_count)
         self.assertEqual(resolve(), {'reused': True, 'source_run_id': 42,
             'source_run_attempt': 2, 'source_pr': None,
             'source_head_sha': 'b'*40, 'source_tested_sha': 'b'*40})
@@ -377,6 +398,253 @@ class ProgramRecords(unittest.TestCase):
             # The timeout stops the shell suites, so test-c.sh has no row: a
             # program that did not run is a missing record, never a pass.
             self.assertNotIn('gate-test-c.sh', rows)
+
+
+class ConversionProof(unittest.TestCase):
+    fixtures = ROOT / 'ops/fixtures/conversion-proof'
+
+    def setUp(self):
+        self.snapshot = json.loads((self.fixtures / 'github.json').read_text())
+        self.release = json.loads((self.fixtures / 'release.json').read_text())
+        self.health = json.loads((self.fixtures / 'health.json').read_text())
+        self.commit = self.snapshot['data']['repository']['pullRequest']['mergeCommit']
+        self.merge = self.commit['oid']
+        self.workflow = (self.fixtures / 'workflow.yml').read_text()
+        self.commands = []
+
+    def run_proof(self, ancestry=0, timeout=2, cli=False):
+        from lib.release_reader import Reply
+        def command(argv, **kwargs):
+            self.commands.append(argv)
+            self.assertGreater(kwargs['timeout'], 0)
+            if argv[0] == 'gh':
+                return subprocess.CompletedProcess(argv, 0, json.dumps(self.snapshot), '')
+            if 'merge-base' in argv:
+                return subprocess.CompletedProcess(argv, ancestry, '', '')
+            if '--is-shallow-repository' in argv:
+                return subprocess.CompletedProcess(argv, 0, 'false', '')
+            if 'show' in argv:
+                return subprocess.CompletedProcess(argv, 0, self.workflow, '')
+            return subprocess.CompletedProcess(argv, 0, self.merge, '')
+        def http(url, **kwargs):
+            self.assertGreater(kwargs['timeout'], 0)
+            payload = self.release if url.endswith('/release') else self.health
+            return Reply(200, {}, json.dumps(payload).encode())
+        with patch.object(evidence.subprocess, 'run', side_effect=command), \
+                patch('lib.release_reader.read', side_effect=http):
+            if cli:
+                with patch.object(sys, 'argv', ['ci-evidence.py', 'prove-conversion',
+                                                '--pr', '3114', '--timeout', str(timeout)]):
+                    return evidence.main()
+            return evidence.prove_conversion(pr=3114, timeout=timeout)
+
+    def test_bundled_coverage_requires_the_strict_aggregate_and_every_full_job(self):
+        self.workflow = (ROOT / '.github/workflows/ci.yml').read_text()
+        suite = next(s for s in self.commit['checkSuites']['nodes'] if s['workflowRun'])
+        jobs = suite['checkRuns']['nodes']
+        jobs[:] = [job for job in jobs if job['name'] != 'unit-coverage']
+        short = next(job for job in jobs if job['name'] ==
+                     'ops/ci.sh --strict --only lint pushfloor types secret binding artifact')
+        short['name'] += ' hxprobe dependency'
+        self.assertEqual(self.run_proof(), 0)
+        original = copy.deepcopy(jobs)
+        required = {'ops/ci.sh --strict', 'unit / plan', 'launchd-python39',
+                    'Gates selftests shard 2 of 2',
+                    *('ops/ci.sh --strict --only ' + group
+                      for group in evidence.workflow_groups(self.workflow)),
+                    *(f'unit / MCP unit shard {n} of 8' for n in range(1, 9))}
+        for name in sorted(required):
+            for state in ('missing', 'FAILURE', 'CANCELLED', 'SKIPPED'):
+                suite['checkRuns']['nodes'] = copy.deepcopy(original)
+                current = suite['checkRuns']['nodes']
+                if state == 'missing':
+                    current[:] = [job for job in current if job['name'] != name]
+                else:
+                    next(job for job in current if job['name'] == name)['conclusion'] = state
+                with self.subTest(name=name, state=state):
+                    self.assertEqual(self.run_proof(), 78 if state == 'missing' else 1)
+
+    def test_recorded_equal_and_descendant_release(self):
+        self.assertEqual(self.run_proof(), 0)
+        self.release['git_sha']['value'] = 'a' * 40
+        self.assertEqual(self.run_proof(), 0)
+        self.assertEqual(len([x for x in self.commands if x[0] == 'gh']), 2)
+
+    def test_older_unrelated_unknown_releases_are_insufficient(self):
+        for result in (1, 128):
+            with self.subTest(result=result):
+                self.assertEqual(self.run_proof(ancestry=result), 78)
+        for value in (None, {}, 'unknown', 'abc', {'value': 'a' * 40}):
+            with self.subTest(value=value):
+                self.release['git_sha']['value'] = value
+                self.assertEqual(self.run_proof(), 78)
+
+    def test_red_ci_and_health_only_fail_containing_release(self):
+        suites = self.commit['checkSuites']['nodes']
+        suite = next(s for s in suites if s['workflowRun'])
+        strict = next(j for j in suite['checkRuns']['nodes'] if j['name'] == 'ops/ci.sh --strict')
+        strict['conclusion'] = 'FAILURE'
+        suite['conclusion'] = 'FAILURE'
+        self.assertEqual(self.run_proof(), 1)
+        self.assertEqual(self.run_proof(ancestry=1), 78)
+        strict['conclusion'] = suite['conclusion'] = 'SUCCESS'
+        self.health['ok'] = False
+        self.assertEqual(self.run_proof(), 1)
+
+    def test_missing_pending_paginated_and_wrong_event_evidence_refuses(self):
+        original = copy.deepcopy(self.snapshot)
+        for mode in ('missing', 'pending', 'pagination', 'event', 'shard', 'coverage', 'graphql'):
+            self.snapshot = copy.deepcopy(original)
+            self.commit = self.snapshot['data']['repository']['pullRequest']['mergeCommit']
+            suite = next(s for s in self.commit['checkSuites']['nodes'] if s['workflowRun'])
+            if mode == 'missing':
+                suite['checkRuns']['nodes'] = []
+            elif mode == 'pending':
+                suite['status'] = 'IN_PROGRESS'
+            elif mode == 'pagination':
+                suite['checkRuns']['pageInfo']['hasNextPage'] = True
+            elif mode == 'event':
+                suite['workflowRun']['event'] = 'pull_request'
+            elif mode == 'coverage':
+                suite['checkRuns']['nodes'] = [j for j in suite['checkRuns']['nodes']
+                    if j['name'] != 'unit-coverage']
+            elif mode == 'shard':
+                suite['checkRuns']['nodes'] = [j for j in suite['checkRuns']['nodes']
+                    if j['name'] != 'unit / MCP unit shard 8 of 8']
+            else:
+                self.snapshot['errors'] = [{'message': 'unavailable'}]
+            with self.subTest(mode=mode):
+                self.assertEqual(self.run_proof(), 78)
+
+    def test_merge_commit_input_uses_one_snapshot(self):
+        self.snapshot['data']['repository']['object'] = self.commit
+        result = subprocess.CompletedProcess([], 0, json.dumps(self.snapshot), '')
+        with patch.object(evidence.subprocess, 'run', return_value=result) as command, \
+                patch('lib.release_reader.read', side_effect=OSError('offline')):
+            self.assertEqual(evidence.prove_conversion(merge_sha=self.merge), 78)
+        self.assertEqual(command.call_count, 1)
+        self.assertIn('object(expression:', command.call_args.args[0][-1])
+
+    def test_real_git_equal_descendant_older_unrelated_and_unknown(self):
+        from lib.release_reader import Reply
+        run = subprocess.run
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            env = fixture_env()
+            def git(*args):
+                result = run(['git', *args], cwd=root, env=env, capture_output=True, text=True, check=True)
+                return result.stdout.strip()
+            git('init', '-q')
+            git('config', 'user.email', 'proof@example.test')
+            git('config', 'user.name', 'Proof fixture')
+            (root / '.github/workflows').mkdir(parents=True)
+            (root / '.github/workflows/ci.yml').write_text(self.workflow)
+            git('add', '.github/workflows/ci.yml')
+            git('commit', '-qm', 'older')
+            older = git('rev-parse', 'HEAD')
+            git('commit', '--allow-empty', '-qm', 'merge')
+            merge = git('rev-parse', 'HEAD')
+            git('commit', '--allow-empty', '-qm', 'descendant')
+            descendant = git('rev-parse', 'HEAD')
+            git('checkout', '--orphan', 'unrelated')
+            git('commit', '-qm', 'unrelated')
+            unrelated = git('rev-parse', 'HEAD')
+            self.commit['oid'] = merge
+            self.commit['tree']['oid'] = git('rev-parse', merge + '^{tree}')
+            def command(argv, **kwargs):
+                if argv[0] == 'gh':
+                    return subprocess.CompletedProcess(argv, 0, json.dumps(self.snapshot), '')
+                if argv[:2] == ['git', 'fetch']:
+                    raise subprocess.CalledProcessError(128, argv)
+                return run(argv, **kwargs)
+            def http(url, **kwargs):
+                return Reply(200, {}, json.dumps(self.release if url.endswith('/release') else self.health).encode())
+            for observed, expected in ((merge, 0), (descendant, 0), (older, 78),
+                                       (unrelated, 78), ('f' * 40, 78)):
+                self.release['git_sha']['value'] = observed
+                with self.subTest(observed=observed), \
+                        patch.object(evidence.subprocess, 'run', side_effect=command), \
+                        patch('lib.release_reader.read', side_effect=http):
+                    self.assertEqual(evidence.prove_conversion(pr=3114, root=root), expected)
+
+    def test_cli_deadline_lifecycle(self):
+        child_source = r"""
+import json
+import runpy
+import pathlib
+import signal
+import sys
+from unittest.mock import patch
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]).parent))
+suite = runpy.run_path(sys.argv[1])
+case = suite['ConversionProof']()
+case.setUp()
+phase, outcome = sys.argv[2:]
+if outcome == 'assertion':
+    case.health['ok'] = False
+elif outcome == 'unavailable':
+    case.release['git_sha']['value'] = 'unknown'
+previous = signal.getsignal(signal.SIGALRM)
+real_timer = signal.setitimer
+real_signal = signal.signal
+injected = False
+def expire():
+    global injected
+    injected = True
+    signal.getsignal(signal.SIGALRM)(signal.SIGALRM, None)
+def timer(which, seconds, *args):
+    result = real_timer(which, seconds, *args)
+    if not injected and ((phase == 'setup' and seconds > 0)
+                         or (phase == 'teardown' and seconds == 0)):
+        expire()
+    return result
+def install(which, handler):
+    result = real_signal(which, handler)
+    if phase == 'install' and not injected:
+        expire()
+    return result
+try:
+    with patch.object(signal, 'setitimer', timer), patch.object(signal, 'signal', install):
+        if phase == 'observation':
+            from lib import release_reader
+            def reply(*args, **kwargs):
+                expire()
+            with patch.object(release_reader, 'Reply', reply):
+                code = case.run_proof(cli=True)
+        else:
+            code = case.run_proof(cli=True)
+    raise SystemExit(code)
+finally:
+    print(json.dumps({'handler_restored': signal.getsignal(signal.SIGALRM) == previous,
+                      'timer_disarmed': signal.getitimer(signal.ITIMER_REAL)[0] == 0}), file=sys.stderr)
+    real_timer(signal.ITIMER_REAL, 0)
+    real_signal(signal.SIGALRM, previous)
+"""
+        for phase in ('none', 'install', 'setup', 'observation', 'teardown'):
+            for outcome, normal in (('pass', 0), ('assertion', 1), ('unavailable', 78)):
+                with self.subTest(phase=phase, outcome=outcome):
+                    child = subprocess.run([sys.executable, '-c', child_source, str(pathlib.Path(__file__).resolve()),
+                                            phase, outcome], capture_output=True, text=True, timeout=10)
+                    expected = normal if phase == 'none' else 78
+                    self.assertEqual(child.returncode, expected, child.stdout + child.stderr)
+                    self.assertEqual(len(child.stdout.splitlines()), 1, child.stdout)
+                    receipt = json.loads(child.stdout)
+                    if expected == 78:
+                        self.assertEqual(receipt['classification'], 'insufficient_evidence')
+                    self.assertEqual(json.loads(child.stderr),
+                                     {'handler_restored': True, 'timer_disarmed': True})
+
+    def test_one_wall_clock_deadline_interrupts_stalled_transport(self):
+        import time
+        with patch.object(evidence.subprocess, 'run', side_effect=lambda *a, **k: time.sleep(2)):
+            start = time.monotonic()
+            self.assertEqual(evidence.prove_conversion(pr=3114, timeout=0.05), 78)
+            self.assertLess(time.monotonic() - start, 1)
+
+    def test_deadline_and_unreadable_evidence_refuse(self):
+        self.assertEqual(self.run_proof(timeout=0), 78)
+        with patch.object(evidence.subprocess, 'run', side_effect=subprocess.TimeoutExpired('gh', 1)):
+            self.assertEqual(evidence.prove_conversion(pr=3114), 78)
 
 
 if __name__=='__main__':

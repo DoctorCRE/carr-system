@@ -1,9 +1,9 @@
 // Expose vendor meeting records.
-import { vendorPeopleJoin, vendorPersonFields } from './vendor-people.js';
+import { vendorPeopleJoin, vendorPersonFields } from './vendor-people.ts';
 import { ToolError } from './tool-error.ts';
 import { organizationTenantForActor } from './identity.js';
 import { CALENDAR_AGENDA_BOARD, calendarSection } from './brief-calendar.js';
-import { calendarScheduling } from './calendar-scheduling.js';
+import { calendarScheduling } from './calendar-scheduling.ts';
 import { mailboxOwnerForActor } from './partner-authority.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import time
+import tempfile
 
 
 PROGRAM_PATTERNS = (
@@ -27,7 +28,7 @@ CLOCK_ALLOW = (
     'lead-automation-concurrency.postgres.mjs', 'invoice-review-regressions.postgres.mjs',
     'salesforce-read-run-store-rw02-postgres.test.mjs',
     'program-controller-census-role-boundary.v5.test.mjs',
-    'recovery-matrix.v5.test.mjs', 'shared-oauth-worker.test.mjs',
+    'recovery-matrix.v5.test.mjs', 'shared-oauth-worker.test.ts',
 )
 
 
@@ -69,6 +70,9 @@ class Gates:
         self.timed_out = False
         scope = Path('ops/config/ci-check-scope.json')
         self.scope = json.loads(scope.read_text()) if scope.is_file() else {}
+        budgets = Path('ops/config/ci-execution-budgets.json')
+        self.suite_budgets = (json.loads(budgets.read_text()).get('gate_suites', {})
+                              if budgets.is_file() else {})
         self.portable = (os.environ.get('CARR_CI_PORTABLE_ONLY') == '1'
                          or os.environ.get('GITHUB_ACTIONS', '').lower() == 'true')
 
@@ -104,6 +108,8 @@ class Gates:
         log = self.logdir / (name + '.log')
         start = time.time()
         env = os.environ.copy()
+        if isolated and hasattr(self, 'decoder_target'):
+            env['CARR_HXPROBE_TEST_BINARY'] = str(self.decoder_target / 'debug/hxprobe')
         temporary = self.logdir / ('tmp-' + name.removeprefix('gate-'))
         if isolated:
             temporary.mkdir(parents=True, exist_ok=True)
@@ -152,7 +158,16 @@ class Gates:
     def execute(self, name, *command):
         return self.record(self.run(name, command))
 
+    def suite_timeout(self, path):
+        return self.suite_budgets.get(path, {}).get(
+            "timeout_seconds", self.args.timeout * self.args.jobs)
+
     def check(self):
+        with tempfile.TemporaryDirectory(prefix='gates-hxprobe-') as directory:
+            self.decoder_target = Path(directory)
+            return self.check_prepared()
+
+    def check_prepared(self):
         os.environ['CARR_HOOK_FIXTURE'] = '1'
         try:
             clocks_ok = check_clocks()
@@ -164,7 +179,10 @@ class Gates:
             self.failures.append('codemap')
             self.tail('codemap')
         if Path('vendor/hxprobe/Cargo.toml').is_file():
-            if self.execute('hxprobe-prepare', 'bash', '-c', 'cd vendor/hxprobe && cargo build --locked'):
+            if self.execute('hxprobe-prepare', self.args.python, self.args.timeout_helper,
+                            '180', 'bash', '-c',
+                            'cd vendor/hxprobe && cargo build --locked --target-dir "$1"',
+                            '_', str(self.decoder_target)):
                 self.tail('hxprobe-prepare')
                 return 1, 'HxStore worker preparation failed'
         before = tree_fingerprint()
@@ -175,7 +193,7 @@ class Gates:
                           LOGDIR=str(self.logdir), PY=self.args.python, pooled_timeout=str(timeout))
         with ThreadPoolExecutor(max_workers=self.args.jobs) as pool:
             results = list(pool.map(lambda path: self.run('gate-' + Path(path).name,
-                [self.args.python, self.args.timeout_helper, str(timeout), self.args.python, path],
+                [self.args.python, self.args.timeout_helper, str(self.suite_timeout(path)), self.args.python, path],
                 isolated=True), eligible))
         for result in results:
             rc = self.record(result)
@@ -186,7 +204,8 @@ class Gates:
             elif rc == 124:
                 self.failures.append('TIMEOUT:' + base)
                 self.timed_out = True
-                print(f'        \033[31mTIMEOUT\033[0m  {base} — exceeded {timeout}s (pool-scaled); '
+                budget = self.suite_timeout(next(path for path in eligible if Path(path).name == base))
+                print(f'        \033[31mTIMEOUT\033[0m  {base} — exceeded {budget}s; '
                       'reporting all completed Python gate results', file=sys.stderr)
                 self.tail(name)
             elif rc == 78:

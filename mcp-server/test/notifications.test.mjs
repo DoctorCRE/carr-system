@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // WR-000113 — the R03 notification acceptance proofs.
 //
 // EVERY MINT CASE RUNS THROUGH record-signal, not through SQL. The mint has ONE
@@ -21,7 +22,6 @@ import { PROFILES } from "../src/mcp.js";
 
 const DSN = process.env.DATABASE_URL || "";
 const REQUIRED = process.env.CARR_R03_DB_REQUIRED === "1";
-const LOOPBACK = /@(localhost|127[.]0[.]0[.]1)[:/]|^postgres(ql)?:\/\/(localhost|\/)/;
 
 class ToolError extends Error {
   constructor(fields) { super(fields.error); Object.assign(this, fields); }
@@ -51,8 +51,7 @@ async function skipUnlessDatabase(t) {
     t.skip("the migration class supplies DATABASE_URL");
     return null;
   }
-  assert.ok(LOOPBACK.test(DSN),
-    "REFUSED: this proof mints notifications and runs against a disposable loopback only");
+  assertDisposableDatabase(DSN);
   return (await import("pg")).default ?? (await import("pg"));
 }
 
@@ -628,13 +627,14 @@ test("proof CLI validates release-pinned live contracts, refusals, contradiction
   const { join } = await import('node:path');
   const { fileURLToPath } = await import('node:url');
   const { spawn, execFileSync } = await import('node:child_process');
-  const { createServer } = await import('./helpers/proof-release-fixture.mjs');
+  const { createServer } = await import('./helpers/proof-release-fixture.ts');
   const root = await mkdtemp(join(tmpdir(), 'notification-proof-contract-'));
   const repo = fileURLToPath(new URL('../../', import.meta.url));
   let server;
   try {
     await mkdir(join(root, 'lib'), { recursive: true });
     await copyFile(join(repo, 'lib/release_reader.py'), join(root, 'lib/release_reader.py'));
+    await copyFile(join(repo, 'lib/proof_deadline.py'), join(root, 'lib/proof_deadline.py'));
     await copyFile(join(repo, 'lib/release-reader-marker.json'), join(root, 'lib/release-reader-marker.json'));
     await mkdir(join(root, 'tools'), { recursive: true });
     await mkdir(join(root, 'mcp-server/src'), { recursive: true });
@@ -703,7 +703,8 @@ print(json.dumps(value['feed' if sys.argv[2] == 'notification-feed' else 'prefer
     }
     assert.equal((await run({ exit:true })).code, 78);
     assert.equal((await run({ type_error:true })).code, 1);
-    assert.equal((await run({ ...valid, sleep:true }, ['--timeout-seconds', '0.1'])).code, 78);
+    const deadline = await run({ ...valid, sleep:true }, ['--timeout-seconds', '0.1']);
+    assert.equal(deadline.code, 78, deadline.stdout + deadline.stderr);
     assert.equal((await run(valid, ['--timeout-seconds', '0'])).code, 2);
     assert.equal((await run(valid, ['--unknown'])).code, 2);
     const { readFile } = await import('node:fs/promises');
@@ -725,7 +726,7 @@ print(json.dumps(value['feed' if sys.argv[2] == 'notification-feed' else 'prefer
 
 
 test('proof release fixture refuses unmarked reads and admits the Python reader', async () => {
-  const { createServer } = await import('./helpers/proof-release-fixture.mjs');
+  const { createServer } = await import('./helpers/proof-release-fixture.ts');
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
   const { fileURLToPath } = await import('node:url');
@@ -746,4 +747,32 @@ test('proof release fixture refuses unmarked reads and admits the Python reader'
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
   }
+});
+
+
+test('watch routes accept only exact subject destinations', () => {
+  const deal = 'ae000000-0000-4000-8000-000000000060';
+  const lease = 'ae000000-0000-4000-8000-000000000061';
+  const client = 'ae000000-0000-4000-8000-000000000062';
+  const shape = (subject_type, subject_ref, deep_link) => notificationFeedProjection({
+    ok: true, unread_count: 1, notifications: [{
+      id: randomUUID(), severity: 'action_required', reason: 'Watched record changed',
+      subject_type, subject_ref, deep_link, created_at: '2026-11-08T12:00:00Z',
+      read_at: null, delivery: [{channel:'in_app',state:'pending'}],
+    }],
+  }, null, ToolError);
+  for (const [type, ref, url] of [['deal',deal,`/deals?deal=${deal}`], ['lease',lease,`/clients?record=${client}`]]) {
+    assert.equal(shape(type,ref,url).notifications[0].deep_link,url);
+    for (const unsafe of [
+      `https://foreign.test${url}`, `//foreign.test${url}`, `${url}&extra=1`, `${url}&deal=${deal}`,
+      `${url}#fragment`, `${url}\n`, url.replace(/=[^=]+$/, '=bad'), url.replace('?', '/?'),
+      `/../${url.slice(1)}`, `/safe/../${url.slice(1)}`, '/safe/..', '/safe/./child',
+      '/%2e%2e/home', '/safe\\evil',
+    ]) assert.throws(()=>shape(type,ref,unsafe),/notification_feed_unavailable/,unsafe);
+  }
+  assert.throws(()=>shape('deal',lease,`/deals?deal=${deal}`),/notification_feed_unavailable/);
+  assert.throws(()=>shape('lease',lease,`/deals?deal=${deal}`),/notification_feed_unavailable/);
+  assert.throws(()=>shape('deal',deal,`/clients?record=${client}`),/notification_feed_unavailable/);
+  assert.throws(()=>shape('lease','bad',`/clients?record=${client}`),/notification_feed_unavailable/);
+  assert.equal(shape('deal',deal,'/deals/legacy').notifications[0].deep_link,'/deals/legacy');
 });

@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 import copy
+import http.client
+import http.server
+import secrets
+import threading
+from contextlib import contextmanager
 import fnmatch
 import importlib.util
 import json
@@ -33,6 +38,93 @@ CADENCE = json.loads((REPO / 'ops/social/cadence.v1.json').read_text())
 UTC = timezone.utc
 FRIDAY_BEFORE_NOV_2 = datetime(2026, 10, 30, 11, 0, tzinfo=UTC)   # Fri 06:00 CDT
 FRIDAY_BEFORE_OCT_26 = datetime(2026, 10, 23, 11, 0, tzinfo=UTC)  # Fri 06:00 CDT
+
+
+class EscapeRecorder:
+    def __init__(self):
+        self.nonce = secrets.token_urlsafe(24)
+        self.hits = []
+        self.unrelated = []
+
+    def record(self, path):
+        query = parse_qs(urlparse(path).query)
+        (self.hits if query.get('probe') == [self.nonce] else self.unrelated).append(path)
+
+    def assert_no_escape(self):
+        if self.hits:
+            raise AssertionError(f'forbidden HTTP probes reached recorder: {self.hits}; unrelated: {self.unrelated}')
+
+    def positive_control(self, port):
+        path = f'/control?probe={self.nonce}'
+        connection = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
+        try:
+            connection.request('GET', path)
+            response = connection.getresponse()
+            if response.status != 200 or response.read() != b'MARKER-HOST-9c1e':
+                raise AssertionError('recorder control response failed')
+        finally:
+            connection.close()
+        if self.hits != [path]:
+            raise AssertionError(f'recorder did not observe positive control: {self.hits}')
+        self.hits.clear()
+
+
+@contextmanager
+def escape_recorder():
+    recorder = EscapeRecorder()
+
+    class Other(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            recorder.record(self.path)
+            self.send_response(200)
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(b'MARKER-HOST-9c1e')
+
+        def log_message(self, *args):
+            pass
+
+    with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Other) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = server.server_address[1]
+            recorder.positive_control(port)
+            yield recorder, port
+        finally:
+            server.shutdown()
+            thread.join()
+
+
+class EscapeRecorderTest(unittest.TestCase):
+    def test_unrelated_requests_do_not_escape_but_exact_nonce_does(self):
+        with escape_recorder() as (recorder, port):
+            for path in ('/', f'/fetch?probe={recorder.nonce}-wrong',
+                         f'/iframe?probe={recorder.nonce}'):
+                connection = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
+                try:
+                    connection.request('GET', path)
+                    connection.getresponse().read()
+                finally:
+                    connection.close()
+                if path.startswith('/iframe'):
+                    with self.assertRaisesRegex(AssertionError, 'forbidden HTTP probes'):
+                        recorder.assert_no_escape()
+                else:
+                    recorder.assert_no_escape()
+            self.assertEqual(len(recorder.unrelated), 2)
+
+    def test_blind_recorder_fails_positive_control(self):
+        with patch.object(EscapeRecorder, 'record', return_value=None):
+            with self.assertRaisesRegex(AssertionError, 'did not observe positive control'):
+                with escape_recorder():
+                    self.fail('blind recorder admitted observation')
+
+    def test_dead_recorder_cannot_admit_observation(self):
+        with patch.object(http.client.HTTPConnection, 'request', side_effect=ConnectionRefusedError):
+            with self.assertRaises(ConnectionRefusedError):
+                with escape_recorder():
+                    self.fail('dead recorder admitted observation')
 
 
 def png(path: Path, width: int, height: int) -> None:
@@ -481,40 +573,24 @@ class SocialBatchTest(unittest.TestCase):
 
     @unittest.skipUnless(Path(sb.CHROME).exists(), 'Chrome is not installed here')
     def test_real_chrome_card_cannot_reach_outside_files_or_hosts(self):
-        import http.server
-        import threading
         (self.media / 'secret.txt').write_text('MARKER-FILE-7f3a')
-        hits = []
-
-        class Other(http.server.BaseHTTPRequestHandler):
-            def do_GET(self):
-                hits.append(self.path)
-                self.send_response(200)
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                self.wfile.write(b'MARKER-HOST-9c1e')
-
-            def log_message(self, *args):
-                pass
-        other = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Other)
-        threading.Thread(target=other.serve_forever, daemon=True).start()
-        self.addCleanup(other.server_close)
-        self.addCleanup(other.shutdown)
-        secret, port = (self.media / 'secret.txt').resolve().as_uri(), other.server_address[1]
-        targets = [secret, f'http://127.0.0.1:{port}/', f'http://localhost:{port}/', 'http://example.com/',
-                   f'http://{sb.CARD_HOST}/../../../media/secret.txt']
-        script = ''.join(f"fetch({u!r}).then(r=>r.text()).then(t=>{{o.textContent+='|'+t}})"
-                         f".catch(()=>{{o.textContent+='|blocked'}});" for u in targets)
-        html = self.work_card(
-            f'<div id="o">start</div><iframe src="{secret}"></iframe><iframe src="http://127.0.0.1:{port}/"></iframe>'
-            f'<script>const o=document.getElementById("o");{script}'
-            "fetch('/fonts/Oswald.ttf').then(r=>{o.textContent+='|font'+r.status});</script>")
-        dom = sb.browse(html, '--dump-dom', 400, 300, out=self.ctx.out).stdout
-        self.assertIn('start', dom)
-        self.assertIn('font200', dom)
-        self.assertNotIn('MARKER-FILE-7f3a', dom)
-        self.assertNotIn('MARKER-HOST-9c1e', dom)
-        self.assertEqual(hits, [])
+        secret = (self.media / 'secret.txt').resolve().as_uri()
+        with escape_recorder() as (recorder, port):
+            targets = [secret, f'http://127.0.0.1:{port}/?probe={recorder.nonce}',
+                       f'http://localhost:{port}/?probe={recorder.nonce}', f'http://example.com/?probe={recorder.nonce}',
+                       f'http://{sb.CARD_HOST}/../../../media/secret.txt?probe={recorder.nonce}']
+            script = ''.join(f"fetch({u!r}).then(r=>r.text()).then(t=>{{o.textContent+='|'+t}})"
+                             f".catch(()=>{{o.textContent+='|blocked'}});" for u in targets)
+            html = self.work_card(
+                f'<div id="o">start</div><iframe src="{secret}"></iframe><iframe src="http://127.0.0.1:{port}/?probe={recorder.nonce}"></iframe>'
+                f'<script>const o=document.getElementById("o");{script}'
+                "fetch('/fonts/Oswald.ttf').then(r=>{o.textContent+='|font'+r.status});</script>")
+            dom = sb.browse(html, '--dump-dom', 400, 300, out=self.ctx.out).stdout
+            self.assertIn('start', dom)
+            self.assertIn('font200', dom)
+            self.assertNotIn('MARKER-FILE-7f3a', dom)
+            self.assertNotIn('MARKER-HOST-9c1e', dom)
+            recorder.assert_no_escape()
         # A framed file never reaches the DOM, so compare pixels: framing the marker file
         # must look exactly like framing a file that does not exist.
         shots = []

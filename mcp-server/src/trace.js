@@ -76,8 +76,8 @@
 // specifically (a well-handled, well-messaged refusal with its own hint — not
 // an unhandled anything).
 
-import { neon } from "@neondatabase/serverless";
-import { logLine } from "./correlation.js";
+import { neon } from "./postgres.ts";
+import { logLine } from "./correlation.ts";
 
 const SERVICE_KEY = "carr-mcp";
 const DEFAULT_SEVERITY = "SEV-3"; // contained: one request failed, not the whole service —

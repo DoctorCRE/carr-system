@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "client-anniversary-read",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "natural-client-closing-anniversary",
+      "predicate": "Current runner fails closed with missing contract release_reader POST support for read-only MCP verbs. A dedicated shared-transport unit must supply it before the canonical reference step can run. After merge and deployment, the separate proof worker runs python3 tools/prove-client-anniversary-read.py --production --natural --active-cookie-file PRIVATE_SESSION_FILE --merge-sha MERGED_UNIT_SHA. Require the deployed release to contain the merge, a current Chicago observation date, a response accepted by the shared production parser, at least one natural eligible row, and matching canonical get-deal-room closing date, closed-won state, client ID, and source version. The private session file is never printed. Missing natural records, release identity, authentication, or canonical evidence returns insufficient_evidence with exit 78. No data is seeded, no greeting is sent, and no business write is called.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Natural anniversary evidence matches its canonical closed-won deal and linked client. Release-only and fixture-only success never prove production.",
+      "input_class": "Existing authenticated natural closed-won deals and clients only.",
+      "deadline_seconds": 45
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 3,
+    "max_records": 1000,
+    "max_runtime_seconds": 45,
+    "max_artifact_bytes": 1048576
+  }
+}

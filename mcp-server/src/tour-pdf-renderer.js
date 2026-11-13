@@ -1,10 +1,11 @@
 // Render tour packets as PDF documents.
 import fontkit from "@pdf-lib/fontkit";
 import { decodePDFRawStream, PDFDocument, PDFName, PDFString, rgb } from "pdf-lib";
-import { formatApprovedMetric, renderTourPacket } from "./tour-packet-render.js";
+import { TOUR_PACKET_TEMPLATE_VERSION } from "./tour-packet-template.ts";
+import { renderTourPacket } from "./tour-packet-render.js";
 
-export const TOUR_PDF_RENDERER_VERSION = "1.1.0";
-export const TOUR_PDF_TEMPLATE_VERSION = "1.1.0";
+export const TOUR_PDF_RENDERER_VERSION = "2.0.0";
+export const TOUR_PDF_TEMPLATE_VERSION = TOUR_PACKET_TEMPLATE_VERSION;
 
 const PAGE = [612, 792];
 const NAVY = rgb(0, 47 / 255, 108 / 255);
@@ -12,7 +13,7 @@ const ORANGE = rgb(245 / 255, 127 / 255, 41 / 255);
 const INK = rgb(23 / 255, 32 / 255, 51 / 255);
 const MUTED = rgb(82 / 255, 96 / 255, 116 / 255);
 const LINE = rgb(216 / 255, 224 / 255, 233 / 255);
-const PAPER = rgb(247 / 255, 249 / 255, 252 / 255);
+
 
 function bytes(value, field) {
   if (value instanceof Uint8Array && value.byteLength > 0) return value;
@@ -51,39 +52,12 @@ function drawLines(page, lines, options) {
   lines.forEach((line, index) => page.drawText(line, { ...options, y: options.y - index * options.lineHeight }));
 }
 
-function measuredSingleLine(value, font, size, maximumWidth) {
-  const lines = wrap(value, font, size, maximumWidth, 1);
-  const width = font.widthOfTextAtSize(lines[0], size);
-  if (!Number.isFinite(width) || width < 0 || width > maximumWidth)
-    throw new RangeError(`tour_pdf_content_overflow:1:${maximumWidth}`);
-  return { text: lines[0], width };
-}
-
-function factValue(property, field) {
-  const value = property[field];
-  if (!value) return "Not provided";
-  if (field === "size" || field === "asking_economics") return formatApprovedMetric(value);
-  return String(value);
-}
-
-function formatAsOf(value) {
-  const date = new Date(value);
-  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-  return `${months[date.getUTCMonth()]} ${date.getUTCDate()}, ${date.getUTCFullYear()} at ${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")} UTC`;
-}
-
-function drawFact(page, regular, bold, label, value, y) {
-  page.drawLine({ start: { x: 42, y: y + 8 }, end: { x: 570, y: y + 8 }, thickness: .7, color: LINE });
-  page.drawText(label.toUpperCase(), { x: 42, y: y - 7, size: 8.5, font: bold, color: NAVY });
-  drawLines(page, wrap(value, regular, 10.5, 340, 2), { x: 210, y: y - 7, size: 10.5, lineHeight: 14, font: regular, color: INK });
-}
-
 async function sha256(value) {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", value));
   return `sha256:${[...digest].map(byte => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
-/** Generate a fixed Letter packet with exactly one polished page per property. */
+/** Render one overview followed by one complete Letter page per property. */
 export async function renderTourPacketPdf(input, fonts, proof = {}) {
   const packet = renderTourPacket(input);
   const regularBytes = bytes(fonts?.regular, "regular");
@@ -114,41 +88,41 @@ export async function renderTourPacketPdf(input, fonts, proof = {}) {
     if (typeof value === "string" && value) document.catalog.set(PDFName.of(key), PDFString.of(value));
   }
 
-  packet.facts.properties.forEach((property, index) => {
+  const presentation = packet.presentation;
+  const overview = document.addPage(PAGE);
+  overview.node.set(PDFName.of("CARRPageKind"), PDFString.of("overview"));
+  let y = 740;
+  function overviewText(text, size = 11, font = regular) {
+    const lines = wrap(text, font, size, 528, 3);
+    if (y - lines.length * (size + 4) < 42) throw new RangeError("tour_pdf_content_overflow:overview");
+    drawLines(overview, lines, { x: 42, y, size, lineHeight: size + 4, font, color: INK });
+    y -= lines.length * (size + 4) + 8;
+  }
+  overviewText(presentation.brand);
+  overviewText(presentation.title, 24, bold);
+  overviewText(presentation.summary);
+  overviewText(presentation.overview, 16, bold);
+  for (const [index, property] of presentation.stops.entries()) overviewText(`${index + 1}. ${property.route_label} · ${property.name} · ${property.address}${property.appointment ? ` · ${property.appointment}` : ""}`);
+  overviewText(presentation.map, 16, bold);
+  overviewText(presentation.properties, 16, bold);
+  presentation.stops.forEach((property, index) => {
     const page = document.addPage(PAGE);
-    page.drawText("CARR", { x: 42, y: 741, size: 19, font: bold, color: NAVY });
-    const stop = property.route_label || `Stop ${property.route_sequence}`;
-    const measuredStop = measuredSingleLine(stop.toUpperCase(), bold, 9, 240);
-    page.drawText(measuredStop.text, { x: 570 - measuredStop.width, y: 746, size: 9, font: bold, color: NAVY });
+    page.node.set(PDFName.of("CARRPageKind"), PDFString.of("property"));
+    page.node.set(PDFName.of("CARRPropertyRef"), PDFString.of(property.property_ref));
+    page.node.set(PDFName.of("CARRPropertyMarker"), PDFString.of(packet.markers[index]));
+    page.drawText(`Stop ${property.route_label}`, { x: 42, y: 741, size: 11, font: bold, color: NAVY });
     page.drawRectangle({ x: 42, y: 727, width: 528, height: 3, color: ORANGE });
     drawLines(page, wrap(property.name, bold, 24, 528, 2), { x: 42, y: 687, size: 24, lineHeight: 28, font: bold, color: NAVY });
-    drawLines(page, wrap(`${property.address}${property.suite ? ` - ${property.suite}` : ""}`, regular, 11.5, 528, 2), { x: 42, y: 622, size: 11.5, lineHeight: 15, font: regular, color: MUTED });
-
-    const facts = [
-      ["Property type", factValue(property, "property_type")],
-      ["Size", factValue(property, "size")],
-      ["Asking economics", factValue(property, "asking_economics")],
-      ["Availability", factValue(property, "availability")],
-      ["Parking", factValue(property, "parking")],
-    ];
-    facts.forEach(([label, value], factIndex) => drawFact(page, regular, bold, label, value, 570 - factIndex * 58));
-    page.drawLine({ start: { x: 42, y: 288 }, end: { x: 570, y: 288 }, thickness: .7, color: LINE });
-
-    page.drawRectangle({ x: 42, y: 119, width: 528, height: 130, color: PAPER, borderColor: ORANGE, borderWidth: 1.5 });
-    page.drawText("FACTS-ONLY CLIENT NOTE", { x: 58, y: 224, size: 8.5, font: bold, color: NAVY });
-    drawLines(page, wrap(`As of ${formatAsOf(property.as_of)}`, regular, 9.5, 494, 1), { x: 58, y: 204, size: 9.5, lineHeight: 13, font: regular, color: INK });
-    // No caveat line: renderTourPacket (1.3.0) admits only the client field
-    // allowlist, so a property never carries one (V5-J303).
-
-    const marker = packet.markers[index];
-    const packetRefLine = measuredSingleLine(`Packet ref: ${property.property_ref}`, regular, 6.5, 528);
-    const markerLine = measuredSingleLine(`Property marker: ${marker}`, regular, 6.5, 450);
-    page.node.set(PDFName.of("CARRPropertyRef"), PDFString.of(property.property_ref));
-    page.node.set(PDFName.of("CARRPropertyMarker"), PDFString.of(marker));
-    page.drawText(packetRefLine.text, { x: 42, y: 76, size: 6.5, font: regular, color: MUTED });
-    page.drawText(markerLine.text, { x: 42, y: 63, size: 6.5, font: regular, color: MUTED });
-    const pageLabel = `${index + 1} / ${packet.propertyCount}`;
-    page.drawText(pageLabel, { x: 570 - regular.widthOfTextAtSize(pageLabel, 7), y: 63, size: 7, font: regular, color: MUTED });
+    drawLines(page, wrap(property.address, regular, 11.5, 528, 2), { x: 42, y: 622, size: 11.5, lineHeight: 15, font: regular, color: MUTED });
+    if (property.appointment) drawLines(page, wrap(property.appointment, regular, 9, 528, 2), { x: 42, y: 592, size: 9, lineHeight: 12, font: regular, color: INK });
+    property.facts.forEach((fact, factIndex) => {
+      const y = 570 - factIndex * 49;
+      page.drawText(fact.label, { x: 42, y, size: 9, font: bold, color: NAVY });
+      drawLines(page, wrap(fact.value, regular, 10.5, 340, 2), { x: 210, y, size: 10.5, lineHeight: 14, font: regular, color: INK });
+    });
+    if (property.public_packet_note) drawLines(page, wrap(property.public_packet_note, regular, 10, 528, 2), { x: 42, y: 290, size: 10, lineHeight: 12, font: regular, color: INK });
+    page.drawText(presentation.notes, { x: 42, y: 267, size: 12, font: bold, color: NAVY });
+    for (let line = 0; line < 6; line++) page.drawLine({ start: { x: 42, y: 240 - line * 30 }, end: { x: 570, y: 240 - line * 30 }, thickness: .7, color: LINE });
   });
 
   const pdfBytes = await document.save({ addDefaultPage: false, useObjectStreams: false, objectsPerTick: Infinity });
@@ -156,8 +130,10 @@ export async function renderTourPacketPdf(input, fonts, proof = {}) {
     bytes: pdfBytes,
     artifactDigest: await sha256(pdfBytes),
     fontDigests: Object.freeze([regularDigest, boldDigest]),
+    contractVersion: packet.contractVersion,
     rendererVersion: TOUR_PDF_RENDERER_VERSION,
     templateVersion: TOUR_PDF_TEMPLATE_VERSION,
+    pageCount: presentation.stops.length + 1,
     propertyCount: packet.propertyCount,
     propertyRefs: packet.propertyRefs,
     markers: packet.markers,
@@ -395,9 +371,12 @@ export async function inspectStoredTourPacketPdf(readback) {
     const pageFrameCurrent = page.getRotation().angle === 0 && crop.x === 0 && crop.y === 0 &&
       crop.width === size.width && crop.height === size.height;
     const geometryWithinPage = decodedGeometryWithinPage(document, page, pageContent(document, page), size.width, size.height);
+    const pageKind = decoded(page.node.get(PDFName.of("CARRPageKind")));
+    const identityCurrent = pageKind === "overview" ? index === 0 && !propertyRef && !propertyMarker : propertyRef && propertyMarker;
     return {
+      page_kind: pageKind,
       page_number: index + 1, property_ref: propertyRef, property_marker: propertyMarker,
-      clipped_box_count: size.width === 612 && size.height === 792 && pageFrameCurrent && hasContent && propertyRef && propertyMarker && layoutProofCurrent && geometryWithinPage ? 0 : 1,
+      clipped_box_count: size.width === 612 && size.height === 792 && pageFrameCurrent && hasContent && identityCurrent && layoutProofCurrent && geometryWithinPage ? 0 : 1,
     };
   });
   let fontDigests = [];

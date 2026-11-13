@@ -11,7 +11,7 @@ through lib/release_reader.py or the declared call wrapper; dynamic imports and
 string execution in runners are refused. Pure computation is outside scope.
 
 Process declarations pin the entire runner, including indirect argv construction
-and embedded scripts. Audit every command before updating a pin. The selected
+and embedded scripts. Audit every command and hash-bound helper before updating a pin. The selected
 call wrapper and explicit fixture executables are trusted caller inputs.
 """
 import argparse
@@ -52,7 +52,7 @@ def capability(name):
     if belongs(name, NETWORK_MODULES) or (
             parts[0] == 'asyncio' and any(part in ASYNC_NETWORK for part in parts[1:])):
         return 'network'
-    if belongs(name, PROGRAM_MODULES) or (
+    if belongs(name, PROGRAM_MODULES | {'lib.record_call'}) or (
             parts[0] in OS_MODULES and len(parts) > 1 and
             (parts[1] in OS_PROCESS or parts[1].startswith(('exec', 'spawn')) or parts[1] == '*')):
         return 'program'
@@ -63,7 +63,30 @@ def capability(name):
     return None
 
 
-PROCESSES = json.loads((ROOT / 'ops/config/proof-process-allowlist.json').read_text())
+MANIFEST = ROOT / 'ops/config/proof-process-allowlist.json'
+PROCESSES = json.loads(MANIFEST.read_text())
+
+
+def helper_path(name):
+    if name == 'lib.proof_deadline.proof_deadline':
+        return ROOT / 'lib/proof_deadline.py'
+    return ROOT / 'tools' / f"{name.split('.')[0]}.py"
+
+
+def refresh_scripts(paths):
+    """Refresh only explicitly selected, already-audited runner declarations."""
+    declarations = json.loads(MANIFEST.read_text())
+    for path in paths:
+        if path not in declarations:
+            raise ValueError(f'Runner has no audited command declaration: {path}')
+    for path in paths:
+        source = (ROOT / path).read_bytes()
+        declaration = declarations[path]
+        declaration['sha256'] = hashlib.sha256(source).hexdigest()
+        if b'from lib.proof_deadline import proof_deadline' in source:
+            declaration.setdefault('helpers', {})['lib.proof_deadline.proof_deadline'] = hashlib.sha256(
+                helper_path('lib.proof_deadline.proof_deadline').read_bytes()).hexdigest()
+    MANIFEST.write_text(json.dumps(declarations, indent=2) + '\n')
 
 
 def violations(source, path=None):
@@ -72,6 +95,12 @@ def violations(source, path=None):
     declaration = PROCESSES.get(path, {})
     process_allowed = (bool(declaration.get('commands')) and
                        hashlib.sha256(source.encode()).hexdigest() == declaration.get('sha256'))
+    helpers = set()
+    if process_allowed:
+        for name, digest in declaration.get('helpers', {}).items():
+            helper = helper_path(name)
+            if helper.is_file() and hashlib.sha256(helper.read_bytes()).hexdigest() == digest:
+                helpers.add(name)
     bindings = {}
     for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
@@ -86,7 +115,8 @@ def violations(source, path=None):
                 if (getattr(node, 'level', 0) or alias.name == '*' or
                         (isinstance(node, ast.ImportFrom) and alias.name in
                          {'os', 'posix', 'nt', 'sys', 'subprocess', 'socket', 'urllib', 'modules'}) or
-                        (kind is not None and (kind != 'program' or not process_allowed))):
+                        (kind is not None and not (kind == 'unknown helper' and name in helpers)
+                         and (kind != 'program' or not process_allowed))):
                     failures.append((node.lineno, f'undeclared network/process import {name}; use lib.release_reader or declare audited commands'))
         if isinstance(node, ast.Name) and node.id in {'__import__', 'eval', 'exec', 'compile', 'getattr', 'globals', 'locals', 'vars'}:
             failures.append((node.lineno, 'dynamic capability lookup is not admitted'))
@@ -130,7 +160,11 @@ def check(root):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, default=ROOT)
+    parser.add_argument('--refresh-scripts', nargs='+', metavar='PATH')
     args = parser.parse_args()
+    if args.refresh_scripts:
+        refresh_scripts(args.refresh_scripts)
+        return 0
     failures = check(args.root)
     print('\n'.join(failures) if failures else 'Proof HTTP transport uses lib.release_reader')
     return bool(failures)

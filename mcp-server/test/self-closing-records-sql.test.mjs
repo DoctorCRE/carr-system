@@ -1,5 +1,5 @@
 // Test self-closing record predicates in PostgreSQL.
-import { readMigration } from "./migration-source.testhelper.mjs";
+import { readMigration } from "./migration-source.testhelper.ts";
 // self-closing-records-sql.test.mjs — the SQL half of migration 0872, run on a
 // real disposable PostgreSQL rather than a fake that answers marker comments.
 //
@@ -28,7 +28,7 @@ import { readMigration } from "./migration-source.testhelper.mjs";
 //
 // Run with: node --test mcp-server/test/self-closing-records-sql.test.mjs
 
-import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from "./helpers/disposable-postgres.mjs";
+import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from "./helpers/disposable-postgres.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

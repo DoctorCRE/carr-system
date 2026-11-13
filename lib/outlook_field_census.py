@@ -6,8 +6,8 @@ from pathlib import Path
 import tempfile
 from datetime import datetime, timezone
 import uuid
-SCHEMA = 'outlook-field-census/v1'
-CAUSES = ('legitimately_empty', 'protected', 'never_requested', 'acquisition_failed', 'decode_unsupported', 'parser_or_linkage', 'conflict_or_overflow', 'source_unavailable', 'unclassified')
+SCHEMA = 'outlook-field-census/v2'
+CAUSES = ('legitimately_empty', 'protected', 'never_requested', 'acquisition_failed', 'decode_unsupported', 'parser_or_linkage', 'conflict_or_overflow', 'source_unavailable', 'source_absent', 'unclassified')
 FIELDS = {'subject': 'subject_decoded', 'body': 'body_complete', 'sender': 'sender_decoded', 'recipients': 'recipients_decoded'}
 MESSAGE_COUNTERS = ('mail_account_unknown_not_stored', 'decoder_rejected',
                     'stored_not_admitted_account_ambiguous', 'stored_not_admitted_account_unresolved')
@@ -18,7 +18,7 @@ DISPOSITIONS = {
     'observed_empty': ('legitimately_empty',),
     'access_limited': ('protected',),
     'repairable': ('never_requested', 'acquisition_failed', 'decode_unsupported', 'parser_or_linkage'),
-    'unresolved': ('conflict_or_overflow', 'source_unavailable'),
+    'unresolved': ('conflict_or_overflow', 'source_unavailable', 'source_absent'),
     'unknown': ('unclassified',),
 }
 
@@ -48,7 +48,9 @@ def build(meta, mails, bound):
                 row['captured'] += 1
             else:
                 row['raw_missing'] += 1
-                cause = 'unclassified'
+                cause = mail.get('field_causes', {}).get(name, 'unclassified')
+                if cause not in CAUSES:
+                    cause = 'unclassified'
                 if ((name == 'body' and (mail.get('body_completeness') == 'conflict'
                                          or mail.get('body_outcome') in ('conflict', 'oversized')))
                         or (name == 'recipients' and mail.get('census_recipients_status') == 'conflict')):

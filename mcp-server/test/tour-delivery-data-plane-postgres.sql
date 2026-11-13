@@ -2,6 +2,12 @@
 -- Disposable least-privilege proof for 0430. All rows are rolled back.
 begin;
 
+do $download_catalog$ begin
+ if ops.scac_mutation_catalog_v118_current() is not true then
+  raise exception 'download grant catalog is stale';
+ end if;
+end $download_catalog$;
+
 insert into ops.tour_property(id,organization_tenant_id,property_status,created_at) values
 ('a1000000-0000-4000-8000-000000000001','tour-delivery-proof','active',now()-interval '30 days'),
 ('a1000000-0000-4000-8000-000000000002','tour-delivery-proof','active',now()-interval '30 days');
@@ -50,7 +56,7 @@ values
 
 set local carr.verified_human_actor_slug='joe';
 do $map_promotion$
-declare v_actor_id text; v_digest text; v_share uuid; v_packet jsonb; v_render_packet jsonb;
+declare v_actor_id text; v_digest text; v_share uuid; v_packet jsonb; v_render_packet jsonb; nav jsonb;
 begin
   select id::text into strict v_actor_id from public.actor where slug='joe' and active and kind='human';
   perform ops.append_tour_entrance_verification_receipt(jsonb_build_object(
@@ -73,6 +79,10 @@ begin
     '[{"property_id":"a1000000-0000-4000-8000-000000000001","field_assertion_id":"a9000000-0000-4000-8000-000000000001","display_field_key":"display.name"},{"property_id":"a1000000-0000-4000-8000-000000000001","field_assertion_id":"a9000000-0000-4000-8000-000000000003","display_field_key":"display.address"},{"property_id":"a1000000-0000-4000-8000-000000000002","field_assertion_id":"a9000000-0000-4000-8000-000000000010","display_field_key":"display.name"},{"property_id":"a1000000-0000-4000-8000-000000000002","field_assertion_id":"a9000000-0000-4000-8000-000000000011","display_field_key":"display.address"}]',
     v_actor_id,'sha256:'||repeat('6',64));
   if v_digest !~ '^sha256:[a-f0-9]{64}$' then raise exception 'map projection did not seal'; end if;
+  nav := ops.read_tour_internal_detail('tour-delivery-proof','a2000000-0000-4000-8000-000000000001',v_actor_id)#>'{routes,0,navigation}';
+  if nav->>'reason' is distinct from 'promotion_missing' or nav->'evidence' is distinct from 'null'::jsonb then
+    raise exception 'navigation guessed evidence before promotion: %',nav;
+  end if;
   begin
     perform ops.issue_tour_share_grant('tour-delivery-proof','ac000000-0000-4000-8000-000000000001','sha256:'||repeat('7',64),'["view_map"]',now()+interval '1 day','sha256:'||repeat('8',64),v_actor_id);
     raise exception 'expected promotion receipt refusal';
@@ -83,7 +93,7 @@ begin
     'decision','approved','reviewed_at',to_char(now(),'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     'decision_reason','All required map promotion checks passed.',
     'brief_version','tour-map-brief.v1','canonical_dataset_version','proof-v1','selected_prototype_id','carr-map-tour-v1',
-    'component_registry_version','maplibre-6.1.0','route_version',1,
+    'component_registry_version','maplibre-6.4.1','route_version',1,
     'provider_rights_receipt_ids',jsonb_build_array('a5000000-0000-4000-8000-000000000001'),
     'mobile_test_evidence',jsonb_build_object('status','passed'),'native_navigation_test_evidence',jsonb_build_object('status','passed'),
     'offline_test_evidence',jsonb_build_object('status','passed'),'required_checks',jsonb_build_object(
@@ -96,6 +106,50 @@ begin
   if not ops.tour_public_map_projection_ready('tour-delivery-proof','ac000000-0000-4000-8000-000000000001') then
     raise exception 'approved map promotion did not open readiness';
   end if;
+  nav := ops.read_tour_internal_detail('tour-delivery-proof','a2000000-0000-4000-8000-000000000001',v_actor_id)#>'{routes,0,navigation}';
+  if nav->>'contract_version' is distinct from 'tour-navigation-evidence.v1'
+     or nav->>'status' is distinct from 'ready'
+     or nav#>'{evidence,stops,0,position}' is distinct from '{"latitude":30.421000,"longitude":-87.216000}'::jsonb
+     or nav#>>'{evidence,stops,0,source,source_evidence_id}' is distinct from 'a6000000-0000-4000-8000-000000000001'
+     or nav#>>'{evidence,stops,0,source,coordinate_candidate_id}' is distinct from 'aa000000-0000-4000-8000-000000000001'
+     or nav#>>'{evidence,stops,0,route_stop_id}' is distinct from 'a4000000-0000-4000-8000-000000000001'
+     or nav#>>'{evidence,projection_id}' is distinct from 'ac000000-0000-4000-8000-000000000001'
+     or nav#>>'{evidence,promotion,component_registry_version}' is distinct from 'maplibre-6.4.1'
+     or nav#>>'{evidence,promotion,receipt_digest}' is distinct from 'sha256:'||repeat('9',64)
+     or not exists(select 1 from ops.tour_map_promotion_receipt r where r.id::text=nav#>>'{evidence,promotion,receipt_id}' and r.route_version=(nav#>>'{evidence,route_version}')::integer)
+  then raise exception 'navigation contract lost exact sealed entrance or matching promotion evidence: %',nav; end if;
+  raise notice 'TOUR_NAVIGATION_RECORD:%',nav;
+  if ops.read_tour_internal_detail('wrong-tenant','a2000000-0000-4000-8000-000000000001',v_actor_id) is not null then
+    raise exception 'navigation detail leaked across tenant';
+  end if;
+  begin
+    insert into ops.tour_rights_receipt(organization_tenant_id,provider,policy_key,receipt_version,receipt_digest,terms_url,reviewed_at,reviewer,intended_use,allowed_field_classes,allowed_use_classes,effective_at,status,revoked_at,supersedes_receipt_id)
+    values('tour-delivery-proof','search-proof','search-policy',2,'sha256:'||repeat('f',64),'https://example.invalid/search',now(),'proof','revoked','["*"]','["client_public_display"]',now(),'revoked',now(),'a5000000-0000-4000-8000-000000000001');
+    nav := ops.read_tour_internal_detail('tour-delivery-proof','a2000000-0000-4000-8000-000000000001',v_actor_id)#>'{routes,0,navigation}';
+    if nav->>'reason' is distinct from 'entrance_or_rights_evidence_unavailable' or nav->'evidence' is distinct from 'null'::jsonb then
+      raise exception 'navigation used stale rights: %',nav;
+    end if;
+    raise sqlstate 'ZX001';
+  exception when sqlstate 'ZX001' then null;
+  end;
+  begin
+    update ops.tour set route_version=2 where id='a2000000-0000-4000-8000-000000000001';
+    nav := ops.read_tour_internal_detail('tour-delivery-proof','a2000000-0000-4000-8000-000000000001',v_actor_id)#>'{routes,0,navigation}';
+    if nav->>'reason' is distinct from 'route_replaced' or nav->'evidence' is distinct from 'null'::jsonb then
+      raise exception 'navigation used replaced route: %',nav;
+    end if;
+    raise sqlstate 'ZX001';
+  exception when sqlstate 'ZX001' then null;
+  end;
+  begin
+    update ops.tour set canonical_dataset_version='proof-v2' where id='a2000000-0000-4000-8000-000000000001';
+    nav := ops.read_tour_internal_detail('tour-delivery-proof','a2000000-0000-4000-8000-000000000001',v_actor_id)#>'{routes,0,navigation}';
+    if nav->>'reason' is distinct from 'promotion_stale' or nav->'evidence' is distinct from 'null'::jsonb then
+      raise exception 'navigation used stale promotion dataset: %',nav;
+    end if;
+    raise sqlstate 'ZX001';
+  exception when sqlstate 'ZX001' then null;
+  end;
   v_share:=ops.issue_tour_share_grant('tour-delivery-proof','ac000000-0000-4000-8000-000000000001','sha256:'||repeat('a',64),'["view_map","view_packet"]',now()+interval '1 day','sha256:'||repeat('b',64),v_actor_id);
   perform ops.exchange_tour_share_token('sha256:'||repeat('a',64),'sha256:'||repeat('2',64),now()+interval '1 day','sha256:'||repeat('3',64));
   v_packet:=ops.read_tour_share_packet('sha256:'||repeat('2',64));
@@ -112,6 +166,9 @@ begin
   if v_packet::text like '%Facts only%' then
     raise exception 'read_tour_share_packet leaked the removed hard-coded caveat line';
   end if;
+  if ops.read_tour_share_download('sha256:'||repeat('2',64)) is not null then
+    raise exception 'view permission granted download';
+  end if;
   v_render_packet:=ops.read_tour_packet_for_render('tour-delivery-proof','ac000000-0000-4000-8000-000000000001',v_actor_id);
   if v_render_packet is null or not (v_render_packet->'packet' ? 'caveat')
      or v_render_packet->'packet'->'caveat' is distinct from 'null'::jsonb then
@@ -120,11 +177,98 @@ begin
   if v_render_packet::text like '%Facts only%' then
     raise exception 'read_tour_packet_for_render leaked the removed hard-coded caveat line';
   end if;
+  declare
+    grant_id uuid; render_id uuid; result_id uuid; sd text; td text;
+    scopes jsonb; feedback jsonb; state text; n integer:=0; projection_ref text; property_ref text;
+  begin
+    insert into ops.tour_pdf_render_job(organization_tenant_id,projection_id,requested_by_actor_id,request,
+      projection_digest,packet_digest,template_digest,renderer_digest,qc_ruleset_digest,expected_property_count)
+    values('tour-delivery-proof','ac000000-0000-4000-8000-000000000001',v_actor_id,'{}',
+      v_digest,'sha256:'||repeat('1',64),'sha256:'||repeat('2',64),'sha256:'||repeat('3',64),'sha256:'||repeat('4',64),2)
+    returning id into render_id;
+    result_id:=ops.record_tour_pdf_render_result('tour-delivery-proof',render_id,'review_ready',
+      'artifact:tour-pdf:abcdefghijklmnop','sha256:'||repeat('5',64),
+      'tour-pdf/tour-delivery-proof/'||render_id||'/'||repeat('5',64)||'.pdf',100,3,0,'sha256:'||repeat('6',64),v_actor_id);
+    perform ops.record_tour_pdf_human_review('tour-delivery-proof',render_id,'sha256:'||repeat('6',64),
+      'accept',now(),'sha256:'||repeat('7',64),'Reviewed synthetic packet',v_actor_id);
+    projection_ref:='projection:public:'||substr(encode(public.digest('tour-delivery-proof:ac000000-0000-4000-8000-000000000001:'||v_digest,'sha256'),'hex'),1,32);
+    property_ref:='property:public:'||substr(encode(public.digest('tour-delivery-proof:ac000000-0000-4000-8000-000000000001:a1000000-0000-4000-8000-000000000001','sha256'),'hex'),1,32);
+    for scopes in select value from jsonb_array_elements('[[],["view_packet"],["download"],["view_packet","shortlist"],["view_packet","comment"],["view_packet","shortlist","comment","download"]]'::jsonb)
+    loop
+      for state in select unnest(array['active','expired','revoked','session_expired']) loop
+       begin
+        n:=n+1;
+        sd:='sha256:'||encode(public.digest('session-'||n,'sha256'),'hex');
+        td:='sha256:'||encode(public.digest('token-'||n,'sha256'),'hex');
+        -- Empty capability uses map-only access to test all four refusals.
+        insert into ops.tour_share_grant(organization_tenant_id,projection_id,grant_version,token_digest,audience,
+          permission_scopes,expires_at,status,receipt_digest,created_by_actor_id,rotated_from_grant_id,created_at)
+        values('tour-delivery-proof','ac000000-0000-4000-8000-000000000001',2,td,'client',
+          case when scopes='[]' then '["view_map"]'::jsonb else scopes end,
+          case when state='expired' then now()-interval '1 second' else now()+interval '1 day' end,'active','sha256:'||repeat('8',64),v_actor_id,v_share,now()-interval '2 days') returning id into grant_id;
+        perform ops.exchange_tour_share_token(td,sd,now()+interval '1 hour','sha256:'||repeat('9',64));
+        if state='revoked' then
+          perform ops.revoke_tour_share_grant('tour-delivery-proof',grant_id,'Synthetic revocation','sha256:'||repeat('0',64),now(),v_actor_id);
+        elsif state='expired' then
+          -- An existing, unexpired session still refuses when its grant has expired.
+          insert into ops.tour_share_session(organization_tenant_id,share_grant_id,session_digest,permission_scopes,expires_at,audit_digest)
+          values('tour-delivery-proof',grant_id,'sha256:'||encode(public.digest('expired-'||n,'sha256'),'hex'),
+            case when scopes='[]' then '["view_map"]'::jsonb else scopes end,now()+interval '1 hour','sha256:'||repeat('9',64));
+          sd:='sha256:'||encode(public.digest('expired-'||n,'sha256'),'hex');
+        end if;
+        if state='session_expired' then
+          sd:='sha256:'||encode(public.digest('expired-session-'||n,'sha256'),'hex');
+          insert into ops.tour_share_session(organization_tenant_id,share_grant_id,session_digest,permission_scopes,expires_at,audit_digest,created_at)
+          values('tour-delivery-proof',grant_id,sd,case when scopes='[]' then '["view_map"]'::jsonb else scopes end,
+            now()-interval '1 second','sha256:'||encode(public.digest('expired-session-audit-'||n,'sha256'),'hex'),now()-interval '1 day');
+        end if;
+        if state in ('expired','revoked') and ops.exchange_tour_share_token(td,
+          'sha256:'||encode(public.digest('reexchange-'||n,'sha256'),'hex'),now()+interval '1 hour','sha256:'||repeat('9',64)) is not null then
+          raise exception 'inactive link exchanged a new session %',state;
+        end if;
+        if (ops.read_tour_share_packet(sd) is not null) is distinct from (state='active' and scopes ? 'view_packet') then
+          raise exception 'view permission matrix failed % %',scopes,state;
+        end if;
+        if (ops.read_tour_share_download(sd) is not null) is distinct from (state='active' and scopes ? 'download') then
+          raise exception 'download permission matrix failed % %',scopes,state;
+        end if;
+        if (ops.write_tour_share_shortlist(sd,projection_ref,property_ref,true,gen_random_uuid()) is not null)
+          is distinct from (state='active' and scopes ? 'shortlist') then
+          raise exception 'shortlist permission matrix failed % %',scopes,state;
+        end if;
+        if (ops.write_tour_share_comment(sd,projection_ref,property_ref,'Synthetic comment',gen_random_uuid()) is not null)
+          is distinct from (state='active' and scopes ? 'comment') then
+          raise exception 'comment permission matrix failed % %',scopes,state;
+        end if;
+        feedback:=ops.read_tour_share_feedback(sd);
+        if (feedback is not null) is distinct from (state='active' and (scopes ? 'shortlist' or scopes ? 'comment')) then
+          raise exception 'feedback permission matrix failed % %',scopes,state;
+        end if;
+        if feedback is not null and feedback->'permission_scopes' is distinct from scopes then
+          raise exception 'feedback lost live session scopes % %',scopes,feedback;
+        end if;
+        if state='active' and scopes ? 'download' and feedback is not null then
+          sd:='sha256:'||encode(public.digest('narrow-session-'||n,'sha256'),'hex');
+          insert into ops.tour_share_session(organization_tenant_id,share_grant_id,session_digest,permission_scopes,expires_at,audit_digest)
+          values('tour-delivery-proof',grant_id,sd,scopes-'download',now()+interval '1 hour',
+            'sha256:'||encode(public.digest('narrow-session-audit-'||n,'sha256'),'hex'));
+          feedback:=ops.read_tour_share_feedback(sd);
+          if feedback is null or feedback->'permission_scopes' is distinct from (scopes-'download')
+             or ops.read_tour_share_download(sd) is not null then
+            raise exception 'narrow session inherited download from grant %',feedback;
+          end if;
+        end if;
+        raise sqlstate 'Z0001';
+       exception when sqlstate 'Z0001' then null;
+       end;
+      end loop;
+    end loop;
+  end;
   perform ops.record_tour_map_promotion_receipt('tour-delivery-proof','ac000000-0000-4000-8000-000000000001',jsonb_build_object(
     'decision','rejected','reviewed_at',to_char(now()-interval '1 year','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     'decision_reason','Mobile, native-navigation, and offline evidence failed.',
     'brief_version','tour-map-brief.v1','canonical_dataset_version','proof-v1','selected_prototype_id','carr-map-tour-v1',
-    'component_registry_version','maplibre-6.1.0','route_version',1,
+    'component_registry_version','maplibre-6.4.1','route_version',1,
     'provider_rights_receipt_ids',jsonb_build_array('a5000000-0000-4000-8000-000000000001'),
     'mobile_test_evidence',jsonb_build_object('status','failed'),'native_navigation_test_evidence',jsonb_build_object('status','failed'),
     'offline_test_evidence',jsonb_build_object('status','failed'),'required_checks',jsonb_build_object(
@@ -136,6 +280,10 @@ begin
       'provider_terms_attribution_expiry_and_cost_gate_passed',true),'receipt_digest','sha256:'||repeat('c',64)),v_actor_id);
   if ops.tour_public_map_projection_ready('tour-delivery-proof','ac000000-0000-4000-8000-000000000001') then
     raise exception 'later appended backdated rejection did not close readiness';
+  end if;
+  nav := ops.read_tour_internal_detail('tour-delivery-proof','a2000000-0000-4000-8000-000000000001',v_actor_id)#>'{routes,0,navigation}';
+  if nav->>'reason' is distinct from 'promotion_rejected' or nav->'evidence' is distinct from 'null'::jsonb then
+    raise exception 'navigation ignored newer backdated rejection: %',nav;
   end if;
   begin
     perform ops.rotate_tour_share_grant('tour-delivery-proof',v_share,'ac000000-0000-4000-8000-000000000001','sha256:'||repeat('d',64),'["view_map"]',now()+interval '1 day','sha256:'||repeat('e',64),v_actor_id);
@@ -231,14 +379,23 @@ declare
   v_result uuid;
 begin
   v_result:=ops.record_tour_pdf_render_result('tour-pdf-storage-ref-proof','ab000000-0000-4000-8000-000000000001','review_ready',
-    'artifact:tour-pdf:ab000000000040008000000000000001','sha256:'||repeat('7',64),v_ref,12345,1,0,'sha256:'||repeat('8',64),
+    'artifact:tour-pdf:ab000000000040008000000000000001','sha256:'||repeat('7',64),v_ref,12345,2,0,'sha256:'||repeat('8',64),
     'actor:ab000000-0000-4000-8000-0000000000aa');
   if v_result is null then raise exception 'valid storage_ref returned no render result'; end if;
   begin
     perform ops.record_tour_pdf_render_result('tour-pdf-storage-ref-proof','ab000000-0000-4000-8000-000000000002','review_ready',
+      'artifact:tour-pdf:ab000000000040008000000000000002','sha256:'||repeat('7',64),v_ref,12345,1,0,'sha256:'||repeat('8',64),
+      'actor:ab000000-0000-4000-8000-0000000000aa');
+    raise exception 'packet without overview was accepted';
+  exception when raise_exception then
+    if sqlerrm='packet without overview was accepted' then raise; end if;
+  end;
+
+  begin
+    perform ops.record_tour_pdf_render_result('tour-pdf-storage-ref-proof','ab000000-0000-4000-8000-000000000002','review_ready',
       'artifact:tour-pdf:ab000000000040008000000000000002','sha256:'||repeat('7',64),
       'tour-pdf/tour-pdf-storage-ref-proof/ab000000-0000-4000-8000-000000000002/'||repeat('a',400)||'.pdf',
-      12345,1,0,'sha256:'||repeat('8',64),'actor:ab000000-0000-4000-8000-0000000000aa');
+      12345,2,0,'sha256:'||repeat('8',64),'actor:ab000000-0000-4000-8000-0000000000aa');
     raise exception 'over-length storage_ref was accepted';
   exception when raise_exception then
     if sqlerrm='over-length storage_ref was accepted' then raise; end if;

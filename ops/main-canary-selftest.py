@@ -8,7 +8,7 @@ import pathlib
 import re
 import sys
 
-from ci_unit_shards import COUNT
+from ci_unit_shards import plan
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 CANARY = REPO / ".github" / "workflows" / "main-canary.yml"
@@ -81,15 +81,16 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
           and main_names['migration_shard_2'] == {
               'name': 'ops/ci.sh --strict --only migration --migration-part fixtures', 'classes': 'migration'})
     check('main fallback and CI share the MCP shard workflow and coverage gate; both run practice-plugin separately',
-          workflow(REPO / '.github/workflows/unit-shards.yml')['jobs']['unit']['strategy']['matrix']['shard'] == list(range(1, COUNT + 1))
-          and pr['jobs']['unit-coverage']['needs'] == ['select', 'unit']
-          and 'unit-coverage' in pr['jobs']['checks']['needs']
+          workflow(REPO / '.github/workflows/unit-shards.yml')['jobs']['unit']['strategy']['matrix'] == '${{ fromJSON(needs.plan.outputs.matrix) }}'
+          and len(plan()) > 0
+          and 'unit' in pr['jobs']['checks']['needs']
           and any('--unit-part practice' in step.get('run', '') for step in pr['jobs']['classes']['steps'])
           and any('--unit-part practice' in step.get('run', '') for step in classes['steps'])
           and main['jobs']['unit']['uses'] == pr['jobs']['unit']['uses'] == './.github/workflows/unit-shards.yml'
           and main['jobs']['unit']['if'] == classes['if']
           and main['jobs']['unit-coverage']['needs'] == ['evidence', 'unit']
-          and main['jobs']['unit-coverage']['steps'] == pr['jobs']['unit-coverage']['steps'])
+          and all(any(st.get('run') == proof.get('run') for st in pr['jobs']['checks']['steps'])
+                  for proof in main['jobs']['unit-coverage']['steps'] if 'run' in proof))
     check('all classes run unless exact-tree proof succeeded',
           classes.get('if') == "${{ always() && (needs.evidence.result != 'success' || needs.evidence.outputs.reused != 'true') }}")
     main_steps = classes['steps']
@@ -99,12 +100,29 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
               for steps in (main_steps, pr_steps))
           and any(st.get('if') == "matrix.classes == 'gates' && matrix.gate_shard == 1"
                   and st.get('run') == 'python3 test/ci-noise-incident-test.py' for st in main_steps))
-    check('main splits migration into core and fixtures, which together are all',
-          any('ops/ci.sh --strict --only migration --migration-part "${{ matrix.gate_shard == 1 && \'core\' || \'fixtures\' }}"'
-              in st.get('run', '') for st in main_steps)
-          and any('--migration-part proofs' in st.get('run', '') for st in pr_steps)
+    dispatch = next(st['run'] for st in main_steps if st.get('name') == "Run this group's check classes")
+    import shlex
+    for shard, expected in [(1, ['python', 'ops/local-pg-ci.py', '--class', 'migration', '--migration-part', 'core']),
+                            (2, ['ops/ci.sh', '--strict', '--only', 'migration', '--migration-part', 'fixtures'])]:
+        command = dispatch.replace('${{ matrix.classes }}', 'migration').replace('${{ matrix.gate_shard }}', str(shard))
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / 'ops').mkdir()
+            recorder = '#!/bin/bash\nprintf "%s\\n" "$0 $*" >> "$RECORD"\n'
+            for name in ['python', 'ops/ci.sh']:
+                target = root / name
+                target.write_text(recorder)
+                target.chmod(0o755)
+            record = root / 'record'
+            result = subprocess.run(['bash', '-e', '-c', command], cwd=root, capture_output=True, text=True,
+                                    env={**os.environ, 'PATH': str(root) + os.pathsep + os.environ['PATH'], 'RECORD': str(record)}, timeout=10)
+            lines = record.read_text().splitlines() if record.exists() else []
+            actual = [shlex.split(line.replace(str(root) + '/', '')) for line in lines]
+            check(f'main migration shard {shard} dispatches exactly its owned proof', result.returncode == 0 and actual == [expected], result.stderr or str(actual))
+    check('PR migration keeps proofs plus all independent fixture partitions',
+          any('--migration-part proofs' in st.get('run', '') for st in pr_steps)
           and set(pr['jobs']['migration-fixtures']['strategy']['matrix']['part'])
-          == {'reconstruction', 'equivalence', 'shadow', 'gates', 'acceptance'})
+          == {'fixtures', 'gates', 'acceptance'})
     check('main retains its service and PR limits the shared fixture to unit checks',
           classes['services']['postgres']['image'] in pr['jobs']['classes']['services']['postgres']['image']
           and "contains(matrix.classes, 'unit')" in pr['jobs']['classes']['services']['postgres']['image'])

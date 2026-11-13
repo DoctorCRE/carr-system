@@ -1306,10 +1306,18 @@ def _fetch_destination_refusal(path):
     return None
 
 
+PROOF_BROWSER_DISCOVERY = frozenset({
+    'http://127.0.0.1:9333/json/list',
+    'http://127.0.0.1:9333/json/version',
+})
+
+
 def _fetch_url_refusal(word):
     """None if one fetch operand is an http(s) URL the open-read policy accepts
     (or an allowlisted host), else why not."""
     url = word if "://" in word else f"http://{word}"
+    if word in PROOF_BROWSER_DISCOVERY:
+        return None
     if not re.match(r"https?://", url, re.I):
         return f"{word.split('://')[0]}:// is not an http(s) read"
     if host_allowlisted(url_host(url)):
@@ -1397,6 +1405,13 @@ def _fetch_grammar_refusal(tool, words):
         why = _fetch_url_refusal(url)
         if why:
             return why
+    if any(url in PROOF_BROWSER_DISCOVERY for url in urls):
+        # Discovery never follows redirects to a browser control endpoint.
+        if tool != 'curl' or any(
+                word in {'--location'} or (
+                    word.startswith('-') and not word.startswith('--') and 'L' in word)
+                for word in words):
+            return 'proof browser discovery requires curl without redirects'
     # A name taken from the URL (curl -O, wget without -O) is relative to a
     # working directory the guard does not follow: refused outright.
     if remote_name:
@@ -1509,7 +1524,7 @@ def read_only_fetch_refusal(cmd):
     for url in urls_in(cmd):
         if host_allowlisted(url_host(url)):
             continue
-        why = webfetch_open_read_reason(url)
+        why = _fetch_url_refusal(url)
         if why:
             return why.replace("WebFetch ", "the fetch ").split(" — blocked")[0]
     return None

@@ -1,5 +1,5 @@
 // Test fact store promotion, isolation, and grants on PostgreSQL.
-import { readMigration } from './migration-source.testhelper.mjs';
+import { readMigration } from './migration-source.testhelper.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -68,7 +68,7 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
     await c.query('alter table tool_call add primary key(idempotency_key)');
     await c.query('create schema ops; create role carr_reader; create role carr_writer; create role carr_authority; create role dot_reader; grant usage on schema ops to dot_reader; alter default privileges in schema ops grant select on tables to dot_reader');
     // The snapshot's contract without the fact-store definers is the predecessor these migrations extend.
-    const snapshot = JSON.parse(schema.match(/FUNCTION ops\.scac_current_grant_contract\(\) RETURNS jsonb[\s\S]*?AS \$\$SELECT '((?:[^']|'')*)'::jsonb\$\$;/)[1].replaceAll("''", "'"));
+    const snapshot = JSON.parse(schema.match(/FUNCTION ops\.scac_current_grant_contract\(\) RETURNS jsonb[\s\S]*?AS \$\$SELECT '((?:[^']|'')*)'::jsonb\$\$;/i)[1].replaceAll("''", "'"));
     const predecessor = { ...snapshot, secdef_execute: snapshot.secdef_execute.filter(g => !FACT_FUNCTIONS.test(g.signature)) };
     await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as $f$select ${c.escapeLiteral(JSON.stringify(predecessor))}::jsonb$f$`);
     await c.query(await readFile(new URL('../../migrations/0983_fact_store.sql', import.meta.url), 'utf8'));

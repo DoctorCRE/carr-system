@@ -10,6 +10,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / 'tools/prove-prospect-research-future-evidence.py'
+READ_CAP_SECONDS = json.loads((ROOT / 'ops/config/ci-execution-budgets.json').read_text())[
+    'prospect_research_proof_measurement']['read_cap_seconds']
 LEAD = '00000000-0000-4000-8000-000000000001'
 FINDING = {'kind': 'verified', 'found': True, 'expired': False, 'proposes_correction': False,
            'source': 'https://example.test/synthetic', 'observed_at': '2000-01-01T00:00:00Z'}
@@ -34,7 +36,7 @@ def stub():
 class ProofCliTests(unittest.TestCase):
     def run_cli(self, *args):
         return subprocess.run([sys.executable, str(RUNNER), *args], cwd=ROOT, text=True,
-                              capture_output=True, timeout=10)
+                              capture_output=True, timeout=READ_CAP_SECONDS + 5)
 
     def scenario(self, research=None, board=None, release=None, failure=False, delay=0, flags=()):
         with tempfile.TemporaryDirectory(prefix='research-proof-') as directory:
@@ -96,7 +98,7 @@ class ProofCliTests(unittest.TestCase):
 
     def test_read_cap_and_budgets(self):
         board = {'leads': [{'id': f'00000000-0000-4000-8000-{i:012d}'} for i in range(25)]}
-        result = self.scenario(board=board)
+        result = self.scenario(board=board, flags=('--timeout-seconds', str(READ_CAP_SECONDS)))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('records=20', result.stdout)
         self.assertIn('reads=21', result.stdout)

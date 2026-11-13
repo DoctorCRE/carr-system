@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "pretest": "npm run build",
-    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs test/*.test.ts",
     "build": "node build-ui.mjs && WRANGLER_SEND_METRICS=false wrangler deploy --dry-run --outdir .build",
-    "dev": "node build-ui.mjs && wrangler dev --local --ip 127.0.0.1"
+    "dev": "node build-ui.mjs && wrangler dev --local --ip 127.0.0.1",
+    "check": "npm --prefix ../mcp-server run check:staged"
   },
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "1.7.5",
@@ -26,5 +27,8 @@
   "overrides": {
     "ip-address": "10.7.4",
     "zod": "$zod"
+  },
+  "engines": {
+    "node": ">=26"
   }
 }

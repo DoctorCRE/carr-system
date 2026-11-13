@@ -2,7 +2,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { dispatch } from "./helpers/budgeted-dispatch.mjs";
-import { ToolError, coerceArgsToSchema, pgConstraintError, TOOLS } from "../src/tools.js";
+import { coerceArgsToSchema } from "../src/input-validation.ts";
+import { ToolError, TOOLS } from "../src/tools.js";
+import { pgConstraintError } from "../src/constraint-errors.ts";
 import { publicError } from "../src/public-errors.ts";
 import { Pool } from "@neondatabase/serverless";
 
@@ -61,6 +63,11 @@ for (const [code, extra] of [
   ["not_found", {}], ["doctrine_doc_not_found", { ref: privateText }], ["unauthorized", {}], ["loop_not_open", {}], ["action_not_open", {}], ["critical_date_not_open", {}],
   ["value_not_in_declared_vocabulary", { field: "filter" }],
   ["AUTHORIZATION_REFUSED", {}], ["vendor_meetings_query_invalid", {}], ["vendor_meetings_unavailable", {}],
+  ["space_search_unavailable", {}], ["space_search_input_invalid", {}],
+  ["space_search_response_invalid", {}], ["space_search_prefill_mismatch", {}],
+  ["space_search_version_conflict", {}], ["space_search_not_runnable", {}],
+  ["space_search_run_unavailable", {}],
+  ["tour_input_invalid", { field: "query" }], ["tour_search_range_invalid", {}],
   ["tour_share_scope_invalid", {}], ["personal_doc_not_owner", {}], ["personal_loop_not_owner", {}],
   ["work_request_not_found", {}], ["work_request_terminal_state", {}], ["work_request_not_completable", {}],
   ["invalid_completion", {}], ["missing_criterion_evidence", {}], ["missing_change_ref", {}],
@@ -132,9 +139,12 @@ test("MCP read-doctrine names a missing document through the real reader path", 
   t.mock.method(console, "error", () => {});
   const previous = neonConfig.fetchFunction;
   t.after(() => { neonConfig.fetchFunction = previous; });
-  neonConfig.fetchFunction = async () => Response.json({
-    fields: [], rows: [], rowCount: 0, command: "SELECT", rowAsArray: true,
-  });
+  neonConfig.fetchFunction = async (_url, options) => {
+    const identity = JSON.parse(options.body).query.includes('from public.actor where slug=');
+    return Response.json({ fields: identity ? [{name:'id',dataTypeID:25}] : [],
+      rows: identity ? [['00000000-0000-4000-8000-000000000001']] : [],
+      rowCount: identity ? 1 : 0, command: 'SELECT', rowAsArray: true });
+  };
   const request = new Request("https://synthetic.example/mcp", { method: "POST",
     body: JSON.stringify({ jsonrpc: "2.0", id: 31, method: "tools/call", params: {
       name: "read-doctrine", arguments: { document: "synthetic-missing-refinement-plan" },
@@ -460,4 +470,13 @@ test("loop input refusals preserve their names and safe hints", t => {
       { env: { CORRELATION_ID: correlationId } });
     assert.deepEqual(payload, { error: code, correlation_id: correlationId, hint });
   }
+});
+
+
+test('document not-found exposes its type without internal document identifiers', t => {
+  t.mock.method(console, 'error', () => {});
+  const value = publicError(new ToolError({ error: 'document_not_found', document_id: privateText }),
+    { env: { CORRELATION_ID: correlationId } });
+  assert.deepEqual(value, { error: 'document_not_found', correlation_id: correlationId,
+    hint: 'The document is unavailable in the current scope.' });
 });

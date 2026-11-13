@@ -2,6 +2,12 @@
   "schema": "leak-guard-allowlist.v1",
   "entries": [
     {
+      "path": "db/migration-history.zip",
+      "sha256": "82efe62f515483caecc3f66a25e6166df532d49d3ad42367edcc3b6316a486df",
+      "rule": "opaque-binary",
+      "reason": "WR622.S1.J706 deterministic historical SQL archive. All 26 members are byte-identical to blobs in upstream ancestor 3639d54c418841ba15414f1ab1c9d91d57c999c3. The immutable migration manifest verifies all 559 identities and the raw historical snapshot hash; complete archive verification and exact-path/hash leak-guard qualification run in CI. This admits only these reviewed bytes and this path, not changed archives or new data."
+    },
+    {
       "path": "security/fixtures/synthetic-contact.json",
       "sha256": "1f73e855f4b964ccb0355c72ef214a9ae9d06e6bb69b7ab045fec904578e03e6",
       "rule": "pii-phone",
@@ -318,8 +324,8 @@
       "reason": "Historical research-helper README at 2b1643b8 names the operator-designated TEST mailbox, not a client contact or credential. The literal is removed from the current README; this exception binds only these exact historical documentation bytes."
     },
     {
-      "path": "mcp-server/test/party-duplicate-candidates.test.mjs",
-      "sha256": "eced5c16210169cc35c67ec55753bfb08447bb978a18296898156653766cc8f2",
+      "path": "mcp-server/test/party-duplicate-candidates.test.ts",
+      "sha256": "b200266be1f33f085e7588952bd00f938f80e2c6adfe18ff34dab3e277aaffd0",
       "rule": "pii-phone",
       "reason": "Synthetic duplicate-candidate reader tests use invented 202-555-01xx phone values to prove normalization, nonmatches and paging. No record-layer data or live contact is used. Qualification binds only these exact fixture bytes and the phone detector, including the preserved original PR commit."
     },
@@ -624,7 +630,7 @@
       "reason": "Historical synthetic UUID idempotency fixture introduced by 9067df46 in PR #2607, replaced in 3e3c9dcd by patterned UUIDs. Pushed history is retained without force-push. Qualification binds only this path, these exact historical file bytes and this detector."
     },
     {
-      "path": "mcp-server/test/situation-retrieval-bigint.test.mjs",
+      "path": "mcp-server/test/situation-retrieval-bigint.test.ts",
       "sha256": "e90b22671c9e1286da3979d67850fd9c05b554dbf6d690233013feb7b553f210",
       "rule": "generic-api-key",
       "reason": "Historical synthetic UUID idempotency fixture introduced by 9067df46 in PR #2607, replaced in 3e3c9dcd by patterned UUIDs. Pushed history is retained without force-push. Qualification binds only this path, these exact historical file bytes and this detector."
@@ -859,6 +865,200 @@
       "sha256": "8bc3e984ac8784aca89f96a1d3702e6e974695cfdf2eeed3ca48562adebc7cbb",
       "rule": "credential-url",
       "reason": "Historical synthetic recorder-stderr fixture used the literal private:credential at invalid, never a live credential. The current test uses private-data canaries. Exact historical blob retained to preserve no-rebase delivery history."
+    },
+    {
+      "path": "docs/engineering/identity-proof-deadline-design.md",
+      "sha256": "72a1a975b101e278ba02d28f79b71dfbe7b6af742919e6d64dd9d6cfa87f2803",
+      "rule": "pii-phone",
+      "reason": "The decimal POSIX specification version in public Open Group documentation URLs is not a telephone number. Exact design-note blob only."
+    },
+    {
+      "path": "mcp-server/src/party-identity.ts",
+      "sha256": "b6e0b94866100e8893a95e26bb5c6a28d7b4fa007604a1dcff72e87731596f07",
+      "rule": "pii-phone",
+      "reason": "rule 54e2bcb9 firm placeholder line"
+    },
+    {
+      "path": "mcp-server/test/correct-party-identity.test.ts",
+      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
+      "rule": "pii-phone",
+      "reason": "Historical pre-correction test blob only. Covers ten phone findings in that immutable blob; no exception applies to the current fixture. Retained for no-rebase history scanning."
+    },
+    {
+      "path": "mcp-server/test/correct-party-identity.test.ts",
+      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
+      "rule": "pii-address",
+      "reason": "Historical synthetic identity fixture; exact immutable blob only."
+    },
+    {
+      "path": "mcp-server/test/correct-party-identity.test.ts",
+      "sha256": "48db221102eb85ac77bfabfca774f4fbe0bbd3923a31aea01422ea0b503f0bc4",
+      "rule": "pii-address",
+      "reason": "Synthetic identity fixture literals; exact current blob only."
+    },
+    {
+      "path": "mcp-server/test/correct-party-identity.test.ts",
+      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
+      "rule": "pii-email",
+      "reason": "Historical synthetic identity fixture; exact immutable blob only."
+    },
+    {
+      "path": "mcp-server/test/correct-party-identity.test.ts",
+      "sha256": "48db221102eb85ac77bfabfca774f4fbe0bbd3923a31aea01422ea0b503f0bc4",
+      "rule": "pii-email",
+      "reason": "Synthetic identity fixture literals; exact current blob only."
+    },
+    {
+      "path": "mcp-server/test/research-sites.test.ts",
+      "sha256": "788d522de1676a233fe82f649bbc18abfad6f73a9d5f7d1082de7fe4c2f3ee2f",
+      "rule": "pii-email",
+      "reason": "WR622.S1.J590. The four inherited synthetic invalid-host and credential-refusal fixtures use generic usernames and reserved example domains, not contact identities. Historical reviewed blob retained because range scans inspect every commit. Exact blob only."
+    },
+    {
+      "path": "mcp-server/test/research-sites.test.ts",
+      "sha256": "788d522de1676a233fe82f649bbc18abfad6f73a9d5f7d1082de7fe4c2f3ee2f",
+      "rule": "credential-url",
+      "reason": "WR622.S1.J590. The inherited rejected credential URL uses an explicitly synthetic password on a reserved example domain, not a live credential. Historical reviewed blob retained because range scans inspect every commit. Exact blob only."
+    },
+    {
+      "path": "mcp-server/src/tour-client-value-safety.ts",
+      "sha256": "325899c98223fe9418c1eea39454c850a271f3f01844721b9a2e7c82f985e609",
+      "rule": "pii-phone",
+      "reason": "Pre-existing validator comment examples of reserved NANP exchange 555 subscriber 0100 digits, including spaced and country-code forms, renamed from .js to strict .ts; no record-layer data."
+    },
+    {
+      "path": "mcp-server/src/tour-client-value-safety.ts",
+      "sha256": "325899c98223fe9418c1eea39454c850a271f3f01844721b9a2e7c82f985e609",
+      "rule": "pii-address",
+      "reason": "Pre-existing validator comment examples of synthetic gate, key and compass-word street-address phrases illustrate refusal grammar, not property records; renamed from .js to strict .ts; no record-layer data."
+    },
+    {
+      "path": "mcp-server/test/tour-client-share-allowlist.test.ts",
+      "sha256": "c1a1ab8f8f3989fb49b6ed76e4b1e2499440f5024f6f14dc896352f9355636ee",
+      "rule": "pii-phone",
+      "reason": "Pre-existing hardcoded negative-test sentinels use reserved NANP exchange 555 subscriber 0100, including Unicode spacing, to prove client projections refuse contact leakage; renamed from .mjs to strict .ts; no record-layer data."
+    },
+    {
+      "path": "mcp-server/test/tour-client-share-allowlist.test.ts",
+      "sha256": "c1a1ab8f8f3989fb49b6ed76e4b1e2499440f5024f6f14dc896352f9355636ee",
+      "rule": "pii-address",
+      "reason": "Pre-existing hardcoded synthetic Medical Plaza and Bayside Medical Plaza street-address fixtures test client field projections; renamed from .mjs to strict .ts; no record-layer data."
+    },
+    {
+      "path": "audits/decoder-build-ownership.md",
+      "sha256": "459315bb50ffe93175763cda5c5207d2e6465e777b796769c7f012196061f37e",
+      "rule": "pii-phone",
+      "reason": "The digits are the official POSIX documentation edition identifier in the cited Open Group rename URL, not a phone number. Exact document hash only. WR622.S1.J602."
+    },
+    {
+      "path": "mcp-server/test/tour-client-share-allowlist.test.ts",
+      "sha256": "536566bb4b2adc13e78fd3535a9170196008fcc6a137cac1c65bb2e0106f5283",
+      "rule": "pii-phone",
+      "reason": "Pre-existing hardcoded negative-test sentinels use reserved NANP exchange 555 subscriber 0100, including Unicode spacing, to prove client projections refuse contact leakage; renamed from .mjs to strict .ts; no record-layer data. Merge-main WR622.S1.J676 changes only the migration-helper import and asserts the regex capture before use; fixture literals remain identical."
+    },
+    {
+      "path": "mcp-server/test/tour-client-share-allowlist.test.ts",
+      "sha256": "536566bb4b2adc13e78fd3535a9170196008fcc6a137cac1c65bb2e0106f5283",
+      "rule": "pii-address",
+      "reason": "Pre-existing hardcoded synthetic Medical Plaza and Bayside Medical Plaza street-address fixtures test client field projections; renamed from .mjs to strict .ts; no record-layer data. Merge-main WR622.S1.J676 changes only the migration-helper import and asserts the regex capture before use; fixture literals remain identical."
+    },
+    {
+      "path": "mcp-server/test/fixtures/tour-client-text-adversarial.ts",
+      "sha256": "75fb2437bb6f41e233716def2b1ef423a34798e2b13a2c4701a230b7bb313e46",
+      "rule": "client-data",
+      "reason": "WR622.S1.J597: unchanged synthetic adversarial listing/phone corpus from origin/main; all literal and generated exports compared equal before the TypeScript rename.",
+      "value_sha256": "b5d8dfb4d92c397df16cda0399e543925f248f2e1172876a39bd40d4812dc1ab"
+    },
+    {
+      "path": "mcp-server/test/fixtures/tour-client-text-adversarial.ts",
+      "sha256": "75fb2437bb6f41e233716def2b1ef423a34798e2b13a2c4701a230b7bb313e46",
+      "rule": "client-data",
+      "reason": "WR622.S1.J597: unchanged synthetic adversarial listing/phone corpus from origin/main; all literal and generated exports compared equal before the TypeScript rename.",
+      "value_sha256": "c6b1b5e785e7be1532f19d67b9aad326aa2ecba6a5a73a4843087d8df5b83333"
+    },
+    {
+      "path": "mcp-server/test/fixtures/tour-client-text-adversarial.ts",
+      "sha256": "75fb2437bb6f41e233716def2b1ef423a34798e2b13a2c4701a230b7bb313e46",
+      "rule": "pii-address",
+      "reason": "WR622.S1.J597: unchanged synthetic adversarial listing/phone corpus from origin/main; all literal and generated exports compared equal before the TypeScript rename."
+    },
+    {
+      "path": "mcp-server/test/fixtures/tour-client-text-adversarial.ts",
+      "sha256": "75fb2437bb6f41e233716def2b1ef423a34798e2b13a2c4701a230b7bb313e46",
+      "rule": "pii-phone",
+      "reason": "WR622.S1.J597: unchanged synthetic adversarial listing/phone corpus from origin/main; all literal and generated exports compared equal before the TypeScript rename."
+    },
+    {
+      "path": "mcp-server/test/error-unmasking.test.ts",
+      "sha256": "5e2b7fa8838b4eab72867587c87cb5e3237942d5f79f0e7753bbb085d0c1c935",
+      "rule": "credential-url",
+      "reason": "Synthetic redaction-test URL with an invented password, never a live credential. Exact renamed TypeScript fixture blob only."
+    },
+    {
+      "path": "mcp-server/test/tour-client-share-allowlist-postgres.sql",
+      "sha256": "20481086f3790510460c8e00cf471ba5df4b181175ec3cf718c4f1d04eeef01d",
+      "rule": "pii-phone",
+      "reason": "WR591.S23.J4 reviewed synthetic disposable tour proof. Invented 555 phone canaries verify internal contact exclusion; no production record data."
+    },
+    {
+      "path": "mcp-server/test/tour-packet-parity.test.ts",
+      "sha256": "31cbca7b1912ff7cb7227046f0bea2bf81c4eb811a3a8a4b6b9a7ad2757ca05d",
+      "rule": "pii-address",
+      "reason": "WR591.S23.J4 reviewed synthetic PDF fixture. Example Street is invented and verifies deterministic public packet rendering; no production record data."
+    },
+    {
+      "path": "ops/fixtures/tour-navigation-detail.json",
+      "sha256": "a51d1a31983078234a2a65c2abc3037eaf148994fb292607f7a824bdc936f6e9",
+      "rule": "pii-address",
+      "reason": "Recorded disposable Tour delivery fixture. The two synthetic addresses originate in mcp-server/test/tour-delivery-data-plane-postgres.sql; no production records are read. This allowance binds only this path and these exact bytes."
+    },
+    {
+      "path": "mcp-server/test/tour-coordinate-review.test.ts",
+      "sha256": "59dcf1690daf37a0ddd45410bab2f6a696d0f172caaae2b77d440687e1206fe0",
+      "rule": "pii-address",
+      "reason": "WR591.S17.J1 disposable coordinate-review test. The invented address is asserted against the existing synthetic Tour delivery SQL fixture; no production records are read. Exact path and immutable bytes only."
+    },
+    {
+      "path": "mcp-server/src/deal-space-searches.ts",
+      "sha256": "22b0e46dc80d42fb384a0919933e38159f9f321b85fc9b9bbf624d2d9912d67c",
+      "rule": "pii-phone",
+      "reason": "WR591.S18.J30 historical source contains public PostgreSQL integer boundary constants, not contact data. Exact path and blob identity only. Current source groups those constants with numeric separators."
+    },
+    {
+      "path": "mcp-server/test/deal-space-searches.test.ts",
+      "sha256": "c920fbcaaeceb04eeaa18b0e8a5bfab5bc9b694ef21cde3969d01a51a8b9f510",
+      "rule": "pii-phone",
+      "reason": "WR591.S18.J30 historical source contains public PostgreSQL integer boundary constants, not contact data. Exact path and blob identity only. Current source groups those constants with numeric separators."
+    },
+    {
+      "path": "mcp-server/src/deal-space-searches.ts",
+      "sha256": "21b42aa4d80bcc7808defd07ad31105be55d6f5433af0a84e686776a59d30825",
+      "rule": "pii-phone",
+      "reason": "WR591.S18.J30 historical source contains public PostgreSQL integer boundary constants, not contact data. Exact path and blob identity only. Current source groups those constants with numeric separators."
+    },
+    {
+      "path": "mcp-server/test/deal-space-searches.test.ts",
+      "sha256": "990d9324e7263b479524b2549d8833a403f0ae44b8e1e990ea29a827ac53e12d",
+      "rule": "pii-phone",
+      "reason": "WR591.S18.J30 historical source contains public PostgreSQL integer boundary constants, not contact data. Exact path and blob identity only. Current source groups those constants with numeric separators."
+    },
+    {
+      "path": "db/schema.sql",
+      "sha256": "dd731bba56524da53355336e2bcda3a2a1af7050667332be4e07cfabe50399d4",
+      "rule": "pii-email",
+      "reason": "WR622.S13.J334 regenerated schema snapshot retains the existing Dell staff actor email from migration 1014. No client rows or new contact values. Exact snapshot bytes only."
+    },
+    {
+      "path": "db/schema.sql",
+      "sha256": "5532d2ae3b6e9a4bf2c0c72eab7ad096279363086021c0a7a6976974caf4b64a",
+      "rule": "pii-email",
+      "reason": "WR622.S13.J334 regenerated schema snapshot retains the existing Dell staff actor email from migration 1014. No client rows or new contact values. Exact snapshot bytes only."
+    },
+    {
+      "path": "db/schema.sql",
+      "sha256": "eada8d5d419393212ae4cdb69ed216603c01c9eafa0f838d6dc66ecbf6419f84",
+      "rule": "pii-email",
+      "reason": "WR622.S13.J334 regenerated schema snapshot retains the existing Dell staff actor email from migration 1014. No client rows or new contact values. Exact snapshot bytes only."
     }
   ]
 }

@@ -130,13 +130,13 @@ class PushFloorTests(RepositoryFixture):
         self.write("hooks/example.py", "# Fixture hook.\n")
         self.write("ops/example-selftest.py", "from pathlib import Path\n"
                    "with Path('calls').open('a') as log:\n    log.write('paired\\n')\n")
-        self.write("mcp-server/src/scac-mutation-registry.current.generated.js", "// baseline\n")
+        self.write("mcp-server/src/scac-mutation-registry.current.generated.ts", "// baseline\n")
         self.write("mcp-server/src/tool-families/fixture.js", "// reviewed family\n")
         self.commit("ops/ci.sh", "ops/ci.py", "ops/ci-pushfloor.py", "ops/node_test_summary.py",
                     "ops/no-client-deliverables-gate.py",
                     "ops/hook-deletion-check.py", "ops/ci-selftest.py", "bin/type-check.sh",
                     "bin/node", "hooks/example.py", "ops/example-selftest.py",
-                    "mcp-server/src/scac-mutation-registry.current.generated.js",
+                    "mcp-server/src/scac-mutation-registry.current.generated.ts",
                     "mcp-server/src/tool-families/fixture.js")
         self.git("update-ref", "refs/remotes/origin/main", "HEAD")
 
@@ -151,7 +151,7 @@ class PushFloorTests(RepositoryFixture):
                               capture_output=True, timeout=30)
 
     def test_current_scac_registry_selects_atlas_and_propagates_failure(self):
-        result = self.run_floor("mcp-server/src/scac-mutation-registry.current.generated.js")
+        result = self.run_floor("mcp-server/src/scac-mutation-registry.current.generated.ts")
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.calls(), ["--test mcp-server/test/atlas-inventory-graph-read.test.mjs "
                                        "mcp-server/test/atlas-inventory-graph-web.test.mjs"])
@@ -266,7 +266,7 @@ class PushFloorTests(RepositoryFixture):
     def test_missing_atlas_packages_route_to_npm_ci(self):
         self.write("bin/node", "#!/bin/sh\nprintf '%s\\n' \"Error [ERR_MODULE_NOT_FOUND]: "
                    "Cannot find package 'atlas-dependency'\"\nexit 1\n").chmod(0o755)
-        result = self.run_floor("mcp-server/src/scac-mutation-registry.current.generated.js")
+        result = self.run_floor("mcp-server/src/scac-mutation-registry.current.generated.ts")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("Cannot find package 'atlas-dependency'", result.stderr)
         self.assertIn("missing Node packages; run npm ci --prefix mcp-server", result.stderr)
@@ -321,18 +321,17 @@ class PushFloorTests(RepositoryFixture):
 
 
 class PrePrTests(RepositoryFixture):
-    """./run.sh pre-pr: the three checks hosted CI failed on in the 2026-10-28 retro."""
+    """./run.sh pre-pr: the source safety checks identified in the 2026-10-28 retro."""
 
     def setUp(self):
         super().setUp()
         self.copy("ops/ci-pushfloor.py")
-        self.copy("ops/review-gate.py")
         self.copy("ops/git_env.py")
         self.scanner("security/leak_guard.py", "leak")
         self.scanner("hooks/gate-integrity.py", "integrity")
         self.write("bin/gh", "#!/bin/sh\nexit 1\n").chmod(0o755)
         self.child_env["PATH"] = str(self.repo / "bin") + os.pathsep + os.defpath
-        self.commit("ops/ci-pushfloor.py", "ops/review-gate.py", "ops/git_env.py", "security/leak_guard.py",
+        self.commit("ops/ci-pushfloor.py", "ops/git_env.py", "security/leak_guard.py",
                     "hooks/gate-integrity.py", "bin/gh")
         self.git("update-ref", "refs/remotes/origin/main", "HEAD")
         self.base = self.git("rev-parse", "HEAD").stdout.strip()
@@ -347,12 +346,8 @@ class PrePrTests(RepositoryFixture):
                    f"    log.write(' '.join([{call!r}, *sys.argv[1:]]) + '\\n')\n"
                    f"raise SystemExit({status})\n")
 
-    def pre_pr(self, body="Card: WR576.S1.J1\n", *extra):
-        args = []
-        if body is not None:
-            (self.repo.parent / "body.md").write_text(body)
-            args = ["--body", str(self.repo.parent / "body.md")]
-        return subprocess.run(["python3", "ops/ci-pushfloor.py", "--pre-pr", *args, *extra],
+    def pre_pr(self):
+        return subprocess.run(["python3", "ops/ci-pushfloor.py", "--pre-pr"],
                                cwd=self.repo, env=self.child_env, text=True,
                                capture_output=True, timeout=30)
 
@@ -362,93 +357,11 @@ class PrePrTests(RepositoryFixture):
         self.assertEqual(self.calls(), [f"leak --range {self.base}..{self.head}", "integrity --strict"])
         self.assertEqual(result.stdout, "")
 
-    def test_card_line_uses_the_review_gate_rule(self):
-        for body in ("Card: WR576.S1.J1 extra\n", "Summary only\n", " Card: WR576.S1.J1\n"):
-            with self.subTest(body=body):
-                result = self.pre_pr(body)
-                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-                self.assertEqual(len(result.stdout.splitlines()), 1)
-                self.assertIn("Card: WR<n>.S<n>.J<n>", result.stdout)
-        self.assertEqual(self.pre_pr("Intro\nCard: WR576.S1.J1\nEnd\n").returncode, 0)
-
-    def test_docs_only_branch_needs_no_card(self):
-        self.git("reset", "-q", "--hard", self.base)
-        self.write("docs/note.md", "note\n")
-        self.commit("docs/note.md")
-        self.assertEqual(self.pre_pr("no card\n").returncode, 0)
-
-    def test_unicode_docs_only_branch_needs_no_card(self):
-        self.git("reset", "-q", "--hard", self.base)
-        self.write("café.md", "note\n")
-        self.commit("café.md")
-        result = self.pre_pr("no card\n")
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(result.stdout, "")
-        self.assertEqual(result.stderr, "")
-
-    def test_quoted_docs_only_branch_needs_no_card(self):
-        self.git("reset", "-q", "--hard", self.base)
-        self.write('quoted"name.md', "note\n")
-        self.commit('quoted"name.md')
-        result = self.pre_pr("no card\n")
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(result.stdout, "")
-        self.assertEqual(result.stderr, "")
-
-    def test_renamed_docs_only_branch_needs_no_card(self):
-        self.git("reset", "-q", "--hard", self.base)
-        self.write('quoted"name.md', "note\n")
-        self.commit('quoted"name.md')
-        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
-        self.git("mv", 'quoted"name.md', "café.md")
-        self.write("other.md", "another note\n")
-        self.commit("café.md", "other.md")
-        self.assertIn("R100", self.git("diff", "--name-status", "-M", "origin/main..HEAD").stdout)
-        result = self.pre_pr("no card\n")
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(result.stdout, "")
-        self.assertEqual(result.stderr, "")
-
-    def test_code_renamed_to_markdown_still_needs_card(self):
-        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
-        self.git("mv", "app.py", "app.md")
-        self.commit("app.md")
-        result = self.pre_pr("no card\n")
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertEqual(len(result.stdout.splitlines()), 1)
-        self.assertIn("Card:", result.stdout)
-        self.assertEqual(result.stderr, "")
-
-    def test_no_body_and_no_pull_request_says_to_pass_one(self):
-        result = self.pre_pr(None)
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn("--body", result.stdout)
-
-    def test_open_pull_request_body_is_read_from_gh(self):
-        self.write("bin/gh", "#!/bin/sh\nprintf 'Card: WR576.S1.J1\\n'\n").chmod(0o755)
-        result = self.pre_pr(None)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-
-    def test_unreadable_body_is_one_failure_and_other_checks_still_run(self):
-        result = self.pre_pr(None, "--body", "missing.md")
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertEqual(len(result.stdout.splitlines()), 1)
-        self.assertIn("cannot read PR body", result.stdout)
-        self.assertEqual(result.stderr, "")
-        self.assertEqual(len(self.calls()), 2)
-
-    def test_empty_body_path_cannot_skip_card_validation(self):
-        result = self.pre_pr(None, "--body", "")
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn("cannot read PR body", result.stdout)
-
-    def test_absent_gh_is_one_failure(self):
+    def test_pre_pr_needs_no_body_or_github(self):
         (self.repo / "bin/gh").unlink()
-        result = self.pre_pr(None)
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertEqual(len(result.stdout.splitlines()), 1)
-        self.assertIn("--body", result.stdout)
-        self.assertEqual(result.stderr, "")
+        result = self.pre_pr()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(self.calls()), 2)
 
     def test_scanner_output_does_not_add_failure_lines(self):
         self.write("security/leak_guard.py", "import sys\nprint('details')\n"
@@ -461,13 +374,12 @@ class PrePrTests(RepositoryFixture):
     def test_each_failure_is_one_line_with_its_remedy(self):
         self.scanner("security/leak_guard.py", "leak", status=1)
         self.scanner("hooks/gate-integrity.py", "integrity", status=1)
-        result = self.pre_pr("none\n")
+        result = self.pre_pr()
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         lines = result.stdout.splitlines()
-        self.assertEqual(len(lines), 3, result.stdout)
+        self.assertEqual(len(lines), 2, result.stdout)
         self.assertIn(f"--range {self.base}..{self.head}", lines[0])
         self.assertIn("gate-integrity.py --strict", lines[1])
-        self.assertIn("Card:", lines[2])
 
 
 if __name__ == "__main__":

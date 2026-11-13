@@ -50,7 +50,7 @@
 //                          the TRACKING TABLE CLAIMS, and says so in its own
 //                          `note`, every time.
 //   command_contract      — the SCAC mutation registry identity this deploy is
-//                          actually running, from mutation-registry.js's own
+//                          actually running, from mutation-registry.ts's own
 //                          mutationManifestIdentity() — the same identity
 //                          tools.js binds into every write's request_hash, read
 //                          here rather than reimplemented, so there is no second
@@ -74,7 +74,7 @@
 
 import { TOOLS } from "./tools.js";
 import { publicError } from "./public-errors.ts";
-import { mutationManifestIdentity } from "./mutation-registry.js";
+import { mutationManifestIdentity } from "./mutation-registry.ts";
 import { program6ActionPosture } from "./program6-feature-flag.ts";
 import { workspaceCommandCenterPosture } from "./workspace-feature-flag.ts";
 

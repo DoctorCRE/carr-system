@@ -1,7 +1,8 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // Test Local Deals PostgreSQL operations, evidence and regressions.
-import { readMigration } from './migration-source.testhelper.mjs';
+import { readMigration } from './migration-source.testhelper.ts';
 import { restoreEventIdentity, applyPendingDealRoomReads } from './helpers/snapshot-schema.mjs';
-import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -40,9 +41,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
   try {
     let connection;
     if (ciDsn) {
-      const url = new URL(ciDsn);
-      assert.ok(['postgres:', 'postgresql:'].includes(url.protocol));
-      assert.ok(['127.0.0.1', 'localhost'].includes(url.hostname), 'fixture requires disposable loopback PostgreSQL');
+      const url = assertDisposableDatabase(ciDsn, { service: true });
       admin = new pg.Client({ connectionString: ciDsn });
       await admin.connect();
       const name = `local_deals_${randomUUID().replaceAll('-', '')}`;
@@ -82,6 +81,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query(table);
       if (name === "party") await c.query("alter table party drop column if exists vendor_assignment_version");
     }
+    await c.query(schema.match(/^grant select \([^)]*\) on table public\.party to carr_reader;$/m)[0]);
     await c.query('alter table activity add column if not exists email_source jsonb');
     await c.query('alter table activity add column if not exists email_context jsonb');
     await c.query(readMigration('1125_calendar_confirmation.sql'));
@@ -112,7 +112,9 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     await c.query('create schema if not exists ops; create extension if not exists pgcrypto');
     await c.query(readMigration('1068_email_identity.sql'));
     await c.query(schema.match(/CREATE TABLE ops\.client_portal \([\s\S]*?\n\);/)[0]);
-    await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable as $$select '{"secdef_execute":[]}'::jsonb$$`);
+    await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable as $$select '{"secdef_execute":[],"relation_dml":[]}'::jsonb$$`);
+    for (const migration of ['1100_practice_origination.sql', '1131_florida_formation_origination.sql', '1134_florida_document_number_lengths.sql'])
+      await c.query(readMigration(migration));
     await c.query(readMigration('1013_register_client_portal.sql'));
     await applyPendingDealRoomReads(c);
     await c.query(readFileSync(path.join(root, 'migrations/0923_deal_status_next_step.sql'), 'utf8'));
@@ -256,15 +258,15 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       let value = await board();
       const contract = JSON.parse(readFileSync(path.join(root, 'mcp-server/contracts/local-deals-board.v2.json'), 'utf8'));
       assert.equal(value.schema_version, contract.schema);
-      assert.equal(contract.version, '2.0.0');
+      assert.equal(contract.version, '2.1.0');
       assert.equal(value.deals[0].last_step, null);
       assert.deepEqual(value.deals[0].open_actions, []);
       await c.query(`insert into next_action(id,subject_type,subject_id,owner_id,description,due_on,created_by)
         values($1,'deal',$3,$4,'Later action','2027-02-01',$4),($2,'deal',$3,$5,'Earlier action','2027-01-01',$5)`, [id(10),id(11),id(4),actor.id,id(8)]);
       value = await board();
       assert.deepEqual(value.deals[0].open_actions, [
-        {id:id(11),owner:'dell',description:'Earlier action',due_on:'2027-01-01'},
-        {id:id(10),owner:'joe',description:'Later action',due_on:'2027-02-01'},
+        {id:id(11),item_id:`next_action:${id(11)}`,owner:'dell',description:'Earlier action',due_on:'2027-01-01'},
+        {id:id(10),item_id:`next_action:${id(10)}`,owner:'joe',description:'Later action',due_on:'2027-02-01'},
       ]);
       await c.query(`insert into next_action(id,subject_type,subject_id,owner_id,description,due_on,created_by)
         values($1,'deal',$3,$4,'Undated action',null,$4),($2,'deal',$3,$4,'Third action','2027-03-01',$4)`, [id(13),id(14),id(4),actor.id]);
@@ -1400,6 +1402,8 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query('set local role carr_reader');
       assert.deepEqual((await TOOLS['deal-board'].handler(c)).deals,[]);
       const leads = (await TOOLS['lead-board'].handler(c,actor,{workspace:'leads',lead_id:id(30)}));
+      assert.equal(leads.detail.opportunity_timing.status,'unknown');
+      assert.deepEqual(leads.detail.opportunity_timing.events,[]);
       assert.equal(leads.detail.notes,'Synthetic retained history');
       assert.equal(leads.detail.stage,'nurture_drip');
       assert.equal(leads.leads.length,1);

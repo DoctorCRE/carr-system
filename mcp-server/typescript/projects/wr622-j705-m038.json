@@ -1,0 +1,10 @@
+{
+  "node": [
+    "../ops/fixtures/outlook-triage-unread/UnreadFix.map.mts",
+    "test/unread-fix-map.test.ts"
+  ],
+  "entry": [
+    "../ops/fixtures/outlook-triage-unread/UnreadFix.map.mts",
+    "test/unread-fix-map.test.ts"
+  ]
+}

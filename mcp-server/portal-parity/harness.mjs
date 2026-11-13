@@ -1,12 +1,12 @@
 // Run one parity stage over the selected inventory rows and return verdict lines.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { validateMarketStudyPackage } from '../src/market-study-package.js';
+import { validateMarketStudyPackage } from '../src/market-study-package.ts';
 import { launchParityBrowser } from './browser.mjs';
 import { observeHttp, routeManifestPaths, signIn, sourceFidelity } from './http.mjs';
 import { compareScreenshots, observeBrowserProbe } from './observe.mjs';
-import { expand, loadProbes, resolveField, sideAliases, siteOf } from './probes.mjs';
-import { selectRows } from './rows.mjs';
+import { expand, loadProbes, resolveField, sideAliases, siteOf } from './probes.ts';
+import { selectRows } from './rows.ts';
 
 const MAX_PIXEL_DIFFERENCE = 0.005;
 const BROWSER_KINDS = new Set(['dom', 'interaction', 'link', 'media']);

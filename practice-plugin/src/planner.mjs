@@ -1,7 +1,7 @@
 // Define and dispatch practice space planner tools and intake.
 import { z } from 'zod';
 import { OpenAIFormSchema, createOpenAIFormContentSchema } from '@openai/mcp-extensions/server';
-import { VERTICALS, spaceInput } from './verticals.mjs';
+import { VERTICALS, spaceInput } from './verticals.ts';
 import { callTool } from './tools.mjs';
 
 export const PLANNER_URI = 'ui://practice/space-planner';

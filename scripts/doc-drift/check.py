@@ -13,6 +13,9 @@ from urllib.parse import unquote, urlparse
 
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from lib.repository_identity import canonical_repository
+
 SCHEMA = 'doc-drift/v1'
 PATH = re.compile(r'(?<![\w/:])(?:\./|\.\./|~/|/)?(?:[\w.@*<>${}-]+/)+[\w.@*<>${}-]*(?:/)?')
 LINK = re.compile(r'\[[^\]]*\]\(<?([^\s)>]+)>?(?:\s+[^)]*)?\)')
@@ -80,7 +83,6 @@ class Tree:
         self.workflows = {}
         self.jobs = {}
         self.configs = {}
-        self.renames = None
         self.load_verbs('mcp-server/src/tools.js')
         if self.verb_sources:
             registry = (root / 'mcp-server/src/tools.js').resolve().as_uri()
@@ -157,7 +159,7 @@ class Tree:
             return raw, 'vault, quarantine, or git reference outside source tree'
         if raw.startswith('@'):
             return raw, 'package name, not a repository file'
-        if raw.startswith('jbookout/'):
+        if canonical_repository(raw) is not None or raw.startswith('jbookout/'):
             return raw, 'cross-repository name'
         if raw.startswith(('github.com/', 'node_modules/', 'dist/', 'out/', '.venv/', '.claude/')) or '/.qualification' in raw or '/.venv' in raw:
             return raw, 'external source or generated artifact'
@@ -184,20 +186,6 @@ class Tree:
         return first.relative_to(self.root).as_posix(), None
 
     def suggestion(self, target, candidates):
-        if self.renames is None:
-            self.renames = {}
-            history = git(self.root, 'log', '--all', '--format=', '--name-status', '--diff-filter=R', '--find-renames')
-            for line in history.splitlines():
-                parts = line.split('\t')
-                if len(parts) == 3 and parts[0].startswith('R'):
-                    self.renames.setdefault(parts[1], parts[2])
-        renamed, visited = target, set()
-        while renamed in self.renames and renamed not in visited:
-            visited.add(renamed)
-            renamed = self.renames[renamed]
-        if renamed != target and renamed in self.files:
-            history = git(self.root, 'log', '-1', '--follow', '--format=%h %s', '--', renamed).strip()
-            return renamed, f'git rename history; git log --follow: {history}'
         matches = difflib.get_close_matches(target, sorted(candidates), n=1, cutoff=0.78)
         return (matches[0], 'name similarity, unverified') if matches else (None, None)
 

@@ -1,13 +1,16 @@
 {
   "tools/prove-calendar-snapshot-strict-instants.py": {
-    "sha256": "edaecef058793a6e895a81c7fcb74bc38c7356a815fcf67ed59f000c5c5998ff",
+    "sha256": "c73f3c539ce420105400d294d1f33bf69cc5240e5e8a8b5e5c9d8d1443cfb424",
     "commands": [
       "repository run.sh call calendar-meeting-prep",
       "declared fixture wrapper call calendar-meeting-prep",
       "fixture sys.executable -c prints JSON argv",
       "git rev-parse HEAD",
       "git merge-base --is-ancestor"
-    ]
+    ],
+    "helpers": {
+      "proof_release.release_revision": "91e1961693764676e4748173345a23964e288eddf8ee57a74fc1f692f1070d76"
+    }
   },
   "tools/prove-deal-checklist-transaction-recovery.py": {
     "sha256": "21275c25234ab2b3576baa723e2f128b46c2c7bd0f5a7876eb1f465d088dc503",
@@ -19,50 +22,72 @@
     ]
   },
   "tools/prove-duplicate-candidates-address-membership.py": {
-    "sha256": "5ce41fbe2752312bb2f538cc3ee2e11b7169da7cd5394795707bb85ca781ec59",
+    "sha256": "bf1ddd9b935432103bc8af2529e882e4df9299c6a5680e55bdefbc5e398a1a2a",
     "commands": [
       "declared --call-wrapper call email-match-contacts/prospect-research/party-duplicate-candidates"
-    ]
+    ],
+    "helpers": {
+      "lib.proof_deadline.proof_deadline": "6eab1e3c00b2541dfc2e67abab62ee6f7530a1eb3048561261269431b901d83a"
+    }
   },
   "tools/prove-identity-domain-recorded-addresses.py": {
-    "sha256": "15ce1802214c4ac85dadb97c2e3b136f8e74e097c0a633b854315394090a1cd8",
+    "sha256": "53ee190eee89cb63985c8a2fd8039590aa83d726792ed5c4572fd898ddd88f05",
     "commands": [
       "declared --call-wrapper call prospect-research/catch-me-up",
-      "git log -1 --format=%H -- mcp-server/src/party-identity.js",
+      "git log -1 --format=%H -- mcp-server/src/party-identity.ts",
       "git merge-base --is-ancestor"
-    ]
+    ],
+    "helpers": {
+      "lib.proof_deadline.proof_deadline": "6eab1e3c00b2541dfc2e67abab62ee6f7530a1eb3048561261269431b901d83a"
+    }
   },
   "tools/prove-lead-contact-address-membership.py": {
-    "sha256": "6e1b81b5ea76c5f5b1052d7b86c97e9b04a21c82fe392c03e469e2f3db1aa6f7",
+    "sha256": "cf1b36f647870f1484644ace44bb8dce3bf26264ebd5cbe11c0c92e1f8735c4e",
     "commands": [
       "declared --call-wrapper call lead-board/lead-stage-preview"
-    ]
+    ],
+    "helpers": {
+      "lib.proof_deadline.proof_deadline": "6eab1e3c00b2541dfc2e67abab62ee6f7530a1eb3048561261269431b901d83a"
+    }
   },
   "tools/prove-lease-comparison-tiny-rate-stability.py": {
-    "sha256": "11df744ae9d12e2ddec0fbb75a502ee1a3687dacf06d6a7e219f86bbaddfac4b",
+    "sha256": "59666cbbf5a5829e5a55ccddff78518aab73ebadfd92227aecdc09b186a987f1",
     "commands": [
       "declared --call-wrapper call compare-lease-terms"
-    ]
+    ],
+    "helpers": {
+      "proof_release.release_revision": "91e1961693764676e4748173345a23964e288eddf8ee57a74fc1f692f1070d76",
+      "lib.proof_deadline.proof_deadline": "6eab1e3c00b2541dfc2e67abab62ee6f7530a1eb3048561261269431b901d83a"
+    }
   },
   "tools/prove-mail-policy-multiple-recorded-addresses.py": {
-    "sha256": "f6e0c1165c23bccc67d6e8668e0733a0d5c0d822d0a88e23c09b614a2f33edc2",
+    "sha256": "79138a84259759f0110114b6f3efd33490f30ee2b4ecd246ea449ffe234b4c70",
     "commands": [
       "declared --call-wrapper call email-match-contacts/prospect-research/mail-contact-policy"
-    ]
+    ],
+    "helpers": {
+      "lib.proof_deadline.proof_deadline": "6eab1e3c00b2541dfc2e67abab62ee6f7530a1eb3048561261269431b901d83a"
+    }
   },
   "tools/prove-notification-feed-evidence-integrity.py": {
-    "sha256": "a14ed416e99f91550e1b762204b991686ef884e72a3110af4ad77c0b862ec257",
+    "sha256": "cde403ce4846c8df7fdcbd685adf7a76d130fedf6055b65e6dcc057dc731f4dd",
     "commands": [
       "declared --call-wrapper call notification-feed/read-notification-preferences",
       "git log/show/merge-base with fixed read-only arguments",
       "node --experimental-strip-types --input-type=module -e REPLAY with registered projection source"
-    ]
+    ],
+    "helpers": {
+      "lib.proof_deadline.proof_deadline": "6eab1e3c00b2541dfc2e67abab62ee6f7530a1eb3048561261269431b901d83a"
+    }
   },
   "tools/prove-post-call-exact-edge-whitespace.py": {
-    "sha256": "2b3b90de0700eba9fd3e88b63aa0c4b6598e09409990587e5cbba6d408c9d545",
+    "sha256": "d54836129fda3d8c13f41629834bdf3c5d3c750d982f19e3e63bb323b0e79969",
     "commands": [
       "declared --call-wrapper call read-call-outcomes"
-    ]
+    ],
+    "helpers": {
+      "lib.proof_deadline.proof_deadline": "6eab1e3c00b2541dfc2e67abab62ee6f7530a1eb3048561261269431b901d83a"
+    }
   },
   "tools/prove-prospect-research-future-evidence.py": {
     "sha256": "6019d8566cd0deec0d84556780f6739b06dd0f130d9d29e26c196b635017dd73",
@@ -72,14 +97,14 @@
     ]
   },
   "tools/prove-recorded-comps-readable-deal-labels.py": {
-    "sha256": "622198c978c8c4a16920ad79bac519a34343bc378d6f56a5a223e21215ff7608",
+    "sha256": "7d96e7043db3a1a904ac510d6fcf8d7dc5623185ac08e62342bbf17ef970aeaa",
     "commands": [
       "declared --call-wrapper call list-doc-conversations/read-doc-conversation/get-deal-room",
       "node release-pinned check.mjs with fixed SYNTHETIC and validated answer blocks"
     ]
   },
   "tools/prove-vendor-scheduling-zero-duration.py": {
-    "sha256": "270e15167affb568f88e8b39a9aa2228d263c61254bbaed87fde25b3cdc2ac90",
+    "sha256": "b5403589e2032203445bd651fbfb4fc9da40e825dd70cb6187c60d25aca2ce2b",
     "commands": [
       "declared --call-wrapper call read-vendor-meetings/morning-brief"
     ]
@@ -89,6 +114,97 @@
     "commands": [
       "declared --call-wrapper call calendar-meeting-prep {}",
       "node --experimental-vm-modules --input-type=module -e SYNTHETIC with full-release-SHA calendar-meeting-prep source and inert imports"
+    ]
+  },
+  "tools/prove-mail-needs-partner.py": {
+    "sha256": "3a4e7e3321c4e2fb43bd23d4060536b2177735a45b98188f14fa685a4a28fc28",
+    "commands": [
+      "node --experimental-strip-types --input-type=module -e PARSER with fixed registered mail response parser and JSON stdin (no network)",
+      "declared primary/other --call-wrapper call read-mail-needs-partner; primary wrapper call list-email-proposals with bounded pending pages; existing authenticated local actor transport",
+      "killpg only the process group acquired for each wrapper (cleanup on success, error and timeout)"
+    ],
+    "helpers": {
+      "proof_release.release_revision": "91e1961693764676e4748173345a23964e288eddf8ee57a74fc1f692f1070d76"
+    }
+  },
+  "tools/prove-email-next-step-closed-date.py": {
+    "sha256": "ca536d9d919b7b137d4ce077fde5fecd0d7a50b4a5262afef8db46704042fc34",
+    "commands": [
+      "declared --call-wrapper call deal-room-board/get-deal-room/preview-email-next-step via lib.record_call"
+    ],
+    "helpers": {
+      "lib.proof_deadline.proof_deadline": "6eab1e3c00b2541dfc2e67abab62ee6f7530a1eb3048561261269431b901d83a"
+    }
+  },
+  "tools/prove-activity-deal-attribution.py": {
+    "sha256": "9f95711a5d7860169a9cf607b9fde21a1be75f3b4f07e0c538cfd0f5f363489e",
+    "commands": [
+      "node --experimental-strip-types --input-type=module -e with fixed parser program and stdin JSON",
+      "declared --call-wrapper call email-router-queue/get-deal-room/read-activity-deal-attribution; cleanup signals only to each owned wrapper process group"
+    ],
+    "helpers": {
+      "proof_release.release_revision": "91e1961693764676e4748173345a23964e288eddf8ee57a74fc1f692f1070d76"
+    }
+  },
+  "tools/prove-client-anniversary-read.py": {
+    "sha256": "da316cc54445f6bb031b1b8c1205e90bee5db674352c9c2fe5e29e819b3353da",
+    "commands": [
+      "node --experimental-strip-types --input-type=module -e PARSER with JSON stdin through parseClientAnniversaryResponse",
+      "git merge-base --is-ancestor merged unit SHA deployed release SHA"
+    ],
+    "helpers": {
+      "lib.proof_deadline.proof_deadline": "6eab1e3c00b2541dfc2e67abab62ee6f7530a1eb3048561261269431b901d83a"
+    }
+  },
+  "tools/prove-quiet-follow-up-owner-filter.py": {
+    "sha256": "e8df045b07ed4bbdb6a94cf0d1571386b5636d9b7e5ae915e5ad6103b7814290",
+    "commands": [
+      "git --no-replace-objects merge-base --is-ancestor"
+    ],
+    "helpers": {
+      "proof_release.release_revision": "91e1961693764676e4748173345a23964e288eddf8ee57a74fc1f692f1070d76"
+    }
+  },
+  "tools/prove-action-card-targets.py": {
+    "sha256": "b3fafee5731987358909b492422af14a5a99704880b1556f3e12e78e36c1473d",
+    "commands": [
+      "node --input-type=module -e fixed PARSER with JSON stdin through parseActionCardResponse",
+      "git --no-replace-objects merge-base --is-ancestor expected merge observed release",
+      "explicit authorized read-only call-wrapper resolve-action-link-v2 with exact ref JSON"
+    ]
+  },
+  "tools/prove-deal-document-text.py": {
+    "sha256": "0972d218efd698be56a5a20f1f109214055837374bcb0cd700fd02e472a031e8",
+    "commands": [
+      "git --no-replace-objects cat-file -e revision^{commit}",
+      "git --no-replace-objects merge-base --is-ancestor expected observed",
+      "node tools/check-deal-document-text-proof.mjs saved-response original expected-text (no network)"
+    ],
+    "helpers": {
+      "proof_release.release_revision": "91e1961693764676e4748173345a23964e288eddf8ee57a74fc1f692f1070d76"
+    }
+  },
+  "tools/prove-review-call-outcome.py": {
+    "sha256": "5ab81881c918e54b97c5865a0c22ceac1e5b1fb0cdc4cc59651e410b02cad344",
+    "commands": [
+      "git --no-replace-objects -C repository cat-file -t revision",
+      "git --no-replace-objects -C repository merge-base --is-ancestor expected served"
+    ]
+  },
+  "tools/prove-tour-navigation.py": {
+    "sha256": "7fd981b4b40f4739c0a91223c35044d52903cdbaa55bbdd2331cf5fac356ee01",
+    "commands": [
+      "git --no-replace-objects -C repository merge-base --is-ancestor merge_sha served_sha"
+    ],
+    "helpers": {
+      "lib.proof_deadline.proof_deadline": "6eab1e3c00b2541dfc2e67abab62ee6f7530a1eb3048561261269431b901d83a"
+    }
+  },
+  "tools/prove-client-publications.py": {
+    "sha256": "d08796e060b96ea91bc0bc56f5c609c3caa8a3d22c2675899407f8026d59d158",
+    "commands": [
+      "git rev-parse --verify expected-revision^{commit}",
+      "git merge-base --is-ancestor expected-revision observed-release-revision"
     ]
   }
 }

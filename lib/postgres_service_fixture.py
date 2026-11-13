@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 import os
 import re
+import socket
 import subprocess
 from urllib.parse import unquote, urlsplit, urlunsplit
 from uuid import uuid4
@@ -54,13 +55,22 @@ def restore_roles(admin, before):
 @contextmanager
 def service_database(dsn, prefix, schema=None, source=None, *, template=False, migrate=False):
     url = urlsplit(dsn)
-    if url.scheme not in ('postgres', 'postgresql') or url.hostname not in ('localhost', '127.0.0.1') or url.query or url.fragment:
-        raise ValueError('snapshot service requires a disposable loopback URL without overrides')
+    loopback = url.hostname in ('localhost', '127.0.0.1')
+    hosted = (os.environ.get('GITHUB_ACTIONS') == 'true'
+              and os.environ.get('CARR_CI_POSTGRES_IMAGE') == 'both'
+              and url.hostname == 'postgres' and url.port == 5432
+              and url.username == 'carr_ci' and url.password is None and url.path == '/carr_ci')
+    if url.scheme not in ('postgres', 'postgresql') or not (loopback or hosted) or url.query or url.fragment:
+        raise ValueError('snapshot service requires a disposable loopback or hosted image service URL without overrides')
+    if os.environ.get('PGSERVICE') or os.environ.get('PGSERVICEFILE'):
+        raise ValueError('snapshot service refuses ambient libpq service configuration')
+    address = '127.0.0.1' if loopback else socket.getaddrinfo(
+        'postgres', 5432, type=socket.SOCK_STREAM)[0][4][0]
     name = re.sub('[^a-z0-9_]', '_', prefix.lower()).strip('_')[:28] + '_' + uuid4().hex
     if source and not re.fullmatch(r'mcp_snapshot_[a-f0-9]{32}', source):
         raise ValueError('invalid service snapshot template name')
     connection = urlunsplit(url._replace(path='/' + name))
-    with psycopg.connect(dsn, hostaddr='127.0.0.1', autocommit=True) as admin:
+    with psycopg.connect(dsn, hostaddr=address, connect_timeout=10, autocommit=True) as admin:
         before = role_state(admin)
         created = False
         try:
@@ -69,7 +79,9 @@ def service_database(dsn, prefix, schema=None, source=None, *, template=False, m
             created = True
             if not source and schema is not None:
                 admin.execute('do $$ begin create role neondb_owner; exception when duplicate_object then null; end $$')
-                restore_env = {**os.environ, 'PGHOST': url.hostname, 'PGHOSTADDR': '127.0.0.1',
+                restore_env = {**{key: value for key, value in os.environ.items()
+                                  if not key.startswith('PG') or key == 'PGPASSWORD'},
+                               'PGHOST': url.hostname, 'PGHOSTADDR': address,
                                'PGPORT': str(admin.info.port), 'PGUSER': admin.info.user, 'PGDATABASE': name}
                 if url.password is not None:
                     restore_env['PGPASSWORD'] = unquote(url.password)

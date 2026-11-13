@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // salesforce-read-run-store-rw02-postgres.test.mjs — migration 0733 on REAL
 // PostgreSQL: the attended-run ledger and its reset, the clean-after-stop
@@ -22,7 +23,6 @@ import {
 import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const DSN = await snapshotDatabase('salesforce-read-run-store-rw02-postgres-');
-const LOOPBACK = /@(localhost|127[.]0[.]0[.]1)[:/]|^postgres(ql)?:\/\/(localhost|\/)/;
 const JOE = { slug: "joe", display: "Joe", human: true, via: "mcp", client_id: "rw02-run-store-pg-test" };
 const KIND = "presence_membership_reconciliation";
 const hex24 = () => randomUUID().replace(/-/g, "").slice(0, 24);
@@ -66,7 +66,7 @@ const verb = (pg, database, name, args, opts) =>
   asWriter(pg, database, (client, actor) => TOOLS[name].handler(client, actor, args), opts);
 
 test("V5-RW02 run ledger, consent record, loop episodes and invoiced scope on real PostgreSQL", async t => {
-  assert.match(DSN, LOOPBACK, "the V5-RW02 database proof runs only against a loopback disposable database");
+  assertDisposableDatabase(DSN);
   const pg = (await import("pg")).default;
   const source = new URL(DSN).pathname.replace(/^\//, "");
   const admin = await clientFor(pg, "postgres");

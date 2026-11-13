@@ -54,6 +54,22 @@ class GatesTest(unittest.TestCase):
         self.assertIn('OK    gates       2 selftest suites + safety hook installation', output)
         self.assertIn('suite passed', output)
 
+    def test_measured_suite_budget_does_not_raise_other_suites(self):
+        (self.root / 'ops/config/ci-execution-budgets.json').write_text(json.dumps({
+            'gate_suites': {'ops/guard-selftest.py': {'timeout_seconds': 777}}}))
+        (self.root / 'ops/config/ci-unit-durations.json').write_text(json.dumps({
+            'gate_suites': {'ops/guard-selftest.py': {'timeout_seconds': 999}}}))
+        (self.root / 'bin/with-timeout.py').write_text(
+            '# Enforce each synthetic suite timeout at the process interface.\n'
+            'import subprocess,sys\n'
+            'expected = "777" if sys.argv[-1] == "ops/guard-selftest.py" else "480"\n'
+            'assert sys.argv[1] == expected, sys.argv\n'
+            'raise SystemExit(subprocess.call(sys.argv[2:]))\n')
+        self.suite('ops/guard-selftest.py', 'print("measured guard passed")')
+        rc, output = self.run_ci()
+        self.assertEqual(rc, 0, output)
+        self.assertIn('measured guard passed', output)
+
     def test_suite_can_remove_its_empty_temporary_directory(self):
         self.suite('ops/remove-selftest.py',
                    'import tempfile\nfrom pathlib import Path\nPath(tempfile.gettempdir()).rmdir()')

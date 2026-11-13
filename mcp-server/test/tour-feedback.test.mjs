@@ -1,5 +1,5 @@
 // Tests projection-bound client feedback writes and broker reads.
-import { readMigration } from "./migration-source.testhelper.mjs";
+import { readMigration } from "./migration-source.testhelper.ts";
 
 import assert from "node:assert/strict";
 import fs from "node:fs";

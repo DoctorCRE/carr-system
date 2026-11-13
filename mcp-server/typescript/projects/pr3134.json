@@ -1,0 +1,11 @@
+{
+  "node": [
+    "test/ai-boundary.test.ts",
+    "test/assurance-health-store.v5.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "test/ai-boundary.test.ts",
+    "test/assurance-health-store.v5.test.ts"
+  ]
+}

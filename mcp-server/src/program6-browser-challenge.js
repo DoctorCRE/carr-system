@@ -1,7 +1,7 @@
 // Atomic redemption for Deal Room's exact Program 6 approval challenge.
 // Cloudflare KV holds the short-lived opaque preimage, but KV cannot perform a
 // compare-and-delete. PostgreSQL's unique token digest is the single-use tooth.
-import { Pool } from "@neondatabase/serverless";
+import { Pool } from "./postgres.ts";
 import { authorityDsnForActor } from "./mcp.js";
 
 export async function redeemProgram6BrowserChallenge({ env, actor, tokenDigest,

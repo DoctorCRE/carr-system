@@ -1,0 +1,24 @@
+stateDiagram-v2
+  state Link {
+    state Session {
+      [*] --> SignedIn
+      SignedIn --> SignedOut: Sign out
+      SignedOut --> SignedIn: Sign in
+    }
+    --
+    state Card {
+      [*] --> Unissued
+      Unissued --> Issued: Issue current proposal
+      Issued --> Review: Resolve owning session
+      Issued --> Refused: Resolve foreign or signed out
+      Review --> Review: Resolve again without mutation
+      Issued --> Expired: Edit or retire source
+      Review --> Expired: Edit or retire source
+      Review --> Consumed: Explicit domain approval
+      Review --> Refused: Sign out
+      Consumed --> Refused: Resolve or act again
+      Expired --> Refused: Resolve or act stale reference
+      Refused --> Review: Resolve fresh eligible reference
+    }
+  }
+  %% never PrivateAfterSignOut: SignedOut & Review -- A signed-out request returns no private card.

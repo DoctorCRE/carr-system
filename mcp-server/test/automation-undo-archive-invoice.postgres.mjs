@@ -1,10 +1,11 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // Test automation undo, archive, and invoice behavior in disposable PostgreSQL.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import pg from 'pg';
 import {TOOLS} from '../src/tools.js';
 const url=process.env.CARR_CI_DATABASE_URL||process.env.DATABASE_URL;
-if(!url || !['localhost','127.0.0.1'].includes(new URL(url).hostname))throw Error('disposable_loopback_database_required');
+assertDisposableDatabase(url);
 const c=new pg.Client({connectionString:url});await c.connect();let checks=0;
 const equal=(a,b)=>{assert.deepEqual(a,b);checks++;};
 const actor={id:randomUUID(),slug:'joe',human:true,via:'synthetic-test'};

@@ -42,6 +42,29 @@
   },
   "x-runner-source-binding": "Registry CI validates either an ancestor revision/path or a sources map of repository-local paths to SHA256 at tested HEAD. Content bindings include the entry path and its local dependency closure; squash preserves their identity. Never fall back from a refused revision. Neither binding attests installation or execution.",
   "x-runners": {
+    "quiet-follow-up-owner-filter.v1": {
+      "path": "tools/prove-quiet-follow-up-owner-filter.py",
+      "targets": [
+        "worker"
+      ],
+      "sources": {
+        "tools/prove-quiet-follow-up-owner-filter.py": "e8df045b07ed4bbdb6a94cf0d1571386b5636d9b7e5ae915e5ad6103b7814290",
+        "tools/proof_release.py": "91e1961693764676e4748173345a23964e288eddf8ee57a74fc1f692f1070d76",
+        "lib/release_reader.py": "dc01a4489988d3734df5173c83e221fed7f834a645ae7591a717b06667363b8b",
+        "lib/release-reader-marker.json": "29028978ca9edb73d49b2c947f33ebe60252dbc2de19ecff31aeb63f9ebff1ee"
+      }
+    },
+    "github-verdict-delivery.v1": {
+          "path": "ops/verdict-delivery-proof.py",
+          "targets": [
+                "worker"
+          ],
+          "sources": {
+                "ops/verdict-delivery-proof.py": "a199eb96015ea45a56e2b89ff5517eb43618855b3b9b14c7556d6b5ff2ab44c7",
+                "ops/verdict-delivery.py": "ac1eb9e0549bab89f88762b3d7dec5ded4736999006be2892ef8df496e8e35bc",
+                "lib/loadpy.py": "868281532b1b418afbd18c535653adbf21fa580f54da01da158548e539ed40fd"
+          }
+    },
     "pr-release-comments.v1": {
       "path": "ops/pr-release-comments-proof.py",
       "targets": [
@@ -59,14 +82,14 @@
       ],
       "sources": {
         "ops/email-touch-cohort-proof.py": "2918cea6a98b702fb9300c8fa632471e42cf5e45d221319c665bbde464707ca3",
-        "lib/release_reader.py": "96d016ca767847e6569669259cd15fe369c07e53a972d43578e40cc55fcde6b2",
+        "lib/release_reader.py": "dc01a4489988d3734df5173c83e221fed7f834a645ae7591a717b06667363b8b",
         "lib/release-reader-marker.json": "29028978ca9edb73d49b2c947f33ebe60252dbc2de19ecff31aeb63f9ebff1ee",
         "lib/local_principal.py": "71119895af1a2295bc41fb542859136f3efd2adb06847f9e40022b156f0993be"
       }
     },
     "app-release-live-walk.v1": {
       "path": "ops/app-proof-observe.py",
-      "revision": "55d0bd0cb7cc18f651eb4f2569aa111749032369",
+      "sources": {"ops/app-proof-observe.py": "a5673ab8783aa158a77684dab47cb39ac84a83c80eeeeda8e1b25e9669dbe97f"},
       "targets": ["app"]
     },
     "worker-email-link-marker.v1": {
@@ -101,9 +124,10 @@
     "docs/**", "AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", "CHANGELOG.md",
     ".agents/skills/**", "tools/pstack/*.md", "test/**", "mcp-server/test/**", "README.md",
     ".github/**", "ops/*-selftest.py", "tools/test-*.py", "tools/test_*.py",
+    "lib/postgres_service_fixture.py", "lib/postgres_snapshot_fixture.py",
     "ops/ci.sh", "ops/ci-gates.py",
     "ops/ci-evidence.py", "ops/ci-unit.py", "ops/ci-secret.py",
-    "ops/ci_unit_shards.py", "ops/node_test_summary.py", "ops/config/ci-unit-durations.json",
+    "ops/ci_unit_shards.py", "ops/node_test_summary.py", "ops/config/ci-unit-durations.json", "ops/config/ci-execution-budgets.json",
     "ops/ci.py", "ops/ci_scope.py", "ops/db-acceptance-scope.py", "ops/ci-pushfloor.py", "ops/ci-dep-check.py",
     "ops/source-ci-review.py",
     "ops/ci-migration.py", "ops/ci-migration-gates.py", "ops/ci-node-file.mjs",

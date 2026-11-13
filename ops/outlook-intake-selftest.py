@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from hxprobe_test_binary import test_binary
 import uuid
 from urllib.parse import quote
 from unittest.mock import patch
@@ -288,6 +289,10 @@ class Fake:
 
 
 class IntakeTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        test_binary()
+
     def setUp(self):
         scope = patch('lib.outlook_settings.OutlookSettings.verify_helper')
         scope.start()
@@ -498,6 +503,337 @@ class IntakeTest(unittest.TestCase):
         result = self.run_intake()
         self.assertEqual(result.reason, 'ledger_binding_required')
         self.assertEqual(path.read_bytes(), before)
+        self.assertFalse(self.fake.calls)
+
+    def legacy_ledger(self):
+        self.out().mkdir(parents=True, exist_ok=True)
+        state = {'done': {}, 'pending_full': {}, 'events_logged': {}, 'events_balled': {},
+                 'steps': {}, 'requests': {}}
+        payloads = [
+            ('log-activity', {'kind': 'email_in', 'ref': 'C-901',
+                              'email_source': {'mailbox_owner': 'joe', 'sender_email': CLIENT.email},
+                              'email_identity': {'mailbox_account': OWNER},
+                              'email_context': {'sender': {'email': CLIENT.email},
+                                                'recipients': [{'email': OWNER}]}}),
+            ('set-next-action', {'owner': 'joe', 'ref': 'C-901'}),
+            ('set-next-action', {'owner': 'joe', 'ref': 'L-902'})]
+        for n, (verb, args) in enumerate(payloads):
+            ident = str(uuid.uuid5(uuid.NAMESPACE_URL, f'synthetic-legacy-{n}'))
+            args['idempotency_key'] = ident
+            state['requests'][ident] = {'verb': verb, 'payload': json.dumps(args),
+                                        'acknowledged': n == 0, 'attempts': 1,
+                                        'error_code': 'key_reuse', 'disposition': 'blocked',
+                                        'created_at': int(NOW.timestamp())}
+        path = self.out() / intake.STATE
+        path.write_text(json.dumps(state))
+        return path, state
+
+    def test_prebinding_participants_cannot_bind_two_mailboxes(self):
+        retained = []
+        for account in ('other-mailbox@example.test', OWNER):
+            with self.subTest(account=account):
+                path, state = self.legacy_ledger()
+                request = next(iter(state['requests'].values()))
+                args = json.loads(request['payload'])
+                args.pop('email_source')
+                args.pop('email_identity')
+                args['kind'] = 'email_out'
+                args['email_context'] = {'sender': {'email': 'other-mailbox@example.test'},
+                                         'recipients': [{'email': OWNER}]}
+                request['payload'] = json.dumps(args)
+                path.write_text(json.dumps(state))
+                retained.append(path.read_bytes())
+                self.run_intake()
+                settings = intake.replace(load_settings(self.home), account=account)
+                result = intake.run(self.repo, self.home, self.fake.ports(), settings=settings,
+                                    reconcile_binding=True)
+                self.assertEqual(result.reason, 'ledger_binding_evidence_insufficient')
+                self.assertFalse((self.out() / 'binding.json').exists())
+                self.assertEqual(path.read_bytes(), retained[-1])
+                self.assertFalse(self.fake.calls)
+        self.assertEqual(*retained)
+
+    def test_prebinding_attestation_binds_once_and_normal_run_preserves_binding(self):
+        path, state = self.legacy_ledger()
+        request = next(iter(state['requests'].values()))
+        args = json.loads(request['payload'])
+        args.pop('email_identity')
+        request['payload'] = json.dumps(args)
+        path.write_text(json.dumps(state))
+        before = path.read_bytes()
+        self.run_intake()
+        self.assertEqual(self.bind_legacy().reason, 'ledger_binding_evidence_insufficient')
+        result = intake.run(self.repo, self.home, self.fake.ports(), reconcile_binding=True,
+                            attest_mailbox=OWNER)
+        self.assertEqual(result.reason, 'ledger_bound')
+        binding = self.out() / 'binding.json'
+        self.assertEqual(json.loads(binding.read_text())['provenance'], 'operator_attested')
+        bound = binding.read_bytes()
+        decodes = self.fake.decodes
+        for _ in range(2):
+            self.assertEqual(intake.run(self.repo, self.home, self.fake.ports(), reconcile_binding=True,
+                                       attest_mailbox=OWNER).reason, 'ledger_bound')
+        self.assertEqual(self.fake.decodes, decodes)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(binding.read_bytes(), bound)
+        self.assertFalse(self.fake.calls)
+        self.assertNotIn(self.run_intake().reason, ('ledger_binding_mismatch', 'ledger_binding_invalid'))
+        self.assertEqual(binding.read_bytes(), bound)
+
+    def test_prebinding_attestation_refuses_retained_and_decoder_conflicts(self):
+        for conflict in ('account', 'owner', 'hash', 'attestation', 'decoder'):
+            with self.subTest(conflict=conflict):
+                path, state = self.legacy_ledger()
+                request = next(iter(state['requests'].values()))
+                args = json.loads(request['payload'])
+                args.pop('email_identity')
+                if conflict == 'account':
+                    args['email_identity'] = {'mailbox_account': 'foreign@example.test'}
+                elif conflict == 'owner':
+                    args['email_source']['mailbox_owner'] = 'dell'
+                elif conflict == 'hash':
+                    state['account_binding'] = intake._hash('foreign@example.test')
+                request['payload'] = json.dumps(args)
+                path.write_text(json.dumps(state))
+                before = path.read_bytes()
+                self.run_intake()
+                original = intake._load
+                def foreign(db, account_id=None, account_address=None):
+                    with closing(sqlite3.connect(db)) as con, con:
+                        con.execute("UPDATE messages SET sender='foreign@example.test' WHERE id=-1")
+                    return original(db, account_id, account_address)
+                with patch.object(intake, '_load', side_effect=foreign if conflict == 'decoder' else original):
+                    result = intake.run(self.repo, self.home, self.fake.ports(), reconcile_binding=True,
+                                        attest_mailbox='foreign@example.test' if conflict == 'attestation' else OWNER)
+                self.assertEqual(result.reason, 'ledger_binding_evidence_invalid' if conflict == 'decoder'
+                                 else 'ledger_binding_evidence_conflict')
+                self.assertFalse((self.out() / 'binding.json').exists())
+                self.assertEqual(path.read_bytes(), before)
+                self.assertFalse(self.fake.calls)
+
+    def bind_legacy(self):
+        return intake.run(self.repo, self.home, self.fake.ports(), reconcile_binding=True)
+
+    def test_prebinding_legacy_reconciliation_preserves_state_and_retires_actions(self):
+        path, state = self.legacy_ledger()
+        before = path.read_bytes()
+        self.assertEqual(self.run_intake().reason, 'ledger_binding_required')
+        self.assertEqual(self.bind_legacy().reason, 'ledger_bound')
+        self.assertEqual(path.read_bytes(), before)
+        binding = self.out() / 'binding.json'
+        bound = binding.read_bytes()
+        decodes = self.fake.decodes
+        self.assertEqual(self.bind_legacy().reason, 'ledger_bound')
+        self.assertEqual(binding.read_bytes(), bound)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(self.fake.decodes, decodes)
+        self.assertFalse(self.fake.calls)
+        decoder = load_settings(self.home).decoder
+        decoder.parent.mkdir(parents=True, exist_ok=True)
+        decoder.write_text('synthetic decoder, invoked through Fake.decode only')
+        decoder.chmod(0o700)
+        self.assertEqual(self.run_intake().reason, 'reconciled')
+        self.assertEqual(json.loads(path.read_text())['requests'], state['requests'])
+        self.assertEqual(self.run_intake().state, 'succeeded')
+        saved = json.loads(path.read_text())
+        self.assertEqual(saved['requests'], {k: r for k, r in state['requests'].items() if r['acknowledged']})
+        self.assertFalse(self.fake.writes('set-next-action'))
+
+    def test_prebinding_reconciliation_refuses_missing_or_conflicting_evidence(self):
+        for change in ('foreign_account', 'foreign_owner', 'no_owner', 'no_account',
+                       'key_conflict', 'broken_payload', 'empty_requests', 'state_identity', 'foreign_context'):
+            with self.subTest(change=change):
+                path, state = self.legacy_ledger()
+                requests = list(state['requests'].values())
+                args = json.loads(requests[0]['payload'])
+                if change == 'foreign_account':
+                    args['email_identity'] = {'mailbox_account': 'foreign@example.test', 'mailbox_owner': 'joe'}
+                elif change == 'foreign_context':
+                    args['email_identity'] = {'mailbox_account': OWNER, 'mailbox_owner': 'joe'}
+                    args['email_context']['recipients'] = [{'email': 'foreign@example.test'}]
+                elif change == 'foreign_owner':
+                    args['email_source']['mailbox_owner'] = 'dell'
+                elif change == 'no_owner':
+                    args.pop('email_source')
+                    state['requests'] = {next(iter(state['requests'])): requests[0]}
+                elif change == 'no_account':
+                    args.pop('email_context')
+                    args.pop('email_identity')
+                elif change == 'key_conflict':
+                    args['idempotency_key'] = str(uuid.uuid4())
+                elif change == 'empty_requests':
+                    state['requests'] = {}
+                elif change == 'state_identity':
+                    state['account_binding'] = intake._hash('foreign@example.test')
+                requests[0]['payload'] = '{broken' if change == 'broken_payload' else json.dumps(args)
+                path.write_text(json.dumps(state))
+                before = path.read_bytes()
+                result = self.bind_legacy()
+                self.assertEqual(result.state, 'failed')
+                self.assertEqual(path.read_bytes(), before)
+                self.assertFalse((self.out() / 'binding.json').exists())
+                self.assertFalse(self.fake.calls)
+
+    def test_prebinding_reconciliation_refuses_corrupt_state_and_active_writer(self):
+        path, _ = self.legacy_ledger()
+        path.write_text('{broken')
+        self.assertEqual(self.bind_legacy().reason, 'ledger_state_invalid')
+        self.assertEqual(path.read_text(), '{broken')
+        with (self.out() / 'lock').open('w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.assertEqual(self.bind_legacy().reason, 'previous_run_active')
+        self.assertFalse((self.out() / 'binding.json').exists())
+
+    def test_prebinding_reconciliation_refuses_foreign_decoded_account(self):
+        self.legacy_ledger()
+        self.run_intake()
+        original = intake._load
+        def foreign(db, account_id=None, account_address=None):
+            with closing(sqlite3.connect(db)) as con, con:
+                con.execute("UPDATE messages SET sender='foreign@example.test' WHERE id=-1")
+            return original(db, account_id, account_address)
+        with patch.object(intake, '_load', side_effect=foreign):
+            self.assertEqual(self.bind_legacy().reason, 'ledger_binding_evidence_invalid')
+        self.assertFalse((self.out() / 'binding.json').exists())
+        self.assertFalse(self.fake.calls)
+
+    def test_prebinding_reconciliation_binding_write_failure_retries_without_state_loss(self):
+        path, _ = self.legacy_ledger()
+        self.run_intake()
+        before = path.read_bytes()
+        original = intake._private_write
+        def fail(path, text):
+            if path.name == 'binding.json':
+                raise OSError('synthetic binding failure')
+            return original(path, text)
+        with patch.object(intake, '_private_write', side_effect=fail):
+            self.assertEqual(self.bind_legacy().reason, 'ledger_binding_invalid')
+        self.assertFalse((self.out() / 'binding.json').exists())
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(self.bind_legacy().reason, 'ledger_bound')
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_prebinding_command_uses_configured_runtime_and_never_calls_router(self):
+        runtime_settings = load_settings(self.home)
+        outcome = intake.Outcome('succeeded', 'ledger_bound')
+        with patch.object(intake.Path, 'home', return_value=self.home), \
+                patch.object(intake, 'run', return_value=outcome) as run, \
+                patch.object(email_router, 'step') as route:
+            self.assertEqual(intake.main(reconcile_binding=True), 0)
+        self.assertEqual(run.call_args.args[:2], (runtime_settings.repo, self.home))
+        self.assertTrue(run.call_args.kwargs['reconcile_binding'])
+        route.assert_not_called()
+
+    def test_prebinding_reconciliation_preserves_existing_binding_and_refuses_changes(self):
+        self.run_intake()
+        binding = self.out() / 'binding.json'
+        before = binding.read_bytes()
+        path = self.out() / intake.STATE
+        state = path.read_bytes()
+        self.fake.calls.clear()
+        decodes = self.fake.decodes
+        self.assertEqual(self.bind_legacy().reason, 'ledger_bound')
+        self.assertEqual(binding.read_bytes(), before)
+        self.assertEqual(path.read_bytes(), state)
+        settings_path = self.home / '.config/carr/outlook.json'
+        values = json.loads(settings_path.read_text())
+        settings_path.write_text(json.dumps({**values, 'owner': 'dell'}))
+        self.assertEqual(self.bind_legacy().reason, 'ledger_binding_mismatch')
+        binding.write_text('{broken')
+        self.assertEqual(self.bind_legacy().reason, 'ledger_binding_invalid')
+        self.assertEqual(binding.read_text(), '{broken')
+        self.assertEqual(path.read_bytes(), state)
+        self.assertEqual(self.fake.decodes, decodes)
+        self.assertFalse(self.fake.calls)
+
+    def test_prebinding_cli_binds_or_refuses_without_replaying(self):
+        for conflict in (False, True):
+            with self.subTest(conflict=conflict):
+                binding = self.out() / 'binding.json'
+                binding.unlink(missing_ok=True)
+                path, state = self.legacy_ledger()
+                request = next(iter(state['requests'].values()))
+                args = json.loads(request['payload'])
+                args.pop('email_identity')
+                if conflict:
+                    args['email_source']['mailbox_owner'] = 'dell'
+                request['payload'] = json.dumps(args)
+                path.write_text(json.dumps(state))
+                self.assertEqual(self.run_intake().reason, 'ledger_binding_required')
+                before = path.read_bytes()
+                with patch('sys.argv', ['reconcile-outlook-ledger-binding.py', '--decoder-vendor', str(self.tmp / 'separate-decoder'),
+                                         '--attest-mailbox', OWNER]), \
+                        patch.object(intake.Path, 'home', return_value=self.home), \
+                        patch.object(intake, '_decoder', return_value=self.fake.decode) as decoder, \
+                        patch.object(intake, '_carr', return_value=self.fake.carr), \
+                        patch.object(email_router, 'step') as route, \
+                        patch('sys.stdout', new_callable=StringIO) as stdout, \
+                        self.assertRaises(SystemExit) as stopped:
+                    runpy.run_path(str(ROOT / 'bin/reconcile-outlook-ledger-binding.py'), run_name='__main__')
+                self.assertEqual(decoder.call_args.args[1].vendor, (self.tmp / 'separate-decoder').resolve())
+                self.assertEqual(load_settings(self.home).vendor, self.home / 'carr-local/hxstore-reverse-engineering')
+                self.assertEqual(stopped.exception.code, 1 if conflict else 0)
+                self.assertIn('ledger_binding_evidence_conflict' if conflict else 'ledger_bound', stdout.getvalue())
+                self.assertEqual(binding.exists(), not conflict)
+                saved = json.loads(path.read_text())
+                if conflict:
+                    self.assertEqual(path.read_bytes(), before)
+                else:
+                    self.assertIn('mail_ids', saved)
+                    self.assertEqual(saved['requests'], state['requests'])
+                self.assertFalse(self.fake.calls)
+                route.assert_not_called()
+
+    def test_prebinding_separate_decoder_saves_original_ids_before_upgrade(self):
+        path, state = self.legacy_ledger()
+        row = mail(CLIENT.email, -timedelta(hours=1), message_id='<synthetic-original@example.test>')
+        self.run_intake([row])
+        def old_decoder(copy, files, db):
+            self.fake.decode(copy, files, db)
+            with closing(sqlite3.connect(db)) as con, con:
+                con.execute('ALTER TABLE messages DROP COLUMN folder_links_unresolved')
+                con.execute("UPDATE messages SET copy_key='original-decoder-key' WHERE id != -1")
+        original_ident = intake.mail_identity('original-decoder-key', CLIENT.email, row['subject'], row['sent_unix'])[1]
+        result = intake.run(self.repo, self.home, self.fake.ports(), reconcile_binding=True,
+                            legacy_decode=old_decoder)
+        self.assertEqual(result.reason, 'ledger_bound')
+        saved = json.loads(path.read_text())
+        self.assertEqual(saved['mail_ids']['synthetic-original@example.test'], original_ident)
+        self.assertEqual(saved['requests'], state['requests'])
+        before = path.read_bytes()
+        self.assertEqual(intake.run(self.repo, self.home, self.fake.ports(), reconcile_binding=True,
+                                   legacy_decode=old_decoder).reason, 'ledger_bound')
+        self.assertEqual(path.read_bytes(), before)
+        self.assertFalse(self.fake.calls)
+
+    def test_prebinding_original_id_decode_failure_and_binding_retry_keep_requests(self):
+        path, state = self.legacy_ledger()
+        self.run_intake()
+        before = path.read_bytes()
+        with self.subTest(failure='original_decoder'):
+            def fail_decode(copy, files, db):
+                raise intake.DecodeError('synthetic old decoder failure')
+            result = intake.run(self.repo, self.home, self.fake.ports(), reconcile_binding=True,
+                                legacy_decode=fail_decode)
+            self.assertEqual(result.reason, 'ledger_binding_evidence_invalid')
+            self.assertEqual(path.read_bytes(), before)
+            self.assertFalse((self.out() / 'binding.json').exists())
+        original = intake._private_write
+        def fail_binding(path, text):
+            if path.name == 'binding.json':
+                raise OSError('synthetic publication failure')
+            return original(path, text)
+        with patch.object(intake, '_private_write', side_effect=fail_binding):
+            result = intake.run(self.repo, self.home, self.fake.ports(), reconcile_binding=True,
+                                legacy_decode=self.fake.decode)
+        self.assertEqual(result.reason, 'ledger_binding_invalid')
+        saved = json.loads(path.read_text())
+        self.assertIn('mail_ids', saved)
+        self.assertEqual(saved['requests'], state['requests'])
+        retained = path.read_bytes()
+        self.assertEqual(intake.run(self.repo, self.home, self.fake.ports(), reconcile_binding=True,
+                                   legacy_decode=fail_decode).reason, 'ledger_bound')
+        self.assertEqual(path.read_bytes(), retained)
         self.assertFalse(self.fake.calls)
 
     def test_matching_legacy_binding_preserves_request_keys(self):
@@ -2263,14 +2599,13 @@ class IntakeTest(unittest.TestCase):
 
     def cli_mail_fixture(self, records, folder_name='Drafts', extra_folders=b''):
         helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
-        crate = ROOT / 'vendor/hxprobe'
-        REAL_RUN(['cargo', 'build', '--locked'], cwd=crate, check=True, capture_output=True)
+        binary = test_binary()
         folders = helpers['folder'](50, folder_name) + helpers['folder'](51, 'Sent Items') + extra_folders
         binding = helpers['message'](0x9999, sender=OWNER, sent=ts(-timedelta(days=60)), folder=51)
         self.store.write_bytes(helpers['STORE'](folders + b''.join(records) + binding))
 
         def decode(source, files, target):
-            result = REAL_RUN([str(crate / 'target/debug/hxprobe'), 'db', str(source), str(target)],
+            result = REAL_RUN([str(binary), 'db', str(source), str(target)],
                               capture_output=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stderr)
         ports = self.fake.ports()
@@ -3094,7 +3429,7 @@ class IntakeTest(unittest.TestCase):
         settings = load_settings(self.home)
         order, models = [], []
 
-        def fake_run(repo, home, ports, *, settings=None):
+        def fake_run(repo, home, ports, *, settings=None, reconcile_binding=False, legacy_decode=None, attest_mailbox=None):
             order.append('intake')
             ports.read_unresolved({'subject': 'S', 'text': 'T', 'sender': 'a@b.test'}, datetime(2026, 10, 26).date(), [], [])
             return intake.Outcome('succeeded', 'ok')
@@ -5658,6 +5993,30 @@ class LoadObjectFieldsTest(unittest.TestCase):
 
     def load(self, account=None):
         return intake._load(self.db, account)
+
+    def test_private_typed_causes_reach_the_aggregate_without_changing_capture(self):
+        from lib import outlook_field_census as census
+        with sqlite3.connect(self.db) as con:
+            con.executescript("""
+                UPDATE messages SET subject=NULL, sender=NULL, recipients=NULL WHERE id=1;
+                UPDATE message_objects SET subject=NULL, sender=NULL, recipients_status='none' WHERE local_key=71;
+                CREATE TABLE message_field_evidence(local_key INTEGER, field TEXT, cause TEXT);
+                INSERT INTO message_field_evidence VALUES(71,'subject','source_absent');
+                INSERT INTO message_field_evidence VALUES(71,'sender','decode_unsupported');
+                INSERT INTO message_field_evidence VALUES(71,'recipients','unclassified');
+                INSERT INTO message_field_evidence VALUES(71,'body','source_absent');
+            """)
+        meta, rows, _ = self.load(7)
+        self.assertIsNone(rows[0]['subject'])
+        bound = census.binding(self.db, Path(self.tmp.name) / 'Files',
+                               'synthetic', '2026-11-07T00:00:00+00:00', self.db)
+        bundle = census.build(meta, rows, bound)
+        census.validate(bundle)
+        self.assertEqual(bundle['census']['fields']['subject']['causes']['source_absent'], 1)
+        self.assertEqual(bundle['census']['fields']['sender']['causes']['decode_unsupported'], 1)
+        self.assertEqual(bundle['census']['fields']['recipients']['causes']['unclassified'], 1)
+        self.assertNotIn('local_key', json.dumps(bundle))
+        self.assertEqual(meta['subject_decoded'], 0)
 
     def test_delivery_report_reply_identity_is_projected_from_decoder_object(self):
         with sqlite3.connect(self.db) as con:

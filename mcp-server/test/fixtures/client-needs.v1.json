@@ -1,0 +1,40 @@
+{
+  "schema_version": "client-needs.v1",
+  "subject": "vendor",
+  "subject_id": "9f9096f2-5b42-42ac-a7ab-26cc84c2e277",
+  "as_of": "2026-11-10 21:41:25.188345-06",
+  "state": "ready",
+  "rows": [
+    {
+      "id": "90ce058b-303d-4135-8f9d-da158abbb0bf",
+      "state": "approved",
+      "deal_id": "1d811d56-ea1d-4d18-9e40-ad273022973e",
+      "version": 2,
+      "revision": 1,
+      "client_id": "8f6d1d4e-bfd7-4f64-b85d-95280fcd8ee5",
+      "deal_name": "Synthetic deal",
+      "vendor_id": "9f9096f2-5b42-42ac-a7ab-26cc84c2e277",
+      "withdrawn": false,
+      "created_by": "b6c38b27-d006-4fad-9c38-49edf3130a07",
+      "source_ref": "synthetic:deal-review",
+      "updated_at": "2026-11-10T21:41:25.165031-06:00",
+      "updated_by": "b6c38b27-d006-4fad-9c38-49edf3130a07",
+      "vendor_ref": "V-96864c43-3dbc-4f48-ab11-dbdb0465e245",
+      "approved_at": "2026-11-10T21:41:25.164915-06:00",
+      "approved_by": "b6c38b27-d006-4fad-9c38-49edf3130a07",
+      "client_name": "Synthetic practice",
+      "description": "Practice needs equipment financing",
+      "fresh_until": "2098-12-31T18:00:00-06:00",
+      "observed_at": "2025-12-31T18:00:00-06:00",
+      "restriction": "allowed",
+      "deal_version": 1,
+      "applicability": "This vendor offers the recorded equipment program",
+      "client_version": 1,
+      "source_revision": "review-1",
+      "approved_revision": 1,
+      "approved_client_id": "8f6d1d4e-bfd7-4f64-b85d-95280fcd8ee5",
+      "identity_restricted": false
+    }
+  ],
+  "next_offset": null
+}

@@ -139,14 +139,25 @@ page requirements.
 
 ## Synthetic verification and remaining production proof
 
-The two synthetic source folders model local JavaScript data assignments and
+The two synthetic source folders model local TypeScript data assignments and
 app constants, with ownership present in REF-A and absent in REF-V. All names,
 figures, links, and asset bytes are invented. Asset bytes are placeholders, not
 renderable client media. The fixtures expand ordinal arrays to exercise the
 existing inventory without asserting correspondence to the private sources.
 
+The `.ts` fixture modules export historical JavaScript source as inert strings.
+`emit.ts` imports those typed strings and emits a JSON record containing the
+original `app.js` and `data.js` bytes. The acceptance loader materializes those
+files only in its temporary source folder. The mapping names identify generated
+inputs, not authored JavaScript files. Babel still parses those generated files
+without execution. No Window declaration or TypeScript parser extension is needed.
+
+The acceptance suite pins both original source hashes and both extracted package
+hashes. Source filenames, source bytes, mappings, manifest provenance and assets
+retain their existing contracts. There is no tracked JavaScript output copy.
+
 Verification commands are `python3 tools/test_portal_reference_extract.py`,
-`node --test mcp-server/test/market-study-package.test.mjs`, and
+`node --test mcp-server/test/market-study-package.test.ts`, and
 `./ops/ci.sh --only gates`. The Python tests invoke the real CLI, which calls the
 existing validator. No second package schema is implemented in Python.
 

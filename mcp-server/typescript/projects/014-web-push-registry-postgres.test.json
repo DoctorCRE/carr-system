@@ -1,0 +1,8 @@
+{
+  "node": [
+    "test/web-push-registry-postgres.test.ts"
+  ],
+  "entry": [
+    "test/web-push-registry-postgres.test.ts"
+  ]
+}

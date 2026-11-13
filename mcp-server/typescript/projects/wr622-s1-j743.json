@@ -1,0 +1,10 @@
+{
+  "node": [
+    "../workspace/statecharts/wr586-s3-deliverables/view.ts",
+    "test/deliverables-model-view.test.ts"
+  ],
+  "entry": [
+    "../workspace/statecharts/wr586-s3-deliverables/view.ts",
+    "test/deliverables-model-view.test.ts"
+  ]
+}

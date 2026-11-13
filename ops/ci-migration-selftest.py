@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT / "ops"))
 from git_env import fixture_env
 
 PROOFS = [
-    "mcp-server/test/tour-deal-access.test.mjs",
+    "mcp-server/test/tour-deal-access.test.ts",
     "mcp-server/test/assurance-health-store-postgres.sql",
     "mcp-server/test/catch-me-up-writer-route.test.mjs",
     "mcp-server/test/codex-continuity-postgres.sql",
@@ -34,7 +34,6 @@ PROOFS = [
     "mcp-server/test/fact-review-installed-postgres.test.mjs",
     "mcp-server/test/find-rule-supersedes.test.mjs",
     "mcp-server/test/foundation-assurance-minimum-postgres.sql",
-    "mcp-server/test/governed-correspondence-store-postgres.sql",
     "mcp-server/test/invoice-tracker-postgres.sql",
     "mcp-server/test/invoice-tracker-transaction.test.mjs",
     "mcp-server/test/local-deals-postgres.sql",
@@ -58,7 +57,6 @@ PROOFS = [
     "mcp-server/test/notifications.test.mjs",
     "mcp-server/test/session-identity.test.mjs",
     "mcp-server/test/dispatch-spine.test.mjs",
-    "mcp-server/test/governed-correspondence-thread-postgres.test.mjs",
     "mcp-server/test/meeting-mode.test.mjs",
     "mcp-server/test/amend-closed-loop-postgres.test.mjs",
     "mcp-server/test/independent-review-cycle-postgres.test.mjs",
@@ -116,9 +114,21 @@ class MigrationTests(unittest.TestCase):
             with self.subTest(part=part):
                 result, trace = self.run_ci(part)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                digest = hashlib.sha256(json.dumps(trace, sort_keys=True).encode()).hexdigest()
+                closure = [row for row in trace if 'ops/migration-depth1.py' in row['argv']]
+                self.assertEqual(len(closure), int(part in ('all', 'core', 'proofs')))
+                if closure:
+                    self.assertEqual(closure[0]['argv'], ['python3', 'ops/migration-depth1.py'])
+                preserved = [row for row in trace if row not in closure]
+                digest = hashlib.sha256(json.dumps(preserved, sort_keys=True).encode()).hexdigest()
                 self.assertEqual(digest, expected, json.dumps(trace))
                 self.assertIn("CI passed — every class green", result.stdout)
+
+    def test_depth_one_failure_refuses_before_baseline_and_database_work(self):
+        result, trace = self.run_ci('proofs', FAIL_PROGRAM='migration-depth1.py')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('fresh depth-1 migration acceptance failed', result.stdout)
+        self.assertEqual(len(trace), 2)
+        self.assertEqual(trace[-1]['argv'], ['python3', 'ops/migration-depth1.py'])
 
     def test_core_and_fixtures_run_all_exactly_once(self):
         # The main canary runs these two halves in parallel in place of all.
@@ -165,6 +175,7 @@ class MigrationTests(unittest.TestCase):
     def test_empty_shard_setting_keeps_three_shards(self):
         result, trace = self.run_ci("proofs", CARR_DOT_PROOF_SHARDS="")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        trace = [row for row in trace if 'ops/migration-depth1.py' not in row['argv']]
         digest = hashlib.sha256(json.dumps(trace, sort_keys=True).encode()).hexdigest()
         self.assertEqual(digest, BASELINES["proofs"])
 
@@ -266,11 +277,11 @@ BASELINES = {
     "equivalence": "b09903454648438b634b50e5d500f37151daa0f3a0a01d6f94f9aa485d00e29f",
     "shadow": "e152e1e9ff1e9f217bb289391326d3608a9a6296a39fc1c68c1177b79a3f3971",
     "fixtures": "cc6996dc077062e8bc3edcf3fb613c556c140d75eef7d27a61c90845678249e8",
-    "proofs": "1964777b528287ca467ce306ae3693c12dbb31dae9ad47fda83342f7e7f13ecd",
+    "proofs": "6590bd036e8a6e318ee25a21b3ca7609f2a86d79442007b1f65e9db25040cda1",
     "gates": "b56db7dc88a6190a2817d79c4c07e0fac9ca964a615adefb9346f1e6c749665e",
     "acceptance": "f1f0bc65eb63af0eb97d47de87885c239df12bd7c35d6f6edec4ba76c9044cf0",
-    "core": "25d57447587bea40616fb5c7a930eab089bbad16bc1d7c6c3a92ef1a0abe889c",
-    "all": "3ef6a63237105fa1a8d775752330d653aea013c6ef12a1133763b87465b771d0",
+    "core": "2700eb0682e31e7a355b3c73e2c35047d72fbb4b439406cc0690e756a2069496",
+    "all": "8634a0265818709eb856673664cb0ba28eddc9d24f3ff5e00d62398df096a5b7",
 }
 
 if __name__ == "__main__":

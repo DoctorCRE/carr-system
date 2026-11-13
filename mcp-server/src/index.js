@@ -83,10 +83,12 @@ import INGEST_TRANSPORT from "./ingest-transport.v1.json" with { type: "json" };
 // at its own call site below, since a 401 is invisible to a >=500 check.
 
 import { OAuthProvider, getOAuthApi } from "@cloudflare/workers-oauth-provider";
-import { neon, Pool } from "@neondatabase/serverless";
+import { neon, Pool } from "./postgres.ts";
+import { scheduledPushOutbox } from "./web-push-outbox.ts";
+import { scheduledSubjectWatches } from "./subject-watch-scheduler.ts";
 import { mcpApiHandler, dispatch } from "./mcp.js";
 import { handleAuthorize, handleCallback, handleConsent } from "./google-oidc.js";
-export { PhoneAudioHandoff } from './phone-audio-handoff.js';
+export { PhoneAudioHandoff } from './phone-audio-handoff.ts';
 export { OAuthConsentState } from "./oauth-consent-state.ts";
 export { VerbRequestBudget } from "./verb-request-budget.js";
 export { AiNeuronBudget } from "./ai-budget.js";
@@ -105,12 +107,12 @@ import { createPhoneCallHandler, PHONE_STUDIO_PREFIX } from "./phone-call-sessio
 import { TOOLS } from "./tools.js";
 import { buildRelease } from "./release.js";
 import { readCommandCenterSummary } from "./workspace-command-center.js";
-import { wrapWithCorrelation } from "./correlation.js";
+import { wrapWithCorrelation } from "./correlation.ts";
 import { publicError } from "./public-errors.ts";
 import { bearerCredential } from "./bearer.ts";
 import { withFailureRecording, scheduleFailureRecord, actorUnresolvedFailureClass } from "./trace.js";
-import { createTourInternalWebHandler } from "./tour-internal-web.js";
-import { createReportsWebHandler, isReportsHostRequest } from "./reports-web.js";
+import { createTourInternalWebHandler } from "./tour-internal-web.ts";
+import { createReportsWebHandler, isReportsHostRequest } from "./reports-web.ts";
 import { createReportsRuntimeAdapters, createTourRuntimeAdapters } from "./tour-runtime.js";
 
 const JSON_HEADERS = { "content-type": "application/json" };
@@ -747,5 +749,9 @@ async function routeRequest(request, env, ctx) {
 // ordering is load-bearing) so every route's >=500 responses and uncaught
 // throws are covered the same single-wrap way.
 export default {
+  scheduled(controller, env, context) {
+    if (new Date(controller.scheduledTime).getUTCMinutes() % 5 === 0) scheduledSubjectWatches(controller, env, context);
+    context.waitUntil(scheduledPushOutbox(env));
+  },
   fetch: wrapWithCorrelation(withFailureRecording(routeRequest)),
 };

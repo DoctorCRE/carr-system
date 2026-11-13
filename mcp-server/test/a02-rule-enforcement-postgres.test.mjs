@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // Test rule enforcement against PostgreSQL.
 
@@ -9,7 +10,6 @@ import { TOOLS, ToolError } from "../src/tools.js";
 import { readRuleEnforcementCoverage } from "../src/lifecycle-assurance.v5.js";
 
 const DSN = await snapshotDatabase('a02-rule-enforcement-postgres-');
-const LOOPBACK = /@(localhost|127[.]0[.]0[.]1)[:/]|^postgres(ql)?:\/\/(localhost|\/)/;
 
 const sha = text => createHash("sha256").update(text, "utf8").digest("hex");
 
@@ -187,7 +187,7 @@ async function callVerb(pg, database, role, actor, verb, args) {
 }
 
 test("V5-A02 coverage and fallback writer on real PostgreSQL", async t => {
-  assert.match(DSN, LOOPBACK, "the V5-A02 database proof runs only against a loopback disposable database");
+  assertDisposableDatabase(DSN);
   const pg = (await import("pg")).default;
   const source = new URL(DSN).pathname.replace(/^\//, "");
   const admin = await clientFor(pg, "postgres");

@@ -1,6 +1,7 @@
-import { installFocusedFutureWorkStore } from './helpers/focused-future-work-store.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
+import { installFocusedFutureWorkStore } from './helpers/focused-future-work-store.ts';
 // Test feature switch reads and scheduled health on PostgreSQL.
-import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -42,9 +43,7 @@ test('Feature switch reads and scheduled health on disposable PostgreSQL', { ski
   try {
     let connection;
     if (ciDsn) {
-      const url = new URL(ciDsn);
-      assert.ok(['postgres:', 'postgresql:'].includes(url.protocol));
-      assert.ok(['127.0.0.1', 'localhost'].includes(url.hostname), 'fixture requires disposable loopback PostgreSQL');
+      assertDisposableDatabase(ciDsn, { service: true });
       admin = new pg.Client({ connectionString: ciDsn });
       await admin.connect();
       beforeCluster = await clusterState();

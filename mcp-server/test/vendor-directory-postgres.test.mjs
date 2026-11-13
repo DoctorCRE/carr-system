@@ -1,5 +1,6 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // Tests vendor directory migrations and PostgreSQL read and write contracts.
-import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.mjs";
+import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.ts";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -9,12 +10,10 @@ import { randomUUID } from 'node:crypto';
 import { TOOLS } from '../src/tools.js';
 import { parseBusinessQuery, readBusinessList, readBusinessRecord } from '../src/workspace-business-read.js';
 function disposableClient(dsn) {
-  const refuse = () => { throw new Error('REFUSED: disposable database requires loopback with an explicit port and no connection overrides'); };
-  let url, db;
-  try { url = new URL(dsn); db = new pg.Client({connectionString:dsn}); }
-  catch { refuse(); }
-  const hosts = ['127.0.0.1','localhost'];
-  if (!['postgres:','postgresql:'].includes(url.protocol) || !hosts.includes(url.hostname) || !url.port || url.search || url.hash || !hosts.includes(db.connectionParameters.host) || db.connectionParameters.host !== url.hostname || db.connectionParameters.port !== Number(url.port)) refuse();
+  const url = assertDisposableDatabase(dsn);
+  const db = new pg.Client({connectionString:dsn});
+  assert.equal(db.connectionParameters.host, url.searchParams.get('host') || url.hostname);
+  assert.equal(db.connectionParameters.port, Number(url.port || 5432));
   return db;
 }
 
@@ -69,6 +68,8 @@ test('W5 PostgreSQL: vendor contract migrations install together on an empty sch
 });
 
 test('W5 PostgreSQL: sourced stats, partner override, audit, replay, CAS and reader grants', async t => {
+  const observedAt = new Date('2026-10-01T00:00:00Z');
+  t.mock.timers.enable({apis:['Date'], now:observedAt});
   const dsn = process.env.DATABASE_URL;
   if (!dsn) { assert.notEqual(process.env.CARR_VENDOR_DIRECTORY_DB_REQUIRED, '1'); t.skip('disposable PostgreSQL required'); return; }
   const db = disposableClient(dsn); await db.connect();
@@ -86,7 +87,7 @@ test('W5 PostgreSQL: sourced stats, partner override, audit, replay, CAS and rea
     const call = async (who, args) => {await db.query('savepoint action');try {const r=await TOOLS['update-vendor'].handler(db,who,structuredClone(args));await db.query('release savepoint action');return r;}catch(e){await db.query('rollback to savepoint action');throw e;}};
     const version = async () => (await db.query('select version from public.vendor where id=$1',[vendor])).rows[0].version;
     const request = async fields => ({vendor,base_version:await version(),fields,idempotency_key:randomUUID()});
-    const read = async () => readBusinessRecord({client:db,actor,dataset:'vendors',id:vendor,contract:'vendor-directory.v1',correlationId:'demo',now:()=>new Date('2026-10-01')});
+    const read = async () => readBusinessRecord({client:db,actor,dataset:'vendors',id:vendor,contract:'vendor-directory.v1',correlationId:'demo',now:()=>observedAt});
     assert.equal((await read()).record.relationship.deals_worked,null,'unknown history does not become zero');
     for(const occurred_at of [0,'1','2026-02-30']) await t.test(`invalid ${JSON.stringify(occurred_at)} refuses before persisted reads`,async()=>{
       await db.query('savepoint invalid_fixture');
@@ -111,6 +112,17 @@ test('W5 PostgreSQL: sourced stats, partner override, audit, replay, CAS and rea
     const evidence={deal_id:deal,role:'worked',occurred_at:'2022-01-01',evidence_kind:'salesforce',evidence_ref:'DEMO-SF-'+suffix};
     await call(actor,await request({deal_evidence:[evidence,{...evidence,role:'referred',evidence_kind:'mail',evidence_ref:'demo-mail-entry'}],verify_deal_history:true,loan_programs:['Demo equipment financing']}));
     let result=await read();assert.equal(result.record.relationship.deals_worked,1);assert.equal(result.record.relationship.deals_referred,1);assert.equal(result.record.relationship.win_rate,1);assert.equal(result.record.relationship.computed_tier,'Trial');assert.equal(result.record.relationship.last_contact_note,'Demo financing conversation');assert.equal(result.record.relationship.recent_entries[0].detail,'Original demo email entry');assert.deepEqual(result.record.loan_programs,['Demo equipment financing']);assert.deepEqual(result.record.relationship.introductions.map(item=>item.kind).sort(),['can_introduce','intro']);
+    await t.test('verification uses the observation clock and future coverage refuses statistics', async()=>{
+      const coverage=(await db.query('select deal_history_verified_at from public.vendor where id=$1',[vendor])).rows[0].deal_history_verified_at;
+      assert.equal(coverage.toISOString(),observedAt.toISOString());
+      try {
+        await db.query('update public.vendor set deal_history_verified_at=$2 where id=$1',[vendor,'2026-10-01T00:00:00.000001Z']);
+        const relationship=(await read()).record.relationship;
+        assert.equal(relationship.computed_tier,'Unrated');
+        for(const key of ['deals_worked','deals_referred','won','lost','win_rate']) assert.equal(relationship[key],null,key);
+      } finally {await db.query('update public.vendor set deal_history_verified_at=$2 where id=$1',[vendor,coverage]);}
+      assert.equal((await read()).record.relationship.deals_worked,1);
+    });
     await t.test('evidence event new value matches the stored JSON array',async()=>{
       const row=(await db.query("select v.deal_evidence,e.new_value->'deal_evidence' as logged from public.vendor v join public.event e on e.subject_id=v.id where v.id=$1 and e.field='deal_evidence' order by e.id desc limit 1",[vendor])).rows[0];
       assert.ok(Array.isArray(row.logged));assert.deepEqual(row.logged,row.deal_evidence);

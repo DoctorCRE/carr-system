@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { researchSummary } from '../src/lead-follow-up.ts';
-import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
 
 let fixture, c, actor, party, lead;
@@ -135,8 +135,8 @@ test('quiet lead and vendor cadence proposes dated follow-ups but respects exist
   const vendorParty = randomUUID(), vendor = randomUUID();
   await c.query(`insert into party(id,kind,name,created_by,updated_by) values($1,'person','Synthetic broker',$2,$2)`, [vendorParty,actor.id]);
   await c.query(`insert into vendor(id,party_id,category,stage,disposition,last_touch,owner_id,created_by,updated_by)
-    values($1,$2,'broker',(select slug from vendor_stage order by sort limit 1),'active',current_date-100,$3,$3,$3)`, [vendor,vendorParty,actor.id]);
-  await c.query('update lead set last_touch=current_date-60,owner_id=$2 where id=$1', [lead,actor.id]);
+    values($1,$2,'broker',(select slug from vendor_stage order by sort limit 1),'active',carr_business_date()-100,$3,$3,$3)`, [vendor,vendorParty,actor.id]);
+  await c.query('update lead set last_touch=carr_business_date()-60,owner_id=$2 where id=$1', [lead,actor.id]);
   const queue = () => read('quiet-follow-ups', { lead_days: 45, vendor_days: 90 });
   let result = await queue();
   assert.equal(result.sent, false);
@@ -145,12 +145,12 @@ test('quiet lead and vendor cadence proposes dated follow-ups but respects exist
   const defaults = await read('quiet-follow-ups');
   assert.deepEqual(defaults.cadence, { lead_days: 45, vendor_days: 90 });
   assert.deepEqual(defaults.proposals, result.proposals);
-  await c.query('update lead set next_action_date=current_date+20 where id=$1', [lead]);
+  await c.query('update lead set next_action_date=carr_business_date()+20 where id=$1', [lead]);
   assert.ok(!(await queue()).proposals.some(row => row.subject_id === lead));
   await c.query('update lead set next_action_date=null where id=$1', [lead]);
   const action = randomUUID();
   await c.query(`insert into next_action(id,subject_type,subject_id,owner_id,due_on,description,created_by,updated_by)
-    values($1,'lead',$2,$3,current_date+20,'Synthetic existing promise',$3,$3)`, [action,lead,actor.id]);
+    values($1,'lead',$2,$3,carr_business_date()+20,'Synthetic existing promise',$3,$3)`, [action,lead,actor.id]);
   assert.ok(!(await queue()).proposals.some(row => row.subject_id === lead));
   await c.query('delete from next_action where id=$1', [action]);
   await c.query('update lead set suppressed=true where id=$1', [lead]);
@@ -179,8 +179,8 @@ test('legacy board advice respects party-level contact restrictions even when le
 test('party contact state controls advice on both boards and quiet lead and vendor proposals', async () => {
   const vendor = randomUUID();
   await c.query(`insert into vendor(id,party_id,category,stage,disposition,last_touch,created_by,updated_by)
-    values($1,$2,'broker',(select slug from vendor_stage order by sort limit 1),'active',current_date-100,$3,$3)`, [vendor,party,actor.id]);
-  await c.query("update lead set stage='nurture_drip',suppressed=false,client_id=null,last_touch=current_date-60 where id=$1", [lead]);
+    values($1,$2,'broker',(select slug from vendor_stage order by sort limit 1),'active',carr_business_date()-100,$3,$3)`, [vendor,party,actor.id]);
+  await c.query("update lead set stage='nurture_drip',suppressed=false,client_id=null,last_touch=carr_business_date()-60 where id=$1", [lead]);
   try {
     for (const state of ['nurture','paused','do_not_contact','active']) {
       await c.query('update party set contact_state=$2 where id=$1', [party,state]);

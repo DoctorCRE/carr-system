@@ -1,7 +1,7 @@
 // Assess sale readiness and buyer coverage from lease evidence.
 import { z } from 'zod';
-import { envelope } from './evidence.mjs';
-import { id, usd } from './runway.mjs';
+import { envelope } from './evidence.ts';
+import { id, usd } from './runway.ts';
 import { date } from './conversion.mjs';
 
 const yesNo = z.enum(['yes', 'no', 'unknown']);

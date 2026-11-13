@@ -3,7 +3,8 @@
 # Claude Code rules
 
 `AGENTS.md`, imported above, holds every shared rule. This file adds only the
-rules for Claude Code sessions.
+rules for Claude Code sessions. Pull request approval follows GitHub required
+review by the CARR review App, as described in AGENTS.md.
 
 ## "carr needs authentication" is not a reason to ask Joe to sign in
 
@@ -61,11 +62,12 @@ the T3 thread id, not the Claude session id. Mint a card
 through `dispatch-job`, launch a successor with `t3_thread_launch`, post its link,
 and stop. The successor starts `/pstack:poteto-mode` in Orchestrate, reads the
 handoff and Session pickup playbook, and owns the program, never the code
-(rule 974655e1). As part of its opening act, the successor calls
-`t3_thread_organize` with action `"pin"` and omits `threadId` to pin itself. Then
-it calls `t3_thread_organize` with action `"unpin"` and `threadId` set to the
-retiring orchestrator's T3 thread id from the launch prompt and handoff. The
-successor performs both pin actions after it starts (rule d6b2b1ca).
+(rule 974655e1). Seats never pin themselves or any thread. The successor unpins
+the retiring thread only if the handoff or launch prompt says an earlier seat pinned it;
+otherwise leave pins alone (rule 5ddc8cf8).
+Neither seat may archive the retiring thread (rule 82eb869e).
+Every delegated job starts with `delegate_task`; `t3_thread_launch` is reserved
+for an orchestrator successor or a thread Joe requests.
 
 Idle subscription sessions over about 200K tokens can compact near cache expiry
 regardless of the window. PreCompact is the one-attempt backstop for that case.

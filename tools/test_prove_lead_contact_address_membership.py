@@ -10,6 +10,8 @@ import threading
 import unittest
 
 RUNNER = Path(__file__).with_name('prove-lead-contact-address-membership.py')
+READ_CAP_SECONDS = json.loads((RUNNER.parents[1] / 'ops/config/ci-execution-budgets.json').read_text())[
+    'lead_contact_address_proof_measurement']['read_cap_seconds']
 
 
 class ProofCliTests(unittest.TestCase):
@@ -52,7 +54,7 @@ else:
             try:
                 result = subprocess.run([sys.executable, str(RUNNER), '--origin',
                     f'http://127.0.0.1:{server.server_port}', '--call-wrapper', str(wrapper),
-                    '--timeout-seconds', str(timeout)], capture_output=True, text=True, timeout=10)
+                    '--timeout-seconds', str(timeout)], capture_output=True, text=True, timeout=timeout + 5)
                 logged = [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
                 return result, logged, releases
             finally:
@@ -111,8 +113,8 @@ else:
         self.assertNotIn('human_steps', receipt)
 
     def test_read_budget_and_two_page_cap(self):
-        result, calls, _ = self.run_cli(count=30)
-        self.assertEqual(result.returncode, 0)
+        result, calls, _ = self.run_cli(count=30, timeout=READ_CAP_SECONDS)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)['status'], 'human_pending')
         details = [args for verb, args in calls if verb == 'lead-board' and 'lead_id' in args]
         self.assertEqual(len(details), 20)
