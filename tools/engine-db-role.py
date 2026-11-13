@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Reconcile the engine's bounded reader login through db-tap run mode.
+"""Reconcile bounded engine database roles from versioned specifications.
 
 Use --environment production, optionally with --branch for a named Neon branch.
-Passwords stay in private CARR files.
+The reader CLI keeps its existing private credential-file protocol.
+Writer callers use load_spec("writer") and reconcile in-process with Cloudflare-only custody.
 The --rotate flag is the only way to reset an existing login's password.
 """
 import argparse
@@ -33,6 +34,7 @@ CHECKS = (
     'no_default_grants', 'no_sequence_rights', 'read_only_default', 'activity_whole_table_select',
     'ops_read_refused', 'insert_refused', 'update_refused', 'delete_refused',
     'timezone_utc', 'statement_timeout_15s', 'idle_timeout_30s',
+    'effective_relation_grants_match', 'no_ownership',
 )
 
 
@@ -41,29 +43,52 @@ class Refusal(RuntimeError):
 
 
 def validate_spec(data):
-    if data['role'] != ROLE or data['schema'] != 'public':
+    if data['role'] not in (ROLE, 'engine_business_writer') or data['schema'] != 'public':
         raise Refusal('role spec exceeds the authorized role or schema')
+    writer = data['role'] == 'engine_business_writer'
+    allowed_functions = ALLOWED_FUNCTIONS | ({'carr_is_partner_actor(uuid)',
+        'carr_is_partner_made(uuid,text)'} if writer else set())
     functions = data.get('functions')
     if (not isinstance(functions, list)
-            or any(not isinstance(name, str) or name not in ALLOWED_FUNCTIONS for name in functions)
+            or any(not isinstance(name, str) or name not in allowed_functions for name in functions)
             or len(functions) != len(set(functions))):
         raise Refusal('function spec must be a duplicate-free subset of the authorized functions')
     names = data['tables'] + data['views']
-    if not names or len(names) != len(set(names)) or any(
+    if 'tool_call' in names or not names or len(names) != len(set(names)) or any(
         not re.fullmatch('[a-z_][a-z_0-9]*', name) for name in names
     ):
         raise Refusal('role spec contains duplicate or invalid relation names')
     if data['settings'] != {
-        'default_transaction_read_only': 'on', 'timezone': 'UTC',
+        'default_transaction_read_only': 'off' if writer else 'on', 'timezone': 'UTC',
         'search_path': 'pg_catalog, public',
         'statement_timeout': '15s', 'idle_in_transaction_session_timeout': '30s',
     }:
-        raise Refusal('role settings differ from the reader contract')
+        raise Refusal('role settings differ from the role contract')
+    writes = data.get('writes', {})
+    if (not isinstance(writes, dict) or (writes and not writer)
+            or set(writes) - {'INSERT', 'UPDATE'}):
+        raise Refusal('only the writer may grant INSERT and UPDATE')
+    for relations in writes.values():
+        if (not isinstance(relations, list) or any(not isinstance(n, str) for n in relations)
+                or len(relations) != len(set(relations))
+                or not set(relations) <= set(data['tables'])):
+            raise Refusal('writes must name duplicate-free allowlisted tables')
     return data
 
 
-def load_spec():
-    return validate_spec(json.loads(SPEC.read_text()))
+def load_spec(kind='reader'):
+    if kind not in ('reader', 'writer'):
+        raise Refusal('unknown engine role kind')
+    reader = validate_spec(json.loads(SPEC.read_text()))
+    if kind == 'reader':
+        return reader
+    writer = json.loads(SPEC.with_name('engine-business-writer.json').read_text())
+    if writer.pop('extends') != 'reader':
+        raise Refusal('writer must extend the reader contract')
+    return validate_spec(reader | writer | {
+        'functions': reader['functions'] + writer['functions'],
+        'settings': reader['settings'] | {'default_transaction_read_only': 'off'},
+    })
 
 
 def password_change(*, exists, rotate, authenticated):
@@ -79,29 +104,35 @@ def attribute_options(observed):
     return ' '.join(options)
 
 
+def relation_grants(data):
+    return {(name, 'SELECT') for name in data['tables'] + data['views']} | {
+        (name, privilege) for privilege, names in data.get('writes', {}).items() for name in names}
+
+
 def grant_statements(data):
-    return [f'GRANT SELECT ON TABLE "public"."{name}" TO "{ROLE}"'
-            for name in data['tables'] + data['views']] + [
-                f'GRANT EXECUTE ON FUNCTION public.{name} TO "{ROLE}"'
+    validate_spec(data)
+    return [f'GRANT {privilege} ON TABLE "public"."{name}" TO "{data["role"]}"'
+            for name, privilege in sorted(relation_grants(data))] + [
+                f'GRANT EXECUTE ON FUNCTION public.{name} TO "{data["role"]}"'
                 for name in data['functions']]
 
 
 def connect(uri):
     options = '-c lock_timeout=10000'
-    if urlsplit(uri).username != ROLE:
+    if urlsplit(uri).username not in (ROLE, 'engine_business_writer'):
         options += ' -c statement_timeout=30000'
     return psycopg.connect(uri, connect_timeout=20, options=options)
 
 
-def authenticated(uri):
+def authenticated(uri, role_name=ROLE):
     try:
         with connect(uri) as conn:
-            return conn.execute('SELECT current_user = %s', (ROLE,)).fetchone()[0]
+            return conn.execute('SELECT current_user = %s', (role_name,)).fetchone()[0]
     except psycopg.OperationalError:
         return False
 
 
-def revocations(conn):
+def revocations(conn, role_name=ROLE):
     """Only this role's explicit ACLs change; PUBLIC and incumbent ACLs stay intact."""
     return [row[0] for row in conn.execute("""
       WITH target AS (SELECT oid FROM pg_roles WHERE rolname = %s::text)
@@ -138,16 +169,18 @@ def revocations(conn):
       FROM pg_default_acl d JOIN pg_roles r ON r.oid=d.defaclrole
         LEFT JOIN pg_namespace n ON n.oid=d.defaclnamespace,
         aclexplode(d.defaclacl) a,target t WHERE a.grantee=t.oid
-    """, (ROLE,) * 8).fetchall()]
+    """, (role_name,) * 8).fetchall()]
 
 
 def reconcile(conn, data, password=None):
-    conn.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', (ROLE,))
-    exists = conn.execute('SELECT EXISTS(SELECT FROM pg_roles WHERE rolname=%s)', (ROLE,)).fetchone()[0]
+    validate_spec(data)
+    role_name = data['role']
+    conn.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', (role_name,))
+    exists = conn.execute('SELECT EXISTS(SELECT FROM pg_roles WHERE rolname=%s)', (role_name,)).fetchone()[0]
     if exists:
         if conn.execute("""SELECT EXISTS(SELECT FROM pg_shdepend d JOIN pg_roles r
-            ON r.oid=d.refobjid WHERE r.rolname=%s AND d.deptype='o')""", (ROLE,)).fetchone()[0]:
-            raise Refusal('reader owns objects; ownership changes exceed this tool')
+            ON r.oid=d.refobjid WHERE r.rolname=%s AND d.deptype='o')""", (role_name,)).fetchone()[0]:
+            raise Refusal('engine role owns objects; ownership changes exceed this tool')
     for name in data['tables'] + data['views']:
         kind = conn.execute('SELECT relkind FROM pg_class WHERE oid=to_regclass(%s)',
                             ('public.' + name,)).fetchone()
@@ -158,54 +191,76 @@ def reconcile(conn, data, password=None):
         if not conn.execute('SELECT to_regprocedure(%s)', ('public.' + name,)).fetchone()[0]:
             raise Refusal('allowlisted function missing: ' + name)
     if not exists:
-        conn.execute(sql.SQL('CREATE ROLE {} LOGIN').format(sql.Identifier(ROLE)))
+        conn.execute(sql.SQL('CREATE ROLE {} LOGIN').format(sql.Identifier(role_name)))
     observed = conn.execute('SELECT rolsuper,rolreplication,rolbypassrls FROM pg_roles '
-                            'WHERE rolname=%s', (ROLE,)).fetchone()
+                            'WHERE rolname=%s', (role_name,)).fetchone()
     # Managed owners cannot reassert NOSUPERUSER even when it is already false.
-    conn.execute(sql.SQL('ALTER ROLE {} ' + attribute_options(observed)).format(sql.Identifier(ROLE)))
-    conn.execute(sql.SQL('ALTER ROLE {} RESET ALL').format(sql.Identifier(ROLE)))
+    conn.execute(sql.SQL('ALTER ROLE {} ' + attribute_options(observed)).format(sql.Identifier(role_name)))
+    conn.execute(sql.SQL('ALTER ROLE {} RESET ALL').format(sql.Identifier(role_name)))
     for (database,) in conn.execute("""SELECT d.datname FROM pg_db_role_setting s
         JOIN pg_database d ON d.oid=s.setdatabase
-        WHERE s.setrole=(SELECT oid FROM pg_roles WHERE rolname=%s)""", (ROLE,)).fetchall():
+        WHERE s.setrole=(SELECT oid FROM pg_roles WHERE rolname=%s)""", (role_name,)).fetchall():
         conn.execute(sql.SQL('ALTER ROLE {} IN DATABASE {} RESET ALL').format(
-            sql.Identifier(ROLE), sql.Identifier(database)))
+            sql.Identifier(role_name), sql.Identifier(database)))
     for key, value in data['settings'].items():
         setting = (sql.SQL(', ').join(sql.Identifier(name) for name in value.split(', '))
                    if key == 'search_path' else sql.Literal(value))
         conn.execute(sql.SQL('ALTER ROLE {} SET {} = {}').format(
-            sql.Identifier(ROLE), sql.Identifier(key), setting))
+            sql.Identifier(role_name), sql.Identifier(key), setting))
     if password is not None:
         conn.execute(sql.SQL('ALTER ROLE {} PASSWORD {}').format(
-            sql.Identifier(ROLE), sql.Literal(password)))
-    for statement in revocations(conn):
+            sql.Identifier(role_name), sql.Literal(password)))
+    for statement in revocations(conn, role_name):
         conn.execute(statement)
     conn.execute(sql.SQL('GRANT CONNECT ON DATABASE {} TO {}').format(
-        sql.Identifier(conn.info.dbname), sql.Identifier(ROLE)))
-    conn.execute(sql.SQL('GRANT USAGE ON SCHEMA public TO {}').format(sql.Identifier(ROLE)))
+        sql.Identifier(conn.info.dbname), sql.Identifier(role_name)))
+    conn.execute(sql.SQL('GRANT USAGE ON SCHEMA public TO {}').format(sql.Identifier(role_name)))
     for statement in grant_statements(data):
         conn.execute(statement)
     actual = set(conn.execute("""SELECT n.nspname,c.relname,a.privilege_type,a.is_grantable
         FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace,
         aclexplode(c.relacl) a JOIN pg_roles r ON r.oid=a.grantee WHERE r.rolname=%s""",
-        (ROLE,)).fetchall())
-    expected = {('public', name, 'SELECT', False) for name in data['tables'] + data['views']}
+        (role_name,)).fetchall())
+    expected = {('public', name, privilege, False) for name, privilege in relation_grants(data)}
     if actual != expected:
         raise Refusal('direct relation grants differ from the role spec')
     if not function_grants_match(conn, data):
         raise Refusal('direct function grants differ from the role spec')
     if conn.execute("""SELECT EXISTS(SELECT FROM pg_type t,aclexplode(t.typacl) a
-        JOIN pg_roles r ON r.oid=a.grantee WHERE r.rolname=%s)""", (ROLE,)).fetchone()[0]:
+        JOIN pg_roles r ON r.oid=a.grantee WHERE r.rolname=%s)""", (role_name,)).fetchone()[0]:
         raise Refusal('unsupported direct type grants; transaction rolled back')
+    if data.get('writes') and not effective_relation_grants_match(conn, data):
+        raise Refusal('effective relation privileges exceed or miss the role spec')
     return not exists
 
 
 def function_grants_match(conn, data):
     actual = set(conn.execute("""SELECT p.oid,a.privilege_type,a.is_grantable
         FROM pg_proc p,aclexplode(p.proacl) a
-        WHERE a.grantee=(SELECT oid FROM pg_roles WHERE rolname=%s)""", (ROLE,)).fetchall())
+        WHERE a.grantee=(SELECT oid FROM pg_roles WHERE rolname=%s)""", (data['role'],)).fetchall())
     expected = {(conn.execute('SELECT to_regprocedure(%s)::oid', ('public.' + name,)).fetchone()[0],
                  'EXECUTE', False) for name in data['functions']}
     return actual == expected
+
+
+def effective_relation_grants_match(conn, data):
+    expected = {('public', name, privilege) for name, privilege in relation_grants(data)}
+    rows = conn.execute("""SELECT n.nspname,c.relname,p.privilege,
+        has_table_privilege(%s,c.oid,p.privilege),
+        has_table_privilege(%s,c.oid,p.privilege || ' WITH GRANT OPTION'),
+        CASE WHEN p.privilege IN ('SELECT','INSERT','UPDATE','REFERENCES')
+          THEN has_any_column_privilege(%s,c.oid,p.privilege) ELSE false END
+        FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+        CROSS JOIN (VALUES ('SELECT'),('INSERT'),('UPDATE'),('DELETE'),('TRUNCATE'),
+          ('REFERENCES'),('TRIGGER')) p(privilege)
+        WHERE c.relkind IN ('r','p','v','m','f')
+          AND n.nspname NOT IN ('pg_catalog','information_schema')
+          AND n.nspname !~ '^pg_toast'""", (data['role'],) * 3).fetchall()
+    actual = {(schema, name, privilege)
+              for schema, name, privilege, table, grantable, column in rows if table}
+    return actual == expected and all(
+        not grantable and (not column or (schema, name, privilege) in expected)
+        for schema, name, privilege, table, grantable, column in rows)
 
 
 def proof(uri, data):
@@ -238,7 +293,12 @@ def proof(uri, data):
         result['statement_timeout_15s'] = conn.execute('SHOW statement_timeout').fetchone()[0] == '15s'
         result['idle_timeout_30s'] = conn.execute(
             'SHOW idle_in_transaction_session_timeout').fetchone()[0] == '30s'
-        result['read_only_default'] = conn.execute('SHOW default_transaction_read_only').fetchone()[0] == 'on'
+        result['read_only_default'] = (conn.execute('SHOW default_transaction_read_only').fetchone()[0]
+                                       == data['settings']['default_transaction_read_only'])
+        result['effective_relation_grants_match'] = effective_relation_grants_match(conn, data)
+        result['no_ownership'] = not conn.execute("""SELECT EXISTS(SELECT FROM pg_shdepend d
+            WHERE d.refobjid=(SELECT oid FROM pg_roles WHERE rolname=current_user)
+            AND d.deptype='o')""").fetchone()[0]
         result['activity_whole_table_select'] = conn.execute(
             "SELECT has_table_privilege(current_user,'public.activity','SELECT')").fetchone()[0]
         for name in ['activity'] + data['views']:
@@ -268,6 +328,8 @@ def proof(uri, data):
 
 
 def provision(owner, data, environment, rotate, root):
+    if data['role'] != ROLE:
+        raise Refusal('writer credentials must stay in memory and Cloudflare; use reconcile directly')
     parsed = urlsplit(owner)
     key = 'CARR_DB_' + environment.upper().replace('-', '_') + '_ENGINE_BUSINESS_READER_URL'
     final = root / (environment + '-engine-business-reader.env')
