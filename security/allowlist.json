@@ -1059,6 +1059,18 @@
       "sha256": "eada8d5d419393212ae4cdb69ed216603c01c9eafa0f838d6dc66ecbf6419f84",
       "rule": "pii-email",
       "reason": "WR622.S13.J334 regenerated schema snapshot retains the existing Dell staff actor email from migration 1014. No client rows or new contact values. Exact snapshot bytes only."
+    },
+    {
+      "path": "tools/test_engine_db_role.py",
+      "sha256": "e4da6f07080f04341fe2cc0dd2f778586d21d822289699bf9c8b6a2cc91c0f4a",
+      "rule": "credential-url",
+      "reason": "WR622.S1.J1106 historical synthetic URI in cb8af5a89 uses an unused placeholder and invented ep-example host. No credential or person. Replaced with constructed fixture authority in b8eb1c4ed. Exact historical blob only; no future content admitted."
+    },
+    {
+      "path": "tools/test_engine_db_role.py",
+      "sha256": "e4da6f07080f04341fe2cc0dd2f778586d21d822289699bf9c8b6a2cc91c0f4a",
+      "rule": "pii-email",
+      "reason": "WR622.S1.J1106 historical synthetic URI in cb8af5a89 uses an unused placeholder and invented ep-example host. No credential or person. Replaced with constructed fixture authority in b8eb1c4ed. Exact historical blob only; no future content admitted."
     }
   ]
 }
