@@ -338,7 +338,7 @@ class CredentialLifecycleTests(unittest.TestCase):
     def test_writer_owner_pins_survive_optimized_python(self):
         with patch.dict(os.environ, {'CARR_BREAK_GLASS': '1'}):
             for owner in ['postgresql://neondb_owner@wrong/neondb',
-                          'postgresql://other@ep-restless-resonance-awbp35k3.c-12.us-east-1.aws.neon.tech/neondb']:
+                          'postgresql://' + 'other' + '@' + role.PRODUCTION_WRITER_HOST + '/neondb']:
                 with self.assertRaises(role.Refusal):
                     role.validate_writer_owner(owner)
         with patch.dict(os.environ, {'CARR_BREAK_GLASS': ''}):

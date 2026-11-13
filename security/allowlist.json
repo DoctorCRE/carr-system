@@ -1071,6 +1071,12 @@
       "sha256": "e4da6f07080f04341fe2cc0dd2f778586d21d822289699bf9c8b6a2cc91c0f4a",
       "rule": "pii-email",
       "reason": "WR622.S1.J1106 historical synthetic URI in cb8af5a89 uses an unused placeholder and invented ep-example host. No credential or person. Replaced with constructed fixture authority in b8eb1c4ed. Exact historical blob only; no future content admitted."
+    },
+    {
+      "path": "tools/test_engine_db_role.py",
+      "sha256": "48f6a07e998820c759d19730723a4603292e0ad1286b3fc98be1951c270db245",
+      "rule": "pii-email",
+      "reason": "WR622.S1.J1118 historical invalid-owner URI fixture in fdabfb50e uses an invented username and no password. No email contact or credential. Current tests construct the URI from parts. Exact historical path and blob only; no future bytes admitted."
     }
   ]
 }
