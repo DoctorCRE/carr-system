@@ -1025,10 +1025,10 @@ async function atlasGraphResponse(request, env, session, dependencies) {
  *
  * The route holds no query knowledge of its own: the read model parses,
  * bounds and refuses the query so the list, the total and the filter semantics
- * keep exactly ONE definition. The actor comes from the verified session and is
- * never taken from the URL.
+ * keep exactly ONE definition. The actor comes from the verified session, or
+ * the comparison door's named partner, and is never taken from the URL.
  */
-async function businessResponse(request, env, session, dependencies) {
+export async function businessResponse(request, env, actor, businessReader) {
   if (!workspaceCommandCenterEnabled(env)) return json({ error: "not_found" }, 404);
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: { allow: "GET, HEAD, OPTIONS", "cache-control": "no-store" } });
@@ -1038,9 +1038,9 @@ async function businessResponse(request, env, session, dependencies) {
       status: 405, headers: { ...JSON_HEADERS, allow: "GET, HEAD, OPTIONS" },
     });
   }
-  if (typeof dependencies.businessReader !== "function") return json({ error: "DEPENDENCY_UNAVAILABLE" }, 503);
+  if (typeof businessReader !== "function") return json({ error: "DEPENDENCY_UNAVAILABLE" }, 503);
   try {
-    const payload = await dependencies.businessReader(env, session.actor, request, env.CORRELATION_ID);
+    const payload = await businessReader(env, actor, request, env.CORRELATION_ID);
     if (request.method === "HEAD") return new Response(null, { status: 200, headers: JSON_HEADERS });
     return json(payload);
   } catch (error) {
@@ -1254,7 +1254,7 @@ async function handleRequest(request, env, ctx, dependencies) {
       } else if (url.pathname === ATLAS_GRAPH_PATH) {
         response = await atlasGraphResponse(request, env, session, dependencies);
       } else if (isBusinessApiPath(url.pathname)) {
-        response = await businessResponse(request, env, session, dependencies);
+        response = await businessResponse(request, env, session.actor, dependencies.businessReader);
       } else if (url.pathname.startsWith("/api/v1/")) {
         response = json({ error: "not_found" }, 404);
       } else if (url.pathname === "/" && workspaceCommandCenterEnabled(env)) {

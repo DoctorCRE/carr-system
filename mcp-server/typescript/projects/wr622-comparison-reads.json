@@ -1,0 +1,5 @@
+{
+  "worker": ["src/comparison-reads.ts"],
+  "node": ["test/comparison-reads.test.ts"],
+  "entry": ["test/comparison-reads.test.ts"]
+}

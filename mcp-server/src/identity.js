@@ -600,6 +600,20 @@ export function hermesCosActorForToken(authorizationHeader, hermesCosTokensRaw) 
          hermesCosTokensRaw);
 }
 
+/**
+ * The engine's comparison door (WR-000622; engine issue 209): one named partner,
+ * reached only through the ComparisonReads service binding, which has no URL.
+ * It keeps the browser session's partner shape so partner-scoped reads answer
+ * the same, carries its own via for the read log, and the comparison marker
+ * that mcp.js locks to the empty read profile.
+ */
+export function comparisonActorForPartner(partner) {
+  if (!isKnownPartner(partner)) return null;
+  return { slug: partner, display: DISPLAY[partner], human: true, comparison: true,
+           via: "comparison-reads", client_id: null,
+           sponsoring_human_slug: null, human_slug: null, sponsor_required: false };
+}
+
 // ---------------------------------------------------------------------------
 // THE AUTHENTICATED CALL (2026-09-12, PR 1013 — THIRD correction round, under
 // standing-rule AMENDMENT 8, logged 2026-09-13).

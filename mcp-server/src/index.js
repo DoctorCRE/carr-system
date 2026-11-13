@@ -82,6 +82,7 @@ import INGEST_TRANSPORT from "./ingest-transport.v1.json" with { type: "json" };
 // (mcpApiHandler's/protectedApiHandler's own actor-unresolved 401) is recorded
 // at its own call site below, since a 401 is invisible to a >=500 check.
 
+import { WorkerEntrypoint } from "cloudflare:workers";
 import { OAuthProvider, getOAuthApi } from "@cloudflare/workers-oauth-provider";
 import { neon, Pool } from "./postgres.ts";
 import { scheduledPushOutbox } from "./web-push-outbox.ts";
@@ -93,11 +94,13 @@ export { OAuthConsentState } from "./oauth-consent-state.ts";
 export { VerbRequestBudget } from "./verb-request-budget.js";
 export { AiNeuronBudget } from "./ai-budget.js";
 import { sharedOAuthFetch, mcpOriginRefusal, isSharedOAuthPath } from "./oauth-policy.ts";
-import { agentActorForToken, authenticatedIdentity, sessionCheckpointActorForToken, continuityActorForTokenMaps,
+import { agentActorForToken, authenticatedIdentity, comparisonActorForPartner, sessionCheckpointActorForToken, continuityActorForTokenMaps,
          serveReviewRequest, unattendedActorForToken,
          hermesActorForTokenMaps, hermesCosActorForToken } from "./identity.js";
 import { pipelineChanges } from "./dealroom.ts";
-import { authorizeProgram6Action, createDealroomHandler, isDealroomRequest, isLegacyDealroomRequest } from "./dealroom-web.js";
+import { authorizeProgram6Action, businessResponse, createDealroomHandler, isDealroomRequest, isLegacyDealroomRequest } from "./dealroom-web.js";
+import { createWorkspaceBusinessReader } from "./workspace-business-read.js";
+import { serveComparisonRead } from "./comparison-reads.ts";
 import { createProgram6RoutineController } from "./program6-routine-controller.js";
 import { appendRoomTurn, DEFAULT_ROOM, OBSERVATORY_ROOM, readRoomLatest, readRoomQueue, readRoomTurns } from "./partner-room.js";
 import { createDealDeliverablesHandler } from "./deal-deliverables-web.js";
@@ -740,6 +743,25 @@ async function routeRequest(request, env, ctx) {
   return sharedOAuthFetch(oauthProvider, request, {
     ...env, OAUTH_PROVIDER: getOAuthApi(oauthOptions, env),
   }, ctx);
+}
+
+// The engine's read-only comparison door (WR-000622, engine issue 209). A named
+// entrypoint has no route: only a Worker that declares a service binding to it
+// can call it.
+const comparisonBusinessReader = createWorkspaceBusinessReader();
+
+export class ComparisonReads extends WorkerEntrypoint {
+  read(partner, request) {
+    const { env, ctx } = this;
+    const serve = served => serveComparisonRead(partner, served, {
+      actorFor: comparisonActorForPartner,
+      tools: TOOLS,
+      mcp: (call, actor) => dispatch(call, env, ctx, actor),
+      pipeline: (read, actor) => pipelineApi(read, env, actor),
+      business: (read, actor) => businessResponse(read, env, actor, comparisonBusinessReader),
+    });
+    return wrapWithCorrelation(withFailureRecording(serve))(request, env, ctx);
+  }
 }
 
 // Top-level export. wrapWithCorrelation covers every route above in one
