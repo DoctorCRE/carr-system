@@ -295,6 +295,104 @@ class SocialBatchTest(unittest.TestCase):
             batch['drafts'].append(extra)
         return batch, current
 
+    def test_mix_manual_link_warns_and_schedules_remaining_slots(self):
+        batch, _ = self.treatment_batch()
+        manual = item('linkedin', sb.local_to_utc('2026-12-11T09:02'))
+        manual['text'] = 'Joe shared an article: https://news.example.com/story'
+        self.fake.items.append(manual)
+        batch['drafts'] = [d for d in batch['drafts'] if d['id'] != 'li3']
+        current = sb.plan(self.ctx)
+        batch['plan_digest'] = current['plan_digest']
+        self.assertEqual(sb.check(batch, current, self.ctx), [])
+        self.assertTrue(any(w.startswith('manual_platform_links:') for w in current['warnings']))
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+        self.assertEqual(self.fake.created, len(batch['drafts']))
+
+    def test_latest_baseline_check_replaces_abandoned_time_and_posts_win(self):
+        import io
+        from contextlib import redirect_stdout
+        batch, _ = self.treatment_batch('2026-11-23')
+        batch['drafts'] = self.drafts()['drafts']
+        for draft in batch['drafts']:
+            draft['local_time'] = (datetime.fromisoformat(draft['local_time']) + timedelta(weeks=3)).isoformat(timespec='minutes')
+        (self.ctx.out / '2026-11-09/batch.json').unlink()
+        path = Path(self.tmp.name) / 'baseline.json'
+
+        def checked():
+            path.write_text(json.dumps(batch))
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(sb.main(['check', str(path)], self.ctx), 0)
+
+        checked()
+        self.draft(batch, 'o1')['local_time'] = '2026-11-24T09:16'
+        checked()
+        self.ctx.now = datetime(2026, 12, 4, 6, tzinfo=sb.ZONE)
+        expected = ['2026-12-08T09:16', '2026-12-11T12:58']
+        self.assertEqual(sb.plan(self.ctx)['slot_plan']['slots']['one_liner'], expected)
+        self.ctx.now = datetime(2026, 11, 20, 6, tzinfo=sb.ZONE)
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+        self.draft(batch, 'o1')['local_time'] = '2026-11-24T07:13'
+        checked()
+        self.ctx.now = datetime(2026, 12, 4, 6, tzinfo=sb.ZONE)
+        self.assertEqual(sb.plan(self.ctx)['slot_plan']['slots']['one_liner'], expected)
+        (self.ctx.out / '2026-11-23/batch.json').unlink()
+        self.assertEqual(sb.plan(self.ctx)['slot_plan']['slots']['one_liner'], expected)
+
+    def test_mix_short_links_refused_for_drafts_and_logged_posts(self):
+        batch, current = self.treatment_batch()
+        draft = self.draft(batch, 'li1')
+        original = draft['text']
+        for link in ('bit.ly/x', 'lnkd.in', 't.co/x', 'buff.ly/x', 'ow.ly/x',
+                     'example.health/story', 'example.ai/path', 'www.example.us', 'https://example.invalid'):
+            with self.subTest(link=link):
+                draft['text'] = original + ' ' + link
+                self.assertIn('platform_links', {f['rule'] for f in sb.check(batch, current, self.ctx)})
+        draft['text'] = original
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+        ledger = self.ctx.out / '2026-12-07/ledger.jsonl'
+        rows = [json.loads(line) for line in ledger.read_text().splitlines()]
+        for row in rows:
+            if row.get('event') == 'posted' and row.get('platform') == 'linkedin':
+                row['text'] += ' bit.ly/x'
+        ledger.write_text(''.join(json.dumps(r) + '\n' for r in rows))
+        empty = copy.deepcopy(batch)
+        empty['drafts'] = []
+        current = sb.plan(self.ctx)
+        empty['plan_digest'] = current['plan_digest']
+        self.assertIn('platform_links', {f['rule'] for f in sb.check(empty, current, self.ctx)})
+
+    def test_mix_facebook_single_cards_allowed(self):
+        batch, current = self.treatment_batch()
+        draft = self.draft(batch, 'fb1')
+        draft['format'] = 'single_card'
+        draft['media'] = copy.deepcopy(self.draft(batch, 'fb2')['media'])
+        draft['media'][0]['path'] = str(self.media / 'fb1.png')
+        png(Path(draft['media'][0]['path']), 1080, 1080)
+        self.assertEqual(sb.check(batch, current, self.ctx), [])
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+
+    def test_linkedin_image_deviation_visible_in_plan_check_receipt_and_feedback(self):
+        import io
+        from contextlib import redirect_stdout
+        batch, current = self.treatment_batch()
+        deviation = current['deviations'][0]
+        self.assertEqual(deviation['platform'], 'linkedin')
+        self.assertEqual((deviation['requested_format'], deviation['actual_format']),
+                         ('document_carousel', 'image_carousel'))
+        self.assertIn('Blotato', deviation['reason'])
+        path = Path(self.tmp.name) / 'mix.json'
+        path.write_text(json.dumps(batch))
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(sb.main(['check', str(path)], self.ctx), 0)
+        self.assertEqual(json.loads(output.getvalue())['deviations'], [deviation])
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+        receipt = json.loads((self.ctx.out / '2026-12-07/batch.json').read_text())
+        self.assertEqual(receipt['deviations'], [deviation])
+        feedback = next(args['body_text'] for verb, args in self.verbs if verb == 'write-doctrine-section')
+        self.assertIn('document_carousel -> image_carousel', feedback)
+        self.assertIn(deviation['reason'], feedback)
+
     def test_both_mix_weeks_schedule_counts_and_preserve_slot_order(self):
         for week in ('2026-12-07', '2026-12-14'):
             batch, current = self.treatment_batch(week)
