@@ -344,14 +344,73 @@ class SocialBatchTest(unittest.TestCase):
                     self.assertEqual('idea_platform_limit' in findings,
                                      version == 'baseline' and case['id'] == 'one-source-distinct-ideas')
 
+    def test_cancelled_logged_post_frees_slot_for_refill(self):
+        batch = self.drafts()
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+        row = next(r for r in sb.ledger_rows(self.ctx.out)
+                   if r['event'] == 'posted' and r['draft'] == 'li2')
+        del self.fake.posts[row['submission_id']]
+        self.fake.items = [i for i in self.fake.items
+                           if (i['platform'], sb.minute(i['postTime'])) != ('linkedin', row['utc'][:16])]
+        plan = sb.plan(self.ctx)
+        self.assertEqual(plan['lanes']['linkedin']['held'], 1)
+        self.assertEqual(plan['lanes']['linkedin']['open'], 1)
+        self.assertEqual(len(plan['held_posts']), 12)
+        refill = copy.deepcopy(self.draft(batch, 'li2'))
+        refill['id'] = 'li2-refill'
+        batch.update(plan_digest=plan['plan_digest'], drafts=[refill])
+        batch['run_notes']['skipped_slots'] = [
+            {'lane': lane, 'reason': 'Already scheduled this week'}
+            for lane in ('x_series', 'story_time', 'x_visual')]
+        self.assertEqual(sb.check(batch, plan, self.ctx), [])
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+        self.assertEqual(self.fake.created, 14)
+
+    def test_manual_post_warns_and_schedules_remaining_slots(self):
+        self.fake.items = [item('facebook', '2026-11-03T15:06:00Z')]
+        plan = sb.plan(self.ctx)
+        self.assertEqual(plan['lanes']['facebook']['held'], 1)
+        self.assertEqual(plan['lanes']['facebook']['open'], 1)
+        self.assertTrue(any('manual_content_unknown' in w for w in plan['warnings']))
+        batch = self.drafts(plan)
+        batch['drafts'] = [d for d in batch['drafts'] if d['id'] != 'fb1']
+        self.assertEqual(sb.check(batch, plan, self.ctx), [])
+        result = sb.submit(batch, self.ctx)
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(self.fake.created, 12)
+
     def test_missing_historical_metadata_stops_refill(self):
-        self.fake.items = [item('linkedin', '2026-11-03T15:06:00Z')]
+        batch = self.drafts()
+        self.assertTrue(sb.submit(batch, self.ctx)['ok'])
+        ledger = self.ctx.out / '2026-11-02/ledger.jsonl'
+        rows = [json.loads(line) for line in ledger.read_text().splitlines()]
+        for row in rows:
+            row.pop('idea_key', None)
+        ledger.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+        self.fake.requests.clear()
         plan = sb.plan(self.ctx)
         self.assertTrue(any('content_coverage_incomplete' in w for w in plan['warnings']))
-        result = sb.submit(self.drafts(plan), self.ctx)
+        refill = self.drafts(plan)
+        for draft in refill['drafts']:
+            draft['id'] += '-refill'
+        result = sb.submit(refill, self.ctx)
         self.assertFalse(result['ok'])
         self.assertIn('content_coverage_incomplete', {f['rule'] for f in result['findings']})
         self.assertEqual(self.fake.writes(), [])
+
+    def test_identifiable_manual_post_counts_toward_idea_cap(self):
+        manual = item('instagram', '2026-11-03T15:06:00Z')
+        manual['idea_key'] = 'synthetic-bank:remaining-term'
+        self.fake.items = [manual]
+        plan = sb.plan(self.ctx)
+        batch = self.drafts(plan)
+        batch['drafts'] = [d for d in batch['drafts'] if d['id'] != 'ig2']
+        for name in ('li2', 'fb1'):
+            self.draft(batch, name)['idea_key'] = manual['idea_key']
+        rules = {f['rule'] for f in sb.check(batch, plan, self.ctx)}
+        self.assertIn('idea_platform_limit', rules)
+        self.assertNotIn('content_coverage_incomplete', rules)
+        self.assertEqual(plan['lanes']['instagram']['open'], 1)
 
     def test_content_evidence_does_not_leak_across_central_week_boundary(self):
         self.fake.items = [item('linkedin', '2026-11-02T05:59:00Z')]

@@ -9,7 +9,7 @@
     "1. Run `./run.sh social-batch plan`. It prints the target week (Central), open slots per lane, held posts with idea and media evidence, recent X visual formats, warnings and plan_digest.",
     "   - status week_covered: the week is full. It wrote the no-op artifact; write the noop receipt and stop.",
     "   - status queue_unreadable, spec_changed, spec_unreadable or error: stop, say which and its detail, and write no receipt.",
-    "   - Name every warning in your final report. Incomplete held-content evidence stops automatic refill; never call that week compliant.",
+    "   - Name every warning in your final report. Plan warnings do not stop the batch. Manual Blotato posts occupy platform slots and count toward the idea cap when identifiable. Unknown manual content warns and allows the remaining slots; never call that week fully compliant. Missing evidence on logged held posts stops refill. A cancelled post whose readback returns 404 frees its slot.",
     "2. Read the store by slug with `./run.sh call read-doctrine '{\"document\":\"<slug>\"}'`: x-posting-spec, social-media-workflow, content-inspiration-bank (section 2 and the newest section 4 entries), x-strategy-2026, brand-voice, and every voice or style document those name. The store wins over any file.",
     "3. Read the one fuel file with no store copy, the vault file at `{{VAULT}}/Marketing/Social Media/content-fuel-inbox.md` (external source). Joe's own lines go first. Say if it was unreadable.",
     "4. Grok pass: not run here until WR561.S3 binds the grok CLI to read-only tools. Record grok.status skipped, reason 'grok not yet bound for headless runs', and find trends with WebSearch and the banks.",

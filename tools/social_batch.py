@@ -296,8 +296,9 @@ def plan(ctx: Context, own: frozenset[tuple[str, str]] = frozenset()) -> dict:
         if (value['state']['type'] == 'failed' or key in own or platform not in accounts
                 or str(value['account']['id']) != str(accounts[platform]['accountId'])):
             continue
-        held[key] = {'platform': platform, 'utc': stamp(parse_utc(value['postTime'])), 'source': 'listing', 'lane': _lane(platform, by_minute.get(key)),
-                     **_content_evidence(by_minute.get(key) or {})}
+        held[key] = {'platform': platform, 'utc': stamp(parse_utc(value['postTime'])), 'source': 'log' if key in by_minute else 'manual',
+                     'lane': _lane(platform, by_minute.get(key)),
+                     **_content_evidence(by_minute.get(key) or value)}
     # The default listing reaches about 7 days back; every post this script logged for
     # the week is also read back by submission id, so no listing horizon can hide it.
     # Keyed by Blotato's current time, so a post Joe moved is not counted twice.
@@ -305,12 +306,7 @@ def plan(ctx: Context, own: frozenset[tuple[str, str]] = frozenset()) -> dict:
         if (row['platform'], row['utc'][:16]) in own or not start <= parse_utc(row['utc']) < end:
             continue
         status = api.status(row['submission_id']) if row.get('submission_id') else {'status': 'scheduled'}
-        if status and status['status'] == 'failed':
-            continue
-        if not status:
-            key = (row['platform'], row['utc'][:16])
-            held[key] = {'platform': row['platform'], 'utc': row['utc'], 'source': 'unresolved',
-                         'lane': _lane(row['platform'], row)}
+        if not status or status['status'] == 'failed':
             continue
         when = status.get('scheduledTime') or row['utc']
         key = (row['platform'], minute(when))
@@ -318,8 +314,12 @@ def plan(ctx: Context, own: frozenset[tuple[str, str]] = frozenset()) -> dict:
             held[key] = {'platform': row['platform'], 'utc': stamp(parse_utc(when)), 'source': 'log', 'lane': _lane(row['platform'], row),
                          **_content_evidence(row)}
     warnings = []
-    if any(not _complete_evidence(h) for h in held.values()):
+    if any(h['source'] != 'manual' and not _complete_evidence(h) for h in held.values()):
         warnings.append('content_coverage_incomplete: held posts lack idea or media evidence; automatic refill stopped')
+    for h in held.values():
+        if h['source'] == 'manual' and not _complete_evidence(h):
+            warnings.append(f"manual_content_unknown: {h['platform']} {h['utc']} occupies a slot; "
+                            'idea or media coverage is unknown; continuing the batch')
     if not api.listing(*bounds(week - timedelta(days=7))):
         warnings.append('control_week_empty: the previous week lists no posts; planning from the spec cadence')
     unknown_x = sum(1 for h in held.values() if h['lane'] == 'unknown')
@@ -371,15 +371,16 @@ def _content_rules(posts: list[dict], find) -> None:
     ideas: dict[str, set[str]] = {}
     images: dict[str, set[str]] = {}
     for post in posts:
-        if not _complete_evidence(post):
+        if post.get('source') != 'manual' and not _complete_evidence(post):
             find(post.get('id'), 'content_coverage_incomplete',
                  'held content lacks idea or media evidence; stop automatic refill')
             continue
-        platforms = ideas.setdefault(post['idea_key'], set())
-        platforms.add(post['platform'])
-        if len(platforms) > 2:
-            find(post.get('id'), 'idea_platform_limit', f"{post['idea_key']}: at most two platforms per Central week")
-        for digest in post['media_sha256']:
+        if isinstance(post.get('idea_key'), str) and post['idea_key'].strip():
+            platforms = ideas.setdefault(post['idea_key'], set())
+            platforms.add(post['platform'])
+            if len(platforms) > 2:
+                find(post.get('id'), 'idea_platform_limit', f"{post['idea_key']}: at most two platforms per Central week")
+        for digest in post.get('media_sha256') or []:
             platforms = images.setdefault(digest, set())
             platforms.add(post['platform'])
             if len(platforms) > 1:
