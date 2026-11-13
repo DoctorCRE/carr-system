@@ -656,6 +656,29 @@ class PasswordPostgresTests(unittest.TestCase):
                 for name in ['engine_business_reader', 'engine_business_writer']:
                     conn.execute(role.sql.SQL('DROP ROLE IF EXISTS {}').format(role.sql.Identifier(name)))
 
+    def test_recovery_clears_password_statements_after_failed_commit(self):
+        from psycopg.conninfo import make_conninfo
+        owner = os.environ['ENGINE_ROLE_TEST_DSN']
+        stats = make_conninfo(owner, dbname='postgres')
+        with role.connect(stats) as conn:
+            if conn.execute("SELECT to_regclass('pg_stat_statements')").fetchone()[0] is None:
+                self.skipTest('pg_stat_statements is not installed in the fixture')
+        data = role.load_spec('writer')
+        password = 'Synthetic-Secret-uncommitted'
+        with role.connect(owner) as conn:
+            conn.execute(role.sql.SQL('CREATE ROLE {} LOGIN').format(role.sql.Identifier(data['role'])))
+            role.set_password(conn, data['role'], password)
+            conn.rollback()
+
+        def retained():
+            with role.connect(stats) as conn:
+                return conn.execute('SELECT count(*) FROM pg_stat_statements WHERE strpos(query, %s) > 0',
+                                    (password,)).fetchone()[0]
+        self.assertGreater(retained(), 0)
+        result = role.recover_credential(owner, data, lambda: None)
+        self.assertEqual(result, {'hyperdrive_exists': False, 'invalidated': False})
+        self.assertEqual(retained(), 0)
+
 
 @unittest.skipUnless(os.environ.get('ENGINE_ROLE_TEST_DSN'), 'canonical PostgreSQL fixture not requested')
 class ReaderRolePostgresTests(unittest.TestCase):
