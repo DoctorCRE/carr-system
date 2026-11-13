@@ -68,6 +68,7 @@ NOTE_KEYS = {'grok', 'claims_review', 'improved', 'not_improved', 'skipped_slots
 MEDIA_TYPES = {'.png': 'image/png', '.gif': 'image/gif', '.mp4': 'video/mp4'}
 STORY_FLAG = re.compile(r'\b(made[ -]up|invented|composite|hypothetical|fictional|not a real)\b', re.I)
 STATUS_URL = re.compile(r'https?://(?:www\.)?(?:x|twitter)\.com/\w+/status/\d+', re.I)
+POST_LINK = re.compile(r'https?://|www\.|(?<![\w@])[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}(?![\w-])', re.I)
 HASHTAG = re.compile(r'(?<![\w&])#\w+')
 
 
@@ -156,13 +157,14 @@ def treatment_slots(ctx: Context, cadence: dict, week: date, logged: list[dict])
         return None
     baseline = date.fromisoformat(override['baseline_start_week']) + (week - date.fromisoformat(override['start_week']))
     folder = ctx.out / baseline.isoformat()
-    posts: list[dict] = []
-    for name in ('baseline-slots.jsonl', 'batch.json'):
-        path = folder / name
-        if path.is_file():
-            receipts = [json.loads(line) for line in path.read_text().splitlines()] if name.endswith('.jsonl') else [json.loads(path.read_text())]
-            posts.extend(p for receipt in receipts for p in receipt.get('posts', []))
+    posted_path = folder / 'batch.json'
+    posts = json.loads(posted_path.read_text()).get('posts', []) if posted_path.is_file() else []
     posts += [r for r in logged if r['week'] == baseline.isoformat()]
+    if not posts:
+        checked_path = folder / 'baseline-slots.jsonl'
+        if checked_path.is_file():
+            receipts = [json.loads(line) for line in checked_path.read_text().splitlines() if line.strip()]
+            posts = receipts[-1].get('posts', []) if receipts else []
     slots = {}
     for lane, rule in cadence['lanes'].items():
         prior = sorted({parse_utc(p['utc']).astimezone(ZONE).replace(tzinfo=None)
@@ -386,7 +388,16 @@ def plan(ctx: Context, own: frozenset[tuple[str, str]] = frozenset()) -> dict:
     if not api.listing(*bounds(week - timedelta(days=7))):
         warnings.append('control_week_empty: the previous week lists no posts; planning from the spec cadence')
     unknown_x = sum(1 for h in held.values() if h['lane'] == 'unknown')
+    for h in held.values():
+        if (h['source'] == 'manual' and cadence.get('platform_mix', {}).get(h['platform'], {}).get('no_links')
+                and POST_LINK.search(h.get('text', ''))):
+            warnings.append(f"manual_platform_links: {h['platform']} {h['utc']} has a link; continuing the batch")
     slot_plan = treatment_slots(ctx, cadence, week, logged)
+    deviations = [{
+        'platform': 'linkedin', 'requested_format': 'document_carousel', 'actual_format': 'image_carousel',
+        'reason': 'approved image-carousel substitution for this test; PDF posting would require a new Blotato path '
+                  'while Blotato is being replaced (decision 9e277e86); results do not measure document carousels',
+    }] if slot_plan is not None else []
     video_required = cadence.get('platform_mix', {}).get('instagram', {}).get('formats', {}).get('video', {}).get('min', 0)
     video_held = sum(h['platform'] == 'instagram' and h.get('format') == 'video' for h in held.values())
     automatic_skips: list[dict] = []
@@ -413,7 +424,7 @@ def plan(ctx: Context, own: frozenset[tuple[str, str]] = frozenset()) -> dict:
         'days': [{'date': day.isoformat(), 'utc_offset': datetime.combine(day, time(12), ZONE).isoformat()[-6:]}
                  for day in (week + timedelta(days=i) for i in range(7))],
         'lanes': lanes, 'x_total': x_total, 'effective_cadence': cadence,
-        'slot_plan': slot_plan, 'automatic_skips': automatic_skips,
+        'slot_plan': slot_plan, 'automatic_skips': automatic_skips, 'deviations': deviations,
         'held_posts': sorted(held.values(), key=lambda h: h['utc']),
         'recent_x_visual_formats': [r['format'] for r in earlier if r['platform'] == 'twitter' and r.get('visual')]
         [:cadence['x_visual']['no_repeat_last']],
@@ -423,7 +434,7 @@ def plan(ctx: Context, own: frozenset[tuple[str, str]] = frozenset()) -> dict:
     }
     result['plan_digest'] = hashlib.sha256(json.dumps(
         {k: result[k] for k in ('week_start', 'lanes', 'x_total', 'held_posts', 'recent_x_visual_formats',
-                                'animated_last_week', 'slot_plan', 'automatic_skips')} | {'effective_cadence': cadence}, sort_keys=True).encode()).hexdigest()
+                                'animated_last_week', 'slot_plan', 'automatic_skips', 'deviations')} | {'effective_cadence': cadence}, sort_keys=True).encode()).hexdigest()
     if covered:
         _artifact(ctx, {'summary': f'SOCIAL_BATCH_WEEK_COVERED week={week}', 'week_start': week.isoformat()})
     return result
@@ -641,7 +652,7 @@ def _mix_rules(content, current, cadence, skipped, find):
     for platform, policy in cadence['platform_mix'].items():
         mine = [p for p in content if p['platform'] == platform]
         for post in mine:
-            if policy.get('no_links') and re.search(r'(?:https?://|www\.|\b[a-z0-9-]+\.(?:com|org|net|io|co|gov|edu)\b)', post.get('text', ''), re.I):
+            if policy.get('no_links') and post.get('source') != 'manual' and POST_LINK.search(post.get('text', '')):
                 find(post.get('id'), 'platform_links', f'{platform} treatment posts have no links')
         for form, rule in policy['formats'].items():
             n = sum(p.get('format') == form for p in mine)
@@ -697,7 +708,7 @@ def _batch_rules(valid, current, cadence, skipped, find) -> None:
         find(None, 'carr_carousel', 'a carousel on at least one CARR platform')
     for platform in CARR_PLATFORMS:
         mine = [d['format'] for d in carr if d['platform'] == platform]
-        if len(mine) > 1 and set(mine) <= SINGLE_CARDS:
+        if not cadence.get('platform_mix') and len(mine) > 1 and set(mine) <= SINGLE_CARDS:
             find(None, 'carr_all_single', f'{platform} runs only single cards')
     animated = [d for d, _ in valid if d['format'] == 'animated_card']
     if len(animated) > cadence['animated_card']['max_per_batch']:
@@ -814,7 +825,8 @@ def _finish(drafts, current, ctx, api, ledger, posted, media_urls, window) -> di
     (folder / 'batch.json').write_text(json.dumps({
         'schema': 'carr-social-batch-log/v1', 'week_start': current['week_start'], 'summary': summary,
         'posts': posts, 'run_notes': drafts['run_notes'], 'plan_warnings': current['warnings'],
-        'effective_cadence': current['effective_cadence'], 'slot_plan': current['slot_plan']},
+        'effective_cadence': current['effective_cadence'], 'slot_plan': current['slot_plan'],
+        'deviations': current['deviations']},
         indent=1, sort_keys=True) + '\n')
     if verified != len(posts):
         return {'ok': False, 'status': 'unverified', 'summary': summary,
@@ -866,6 +878,9 @@ def _section(posts, notes, current) -> str:
             lines += [f'{label}:'] + [f'- {v}' for v in values]
     for slot in notes.get('skipped_slots') or []:
         lines.append(f"Skipped {slot['lane']}: {slot['reason']}")
+    for deviation in current['deviations']:
+        lines.append(f"Deviation {deviation['platform']}: {deviation['requested_format']} -> "
+                     f"{deviation['actual_format']}: {deviation['reason']}")
     for warning in current['warnings']:
         lines.append(f'Plan warning: {warning}')
     return '\n'.join(lines)
@@ -1002,7 +1017,7 @@ def main(argv=None, ctx: Context | None = None) -> int:
             findings = check(drafts, current, ctx)
             if not findings:
                 record_baseline_slots(drafts, current, ctx)
-            return _print({'ok': not findings, 'findings': findings, 'skipped_slots': current['automatic_skips']}, 0 if not findings else 1)
+            return _print({'ok': not findings, 'findings': findings, 'skipped_slots': current['automatic_skips'], 'deviations': current['deviations']}, 0 if not findings else 1)
         result = submit(drafts, ctx)
         return _print(result, 0 if result['ok'] else 1)
     except Stop as stop:
