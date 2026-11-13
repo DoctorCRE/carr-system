@@ -1,4 +1,4 @@
-"""Tests the engine reader role contract and resumable password decisions."""
+"""Test bounded engine role grants, convergence and credential custody."""
 import importlib.util
 import pathlib
 import os
@@ -173,6 +173,197 @@ class ReaderRoleTests(unittest.TestCase):
                     failed_check = ('functions_executable' if denied and denied.startswith('public.')
                                     else denied)
                     self.assertEqual(result[key], key != failed_check, key)
+
+
+class WriterRoleTests(unittest.TestCase):
+    def test_writer_inherits_reader_and_exact_write_contract(self):
+        reader = role.load_spec()
+        writer = role.load_spec('writer')
+        self.assertEqual(writer['role'], 'engine_business_writer')
+        excluded = (
+            'board_snapshot practice_origination_event practice_origination_feed '
+            'v_calendar_capture_receipt v_capture_candidate_queue v_capture_session_status '
+            'v_deal_room_presence v_export_clients v_export_deals v_lead_client_best '
+            'v_lead_prospect_engagement v_lead_workspace v_lead_workspace_correspondence '
+            'v_lead_workspace_stage_history v_party_graph v_practice_origination_party_address '
+            'v_record_flag_subject v_subject_timeline v_today_triage v_vendor_assignment_context'
+        ).split()
+        self.assertEqual(writer['tables'], [name for name in reader['tables'] if name not in excluded])
+        self.assertEqual(writer['views'], [name for name in reader['views'] if name not in excluded])
+        self.assertEqual(len(writer['tables'] + writer['views']), 97)
+        expected = {
+            'INSERT': {
+                'deal_participant': 'deal_id actor_id role set_by'.split(),
+                'deal_note': 'deal_id kind text actor_id created_at'.split(),
+                'next_action': (
+                    'subject_type subject_id owner_id due_on description created_by updated_by updated_at '
+                    'status'
+                ).split(),
+                'event': (
+                    'occurred_at recorded_at actor_id verb subject_type subject_id field old_value '
+                    'new_value cause human_quote agent_rationale idempotency_key via client_id '
+                    'organization_tenant_id sponsoring_human_slug personal_scope authorization_class '
+                    'correlation_id'
+                ).split(),
+                'tool_call': (
+                    'idempotency_key verb actor_id request_hash response via client_id '
+                    'organization_tenant_id sponsoring_human_slug personal_scope authorization_class '
+                    'correlation_id'
+                ).split(),
+                'deal_conflict': 'deal_id field value_a actor_a event_a value_b actor_b'.split(),
+                'deal_presence_lease': 'actor_id deal_id field expires_at'.split(),
+            },
+            'UPDATE': {
+                'deal': (
+                    'phase owner attention next_date operating_state parking_reason parking_note '
+                    'parked_at parked_by updated_by'
+                ).split(),
+                'deal_participant': 'to_at'.split(),
+                'next_action': 'status updated_by updated_at'.split(),
+                'capture_post_call_action': 'status updated_at completed_at'.split(),
+                'deal_conflict': 'status resolved_by winner resolved_at'.split(),
+                'deal_presence_lease': 'expires_at'.split(),
+            },
+            'SELECT': {
+                'tool_call': 'idempotency_key request_hash response created_at'.split(),
+            },
+        }
+        self.assertEqual(writer['columns'], expected)
+        self.assertEqual(writer['settings']['default_transaction_read_only'], 'off')
+        self.assertEqual(writer['functions'], ['carr_business_date(timestamp with time zone)',
+                         'carr_is_partner_actor(uuid)', 'carr_is_partner_made(uuid,text)'])
+        grants = role.grant_statements(writer)
+        self.assertEqual(role.column_grants(writer), {
+            (table, column, privilege) for privilege, tables in expected.items()
+            for table, columns in tables.items() for column in columns})
+        self.assertTrue(all('engine_business_writer' in item for item in grants))
+        self.assertFalse(any('DELETE' in item for item in grants))
+        self.assertFalse(any('GRANT UPDATE' in item and 'tool_call' in item for item in grants))
+        self.assertFalse(any('tool_call' in item for item in role.grant_statements(reader)))
+        for table, column, privilege in role.column_grants(writer):
+            self.assertIn(f'GRANT {privilege} ("{column}") ON TABLE "public"."{table}" '
+                          'TO "engine_business_writer"', grants)
+
+    def test_writer_spec_rejects_forbidden_or_invalid_grants(self):
+        for writes in [{'DELETE': ['deal']}, {'INSERT': ['tool_call']},
+                       {'UPDATE': ['ops.work_request']}, {'UPDATE': ['deal', 'deal']},
+                       {'UPDATE': ['v_deal_board']}, {'UPDATE': ['deal; DROP TABLE deal']}]:
+            with self.subTest(writes=writes), self.assertRaises(role.Refusal):
+                role.validate_spec(role.load_spec('writer') | {'writes': writes})
+        with self.assertRaises(role.Refusal):
+            role.validate_spec(role.load_spec() | {'writes': {'INSERT': ['deal']}})
+        with self.assertRaises(role.Refusal):
+            role.validate_spec(role.load_spec() | {'tables': ['tool_call']})
+        with self.assertRaises(role.Refusal):
+            role.load_spec('owner')
+        for columns in [{'DELETE': {'deal': ['id']}}, {'UPDATE': {'tool_call': ['response']}},
+                        {'SELECT': {'deal': ['id']}}, {'INSERT': {'ops.work_request': ['id']}},
+                        {'INSERT': {'deal': ['id', 'id']}}, {'INSERT': {'deal': ['id;bad']}},
+                        {'INSERT': {'deal': []}}, {'INSERT': ['deal']}]:
+            with self.subTest(columns=columns), self.assertRaises(role.Refusal):
+                role.validate_spec(role.load_spec('writer') | {'columns': columns})
+        with self.assertRaises(role.Refusal):
+            role.validate_spec(role.load_spec() | {'columns': {'SELECT': {'tool_call': ['id']}}})
+
+
+    def test_effective_matrix_requires_exact_table_and_column_rights(self):
+        data = role.load_spec('writer')
+        rows = [('public', name, privilege, True, False)
+                for name, privilege in role.relation_grants(data)]
+        columns = [('public', name, column, privilege, True, False)
+                   for name, column, privilege in role.column_grants(data)]
+        conn = MagicMock()
+        def check(tables, cols):
+            conn.execute.side_effect = [MagicMock(fetchall=lambda: tables),
+                                        MagicMock(fetchall=lambda: cols)]
+            return role.effective_relation_grants_match(conn, data)
+        self.assertTrue(check(rows, columns))
+        self.assertFalse(check(rows[:-1], columns))
+        self.assertFalse(check(rows, columns[:-1]))
+        self.assertFalse(check(rows, columns + [('public', 'tool_call', 'verb', 'SELECT', True, False)]))
+        self.assertFalse(check(rows, columns + [('public', 'tool_call', 'response', 'UPDATE', True, False)]))
+        self.assertFalse(check(rows, columns + [('public', 'deal', 'phase', 'UPDATE', True, True)]))
+        self.assertFalse(check(rows + [('public', 'deal', 'DELETE', True, False)], columns))
+
+    def test_writer_cannot_use_local_credential_protocol(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(role, 'connect') as connect:
+            with self.assertRaises(role.Refusal):
+                role.provision('synthetic-owner', role.load_spec('writer'), 'production', False,
+                               pathlib.Path(directory))
+            connect.assert_not_called()
+            self.assertEqual(list(pathlib.Path(directory).iterdir()), [])
+
+    def test_writer_read_exclusions_are_bounded_by_reader(self):
+        reader = role.load_spec()
+        writer = role.json.loads(role.SPEC.with_name('engine-business-writer.json').read_text())
+        for excluded in ['activity', ['activity', 'activity'], ['unknown'], [None]]:
+            with self.subTest(excluded=excluded), patch.object(
+                pathlib.Path, 'read_text', side_effect=[role.json.dumps(reader),
+                    role.json.dumps(writer | {'exclude_reads': excluded})]
+            ), self.assertRaises(role.Refusal):
+                role.load_spec('writer')
+
+
+@unittest.skipUnless(os.environ.get('ENGINE_ROLE_TEST_DSN'), 'canonical PostgreSQL fixture not requested')
+class PasswordPostgresTests(unittest.TestCase):
+    def test_password_never_reaches_sql_on_create_rotate_or_failure(self):
+        owner = os.environ['ENGINE_ROLE_TEST_DSN']
+        with role.connect(owner) as conn:
+            conn.autocommit = True
+            conn.execute('CREATE DATABASE password_fixture')
+            hba = pathlib.Path(conn.execute('SHOW hba_file').fetchone()[0])
+            original = hba.read_text()
+            hba.write_text('host all engine_business_reader,engine_business_writer 127.0.0.1/32 scram-sha-256\n' + original)
+            conn.execute('SELECT pg_reload_conf()')
+        target = owner.rsplit('/', 1)[0] + '/password_fixture'
+        try:
+            with role.connect(target) as conn:
+                conn.execute('CREATE TABLE public.activity(id int)')
+            for kind in ['reader', 'writer']:
+                data = role.load_spec(kind) | {'tables': ['activity'], 'views': [],
+                                              'functions': [], 'writes': {}, 'columns': {}}
+                name = data['role']
+                for attempt in ['create', 'rotate', 'failure']:
+                    with self.subTest(kind=kind, attempt=attempt):
+                        password = 'Synthetic-Secret-' + kind + '-' + attempt
+                        statements = []
+                        with role.connect(target) as conn:
+                            class Captured:
+                                def __getattr__(self, key):
+                                    return getattr(conn, key)
+
+                                def execute(self, statement, params=None):
+                                    text = (statement.as_string(conn) if isinstance(statement, role.sql.Composable)
+                                            else statement)
+                                    if attempt == 'failure' and text.startswith('ALTER ROLE') and ' PASSWORD ' in text:
+                                        text += ' INVALID'
+                                    statements.append(text)
+                                    return conn.execute(text, params)
+                            if attempt == 'failure':
+                                with self.assertRaises(role.psycopg.errors.SyntaxError):
+                                    role.reconcile(Captured(), data, password)
+                                conn.rollback()
+                            else:
+                                role.reconcile(Captured(), data, password)
+                        self.assertTrue(any(' PASSWORD ' in text and 'SCRAM-SHA-256$' in text
+                                            for text in statements))
+                        self.assertFalse(any(password in text for text in statements),
+                                         'plaintext password was sent in SQL')
+                        if attempt != 'failure':
+                            uri = target.replace('fixture@', name + ':' + password + '@')
+                            self.assertTrue(role.authenticated(uri, name))
+                            self.assertFalse(role.authenticated(uri.replace(password, 'wrong-password'), name))
+                with role.connect(target) as conn:
+                    conn.execute(role.sql.SQL('DROP OWNED BY {}').format(role.sql.Identifier(name)))
+                    conn.execute(role.sql.SQL('DROP ROLE {}').format(role.sql.Identifier(name)))
+        finally:
+            with role.connect(owner) as conn:
+                conn.autocommit = True
+                hba.write_text(original)
+                conn.execute('SELECT pg_reload_conf()')
+                conn.execute('DROP DATABASE password_fixture')
+                for name in ['engine_business_reader', 'engine_business_writer']:
+                    conn.execute(role.sql.SQL('DROP ROLE IF EXISTS {}').format(role.sql.Identifier(name)))
 
 
 @unittest.skipUnless(os.environ.get('ENGINE_ROLE_TEST_DSN'), 'canonical PostgreSQL fixture not requested')
@@ -371,6 +562,75 @@ class ReaderRolePostgresTests(unittest.TestCase):
                 conn.autocommit = True
                 conn.execute(role.sql.SQL('DROP DATABASE {}').format(role.sql.Identifier(database)))
                 conn.execute('DROP ROLE IF EXISTS settings_bystander')
+
+    def test_writer_converges_and_refuses_public_privilege_leaks(self):
+        owner = os.environ['ENGINE_ROLE_TEST_DSN']
+        data = role.load_spec('writer')
+        with role.connect(owner) as conn:
+            conn.execute('CREATE FUNCTION public.carr_is_partner_actor(uuid) RETURNS boolean '
+                         'LANGUAGE sql AS $$ SELECT true $$')
+            conn.execute('CREATE FUNCTION public.carr_is_partner_made(uuid,text) RETURNS boolean '
+                         'LANGUAGE sql AS $$ SELECT true $$')
+            conn.execute('CREATE TABLE public.tool_call(id int)')
+            for table in {name for name, _, _ in role.column_grants(data)}:
+                columns = {column for name, column, _ in role.column_grants(data) if name == table}
+                for column in sorted(columns):
+                    conn.execute(role.sql.SQL('ALTER TABLE public.{} ADD COLUMN {} text').format(
+                        role.sql.Identifier(table), role.sql.Identifier(column)))
+            conn.execute('ALTER TABLE public.event ADD COLUMN mutation_order bigint GENERATED ALWAYS AS IDENTITY')
+            self.assertTrue(role.reconcile(conn, data))
+        with role.connect(owner) as conn:
+            self.assertTrue(role.effective_relation_grants_match(conn, data))
+            conn.execute('GRANT SELECT(id), UPDATE(id) ON public.tool_call TO engine_business_writer')
+            conn.execute('GRANT DELETE ON public.deal TO engine_business_writer')
+            conn.execute('GRANT extra_bundle TO engine_business_writer')
+        with role.connect(owner) as conn:
+            self.assertFalse(role.reconcile(conn, data))
+            self.assertTrue(role.effective_relation_grants_match(conn, data))
+            self.assertFalse(conn.execute("SELECT has_sequence_privilege('engine_business_writer',"
+                "'public.event_mutation_order_seq','USAGE')").fetchone()[0])
+        writer_uri = owner.replace('fixture@', 'engine_business_writer@')
+        self.assertTrue(role.authenticated(writer_uri, data['role']))
+        with role.connect(writer_uri) as conn:
+            self.assertEqual(conn.execute('SHOW default_transaction_read_only').fetchone()[0], 'off')
+            for name, column, privilege in sorted(role.column_grants(data)):
+                if privilege == 'SELECT':
+                    conn.execute(role.sql.SQL('SELECT {} FROM public.{} LIMIT 1').format(
+                        role.sql.Identifier(column), role.sql.Identifier(name)))
+                elif privilege == 'INSERT':
+                    conn.execute(role.sql.SQL('INSERT INTO public.{} ({}) VALUES (NULL)').format(
+                        role.sql.Identifier(name), role.sql.Identifier(column)))
+                else:
+                    conn.execute(role.sql.SQL('UPDATE public.{} SET {}=NULL WHERE false').format(
+                        role.sql.Identifier(name), role.sql.Identifier(column)))
+            for statement in ['SELECT verb FROM public.tool_call',
+                              'UPDATE public.tool_call SET response=NULL WHERE false',
+                              'DELETE FROM public.tool_call WHERE false',
+                              'UPDATE public.deal SET id=NULL WHERE false']:
+                with self.assertRaises(role.psycopg.errors.InsufficientPrivilege):
+                    with conn.transaction():
+                        conn.execute(statement)
+            conn.rollback()
+        result = role.proof(writer_uri, data)
+        for check in role.CHECKS:
+            self.assertTrue(result[check], check)
+        for statement in ['GRANT SELECT ON public.tool_call TO PUBLIC',
+                          'GRANT SELECT(verb) ON public.tool_call TO PUBLIC',
+                          'GRANT UPDATE(id) ON public.tool_call TO PUBLIC',
+                          'GRANT DELETE ON public.deal TO PUBLIC']:
+            with role.connect(owner) as conn:
+                conn.execute(statement)
+            try:
+                with self.assertRaises(role.Refusal), role.connect(owner) as conn:
+                    role.reconcile(conn, data)
+            finally:
+                with role.connect(owner) as conn:
+                    conn.execute('REVOKE ALL ON public.tool_call, public.deal FROM PUBLIC')
+                    conn.execute('REVOKE ALL(id,verb) ON public.tool_call FROM PUBLIC')
+        with role.connect(owner) as conn:
+            conn.execute('ALTER TABLE public.tool_call OWNER TO engine_business_writer')
+        with self.assertRaises(role.Refusal), role.connect(owner) as conn:
+            role.reconcile(conn, data)
 
 
 if __name__ == '__main__':
