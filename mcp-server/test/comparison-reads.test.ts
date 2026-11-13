@@ -65,7 +65,7 @@ const throughDoor = (partner: unknown, request: Request, env: object = {}, send:
 const toolResult = async (reply: Response) =>
   JSON.parse(String(at(await reply.json(), "result", "content", 0, "text")));
 
-test("write tools, partner-in-person reads and the call-verb passthrough are refused before dispatch", async () => {
+test("write tools, partner-in-person reads and unregistered names are refused before dispatch", async () => {
   for (const [name, args] of [
     ["log-activity", { idempotency_key: "c0de0000-0000-4000-8000-000000000001" }],
     ["confirm-merge", {}],
@@ -77,6 +77,33 @@ test("write tools, partner-in-person reads and the call-verb passthrough are ref
     assert.equal(reply.status, 403, name);
     assert.deepEqual(await reply.json(), { error: "read_only" }, name);
   }
+});
+
+test("only the session methods and tools/call reach dispatch", async () => {
+  for (const method of [
+    "resources/list",
+    "resources/read",
+    "prompts/get",
+    "completion/complete",
+    "logging/setLevel",
+    "notifications/cancelled",
+  ]) {
+    const reply = await serveComparisonRead("joe", rpc(method), unreachable);
+    assert.equal(reply.status, 403, method);
+    assert.deepEqual(await reply.json(), { error: "method_not_allowed" }, method);
+  }
+  const dispatched: unknown[] = [];
+  const door: ComparisonDoor<unknown> = {
+    ...unreachable,
+    mcp: async (call) => {
+      dispatched.push(at(await call.json(), "method"));
+      return new Response("{}");
+    },
+  };
+  const allowed = ["initialize", "notifications/initialized", "ping", "tools/list"];
+  for (const method of allowed) await serveComparisonRead("joe", rpc(method), door);
+  await serveComparisonRead("joe", rpc("tools/call", { name: "find", arguments: { query: "Synthetic" } }), door);
+  assert.deepEqual(dispatched, [...allowed, "tools/call"]);
 });
 
 test("only GET reaches the change feed and the business read", async () => {

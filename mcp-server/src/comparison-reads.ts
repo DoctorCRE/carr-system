@@ -12,17 +12,19 @@ export type ComparisonDoor<Actor> = {
 const refuse = (status: number, error: string) =>
   Response.json({ error }, { status, headers: { "cache-control": "no-store" } });
 
-// call-verb is refused because its inner verb would escape this registry check.
+const SESSION_METHODS = new Set(["initialize", "notifications/initialized", "ping", "tools/list"]);
+
 // Partner-in-person reads stay off a machine door the comparison never needs.
 function refusedCall(rpc: unknown, tools: ComparisonDoor<unknown>["tools"]): string | null {
   if (typeof rpc !== "object" || rpc === null || !("method" in rpc) || typeof rpc.method !== "string")
     return "invalid_request";
-  if (rpc.method !== "tools/call") return null;
+  if (SESSION_METHODS.has(rpc.method)) return null;
+  if (rpc.method !== "tools/call") return "method_not_allowed";
   const params = "params" in rpc && typeof rpc.params === "object" && rpc.params !== null ? rpc.params : {};
   const name = "name" in params && typeof params.name === "string" ? params.name : "";
   const tool = Object.hasOwn(tools, name) ? tools[name] : undefined;
   const read = tool !== undefined && !("write" in tool && tool.write) && !("humanOnly" in tool && tool.humanOnly);
-  return read && name !== "call-verb" ? null : "read_only";
+  return read ? null : "read_only";
 }
 
 export async function serveComparisonRead<Actor>(
