@@ -336,6 +336,26 @@ class SocialBatchTest(unittest.TestCase):
         self.assertEqual(sb.check(batch, current, self.ctx), [])
         self.assertTrue(sb.submit(batch, self.ctx)['ok'])
 
+    def test_baseline_cli_check_retains_slots_for_existing_weekly_publisher(self):
+        import io
+        from contextlib import redirect_stdout
+        batch, _ = self.treatment_batch('2026-11-23')
+        original = self.drafts()
+        batch['drafts'] = original['drafts']
+        for draft in batch['drafts']:
+            draft['local_time'] = (datetime.fromisoformat(draft['local_time']) + timedelta(weeks=3)).isoformat(timespec='minutes')
+        path = Path(self.tmp.name) / 'checked.json'
+        path.write_text(json.dumps(batch))
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(sb.main(['check', str(path)], self.ctx), 0)
+        receipt = self.ctx.out / '2026-11-23/baseline-slots.jsonl'
+        self.assertTrue(receipt.is_file())
+        self.assertEqual(self.fake.created, 0)
+        self.ctx.now = datetime(2026, 12, 4, 6, tzinfo=sb.ZONE)
+        current = sb.plan(self.ctx)
+        self.assertEqual(current['slot_plan']['missing_baseline'], [])
+        self.assertEqual(current['slot_plan']['slots']['linkedin'][:2], ['2026-12-08T09:06', '2026-12-10T08:38'])
+
     def test_baseline_weeks_have_no_override(self):
         baseline = copy.deepcopy(CADENCE)
         baseline.pop('overrides')

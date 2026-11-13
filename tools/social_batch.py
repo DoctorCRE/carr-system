@@ -155,8 +155,13 @@ def treatment_slots(ctx: Context, cadence: dict, week: date, logged: list[dict])
     if override is None:
         return None
     baseline = date.fromisoformat(override['baseline_start_week']) + (week - date.fromisoformat(override['start_week']))
-    path = ctx.out / baseline.isoformat() / 'batch.json'
-    posts = json.loads(path.read_text()).get('posts', []) if path.is_file() else []
+    folder = ctx.out / baseline.isoformat()
+    posts = []
+    for name in ('baseline-slots.jsonl', 'batch.json'):
+        path = folder / name
+        if path.is_file():
+            receipts = [json.loads(line) for line in path.read_text().splitlines()] if name.endswith('.jsonl') else [json.loads(path.read_text())]
+            posts.extend(p for receipt in receipts for p in receipt.get('posts', []))
     posts += [r for r in logged if r['week'] == baseline.isoformat()]
     slots = {}
     for lane, rule in cadence['lanes'].items():
@@ -172,6 +177,21 @@ def treatment_slots(ctx: Context, cadence: dict, week: date, logged: list[dict])
     return {'baseline_week': baseline.isoformat(), 'slots': slots,
             'missing_baseline': [lane for lane in cadence['lanes'] if not any(
                 (p['lane'] if p['platform'] == 'twitter' else p['platform']) == lane for p in posts)]}
+
+
+def record_baseline_slots(drafts: dict, current: dict, ctx: Context) -> None:
+    week = date.fromisoformat(current['week_start'])
+    if not any(date.fromisoformat(o['baseline_start_week']) <= week < date.fromisoformat(o['start_week'])
+               for o in ctx.cadence.get('overrides', [])):
+        return
+    folder = ctx.out / current['week_start']
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / 'baseline-slots.jsonl'
+    posts = current['held_posts'] + [
+        {'platform': d['platform'], 'lane': d['lane'], 'utc': local_to_utc(d['local_time'])} for d in drafts['drafts']]
+    slots = {(p['platform'], p['utc']): {k: p[k] for k in ('platform', 'lane', 'utc')} for p in posts}
+    append(path, {'week_start': current['week_start'], 'evidence': 'checked slot plan, not publication proof',
+                  'posts': list(slots.values())})
 
 
 def bounds(week: date) -> tuple[datetime, datetime]:
@@ -715,6 +735,7 @@ def _submit(drafts: dict, ctx: Context) -> dict:
     findings = check(drafts, current, ctx)
     if findings:
         return {'ok': False, 'status': 'refused', 'findings': findings}
+    record_baseline_slots(drafts, current, ctx)
     drafts = copy.deepcopy(drafts)
     for skip in current['automatic_skips']:
         if skip not in drafts['run_notes'].setdefault('skipped_slots', []):
@@ -979,6 +1000,8 @@ def main(argv=None, ctx: Context | None = None) -> int:
         if args.command == 'check':
             current = plan(ctx, own_keys(ctx, drafts))
             findings = check(drafts, current, ctx)
+            if not findings:
+                record_baseline_slots(drafts, current, ctx)
             return _print({'ok': not findings, 'findings': findings, 'skipped_slots': current['automatic_skips']}, 0 if not findings else 1)
         result = submit(drafts, ctx)
         return _print(result, 0 if result['ok'] else 1)
