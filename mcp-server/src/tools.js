@@ -86,7 +86,7 @@ import { derivedIdempotencyKey } from "./derived-key.ts";
 import { DURABLE_KEY_SHAPES, REPLAY_WINDOW, durableReceipt, replayReceipt } from "./replay-receipt.ts";
 import { emailNextStepTools } from "./email-next-step.ts";
 import { EMAIL_TOUCH_SCHEMA, emailTouchBinding, guardEmailTouch, emailTouchReader } from "./email-touch.js";
-import { EMAIL_IDENTITY_SCHEMA, lockEmailIdentity, capturedEmail, guardEmailAction } from "./email-identity.ts";
+import { EMAIL_IDENTITY_SCHEMA, lockEmailIdentity, capturedEmail, guardEmailAction, originalMessageId, recordEmailMessage } from "./email-identity.ts";
 import { emailProposalTools, resolveEmailProposal } from "./email-proposals.js";
 import { clearTheDeckTools } from "./clear-the-deck.js";
 import { addCalendarMeetingPrep } from "./calendar-meeting-prep.js";
@@ -4176,6 +4176,7 @@ export const TOOLS = {
               name: { type: ['string', 'null'] }, kind: { enum: ['to', 'cc'] }, internal: { type: 'boolean' } } } },
         } },
       email_identity: EMAIL_IDENTITY_SCHEMA,
+      message_id: { type: ["string", "null"], description: "Original Message-ID header; malformed values are stored as null" },
       email_touch: EMAIL_TOUCH_SCHEMA,
       calendar_event_key: { type: "string", pattern: "^[0-9a-f]{16}$", description: "Stable Outlook event key for a meeting confirmation" },
       email_source: { type: "object", additionalProperties: false, required: ["sender_email", "mailbox_owner"],
@@ -4255,7 +4256,7 @@ export const TOOLS = {
         const existing = await c.query('select id from activity where calendar_event_key=$1 and deal_id=$2', [args.calendar_event_key, s.id]);
         if (existing.rows.length) return { ok: true, activity_id: existing.rows[0].id, subject: s, deduped: true };
       }
-      let emailIdentity = null;
+      let emailIdentity = null, emailId = null;
       if (args.email_identity) {
         if (!['email_in', 'email_out'].includes(args.kind) ||
             args.email_identity.mailbox_owner !== partnerAuthoritySlugForActor(actor))
@@ -4264,9 +4265,11 @@ export const TOOLS = {
         if (args.email_identity.mailbox_account !== account)
           throw new ToolError({ error: 'email_identity_account_mismatch' });
         emailIdentity = await lockEmailIdentity(c, args.email_identity.mailbox_owner, account, args.email_identity.item_id);
-        const anyCapture = await capturedEmail(c, emailIdentity);
+        const messageId = originalMessageId(args.message_id);
+        if (messageId) emailId = await recordEmailMessage(c, account, messageId);
+        const anyCapture = await capturedEmail(c, emailIdentity, null, emailId);
         if (anyCapture?.email_context?.lifecycle?.state) throw new ToolError({ error: 'email_not_live' });
-        const existing = await capturedEmail(c, emailIdentity, s.id);
+        const existing = await capturedEmail(c, emailIdentity, s.id, emailId);
         if (existing) {
           if (existing.email_context?.lifecycle?.state) throw new ToolError({ error: 'email_not_live' });
           if (existing.kind !== args.kind) throw new ToolError({ error: 'email_identity_conflict' });
@@ -4283,6 +4286,7 @@ export const TOOLS = {
           return result;
         }
       }
+      if (emailIdentity && !emailId) emailId = await recordEmailMessage(c, emailIdentity.mailbox_account, null);
       const assignments = [];
       if (args.vendor_assignments !== undefined) {
         if (s.type !== 'deal' || !Array.isArray(args.vendor_assignments) || !args.vendor_assignments.length || args.vendor_assignments.length > 30)
@@ -4309,12 +4313,12 @@ export const TOOLS = {
           await c.query('update vendor set updated_by=$1 where id=$2',[actor.id,vendorId]);
       }
       const r = await c.query(
-        `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source, email_context, email_source, email_identity, calendar_event_key)
-         values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated', $8::jsonb, $9::jsonb, $10::jsonb, $11) returning id, occurred_at`,
+        `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source, email_context, email_source, email_identity, calendar_event_key, email_id)
+         values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated', $8::jsonb, $9::jsonb, $10::jsonb, $11, $12) returning id, occurred_at`,
         [binding?.occurred_at || args.occurred_at || null, actor.id, args.kind, args.summary, args.detail || null, args.owed || null, s.id,
           args.email_context ? JSON.stringify(args.email_context) : null,
           args.email_source ? JSON.stringify(args.email_source) : null,
-          emailIdentity ? JSON.stringify({ ...emailIdentity, subject: s.id }) : null, args.calendar_event_key ?? null]);
+          emailIdentity ? JSON.stringify({ ...emailIdentity, subject: s.id }) : null, args.calendar_event_key ?? null, emailId]);
       const links = args.links && args.links.length
         ? await writeLinks(c, actor, args.links, args.idempotency_key) : [];
       const result = { ok: true, activity_id: r.rows[0].id, subject: s,

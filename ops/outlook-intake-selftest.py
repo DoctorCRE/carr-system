@@ -1836,6 +1836,21 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual((result.state, result.reason), ('failed', 'no_email_in_business_day'))
         self.assertTrue(any(args['kind'] == 'email_out' for _, args in self.fake.writes('log-activity')))
 
+    def test_original_message_id_reaches_record_layer_without_local_key(self):
+        self.run_intake([mail(CLIENT.email, timedelta(hours=-1), message_id=' <MiXeD@Example.test> ')])
+        calls = [a for v, a in self.fake.calls if v == 'log-activity' and a['kind'] == 'email_in']
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].get('message_id'), ' <MiXeD@Example.test> ')
+        self.assertEqual(calls[0]['email_identity']['mailbox_account'], OWNER)
+
+    def test_message_id_case_does_not_hide_new_mail_after_reconciliation(self):
+        first = mail(CLIENT.email, timedelta(hours=-1), subject='First fixture', message_id='<Case@example.test>')
+        second = mail(CLIENT.email, timedelta(hours=-1), subject='Second fixture', message_id='<case@example.test>')
+        self.run_intake([first])
+        self.run_intake([second])
+        calls = [a for v, a in self.fake.calls if v == 'log-activity' and a['kind'] == 'email_in']
+        self.assertEqual(len(calls), 2)
+
     def test_record_layer_receives_stable_mailbox_identity(self):
         first = mail(CLIENT.email, timedelta(hours=-1),
                      local_keys='77', message_id='<Stable@example.test>')

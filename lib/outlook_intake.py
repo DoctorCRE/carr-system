@@ -1101,7 +1101,7 @@ class Run:
         held = (self.state.setdefault('mail_unresolved', {}), self.state.setdefault('pending_full', {}))
         groups: dict[str, list[dict]] = {}
         for m in mails:
-            if mid := (m.get('message_id') or '').strip().strip('<>').lower():
+            if mid := (m.get('message_id') or '').strip().strip('<>'):
                 groups.setdefault(mid, []).append(m)
         for mid, rows in groups.items():
             target = next((m for m in rows if _store_keys(m['local_keys'])), rows[0])
@@ -1394,9 +1394,10 @@ class Run:
                 'summary': f'{label}: {m["subject"] or "(no subject)"}', 'detail': m['text'],
                 'occurred_at': _iso(m['sent_unix']),
                 'email_context': email_context(m, self.settings.internal_domain),
-                **({'email_identity': {'mailbox_owner': self.settings.owner, 'mailbox_account': self.settings.account,
-                     'item_id': 'hxstore-key:' + ','.join(_store_keys(m['local_keys']))}}
-                   if _store_keys(m['local_keys']) else {}),
+                'message_id': m.get('message_id'),
+                'email_identity': {'mailbox_owner': self.settings.owner, 'mailbox_account': self.settings.account,
+                     'item_id': ('hxstore-key:' + ','.join(_store_keys(m['local_keys']))
+                                 if _store_keys(m['local_keys']) else 'intake:' + m['ident'])},
                 **({'email_source': {'sender_email': m['sender'].lower(), 'mailbox_owner': self.settings.owner}}
                    if not outbound else {})}, who, '' if m['full'] else 'preview_only') for ref in refs]
             completed.extend(ref for ref, ok in zip(refs, results) if ok)

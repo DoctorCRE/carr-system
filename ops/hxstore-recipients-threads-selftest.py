@@ -116,7 +116,7 @@ class RecipientThreadExportTests(unittest.TestCase):
                           recipient(0xc101, 0xc112, CC, 'copy@example.test'),
                           recipient(0xc101, 0xc113, BCC, 'blind@example.test'))
         with patch.object(send, 'account', return_value='owner@example.test'):
-            for bcc, found in (((), None), (('blind@example.test',), f'{0xc101}@example.test')):
+            for bcc, found in (((), None), (('blind@example.test',), f'<{0xc101}@example.test>')):
                 mail = send.Mail(('target@example.test',), ('copy@example.test',), bcc, 'Synthetic sent topic', 'Body')
                 self.assertEqual(send.confirmed_mail(send.Snapshot(out['sent'], ()), mail, 1_793_000_000 - 5), found)
 
@@ -131,7 +131,7 @@ class RecipientThreadExportTests(unittest.TestCase):
         mail = send.Mail(('target@example.test',), (), (), 'Synthetic sent topic', 'Synthetic body')
         with patch.object(send, 'account', return_value='owner@example.test'):
             self.assertEqual(send.confirmed_mail(send.Snapshot(out['sent'], ()), mail, 1_793_000_000 - 5),
-                             f'{0xc201}@example.test')
+                             f'<{0xc201}@example.test>')
 
     def test_sender_is_exported_only_when_cached_revisions_agree(self):
         out = self.export(message(0xc001, sender='actual@example.test'),

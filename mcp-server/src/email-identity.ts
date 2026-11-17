@@ -31,15 +31,20 @@ export async function lockEmailIdentity(c: EmailReader, mailbox_owner: string, m
   return { mailbox_owner, mailbox_account, item_id };
 }
 
-export async function capturedEmail(c: EmailReader, identity: Identity, subject: string | null = null) {
+export async function capturedEmail(
+  c: EmailReader,
+  identity: Identity,
+  subject: string | null = null,
+  emailId: string | null = null,
+) {
   const rows = (
     await c.query(
       `select id,kind,email_context from activity
-    where email_identity->>'mailbox_owner'=$1 and email_identity->>'mailbox_account'=$2
-      and email_identity->>'item_id'=$3
+    where ((email_identity->>'mailbox_owner'=$1 and email_identity->>'mailbox_account'=$2
+      and email_identity->>'item_id'=$3) ${emailId ? "or email_id=$5" : ""})
       and ($4::text is null or email_identity->>'subject'=$4 or party_id::text=$4 or email_context->>'send_id' is not null)
     order by (email_context->'lifecycle' is not null) desc,occurred_at,id limit 1`,
-      [identity.mailbox_owner, identity.mailbox_account, identity.item_id, subject],
+      [identity.mailbox_owner, identity.mailbox_account, identity.item_id, subject, ...(emailId ? [emailId] : [])],
     )
   ).rows;
   return rows[0];
@@ -59,4 +64,27 @@ export async function guardEmailAction(c: EmailReader, args: Action, ToolError: 
   ).rows;
   if (rows.some((row) => row.email_context?.lifecycle?.state && row.email_context.lifecycle.state !== "live"))
     throw new ToolError({ error: "email_not_live" });
+}
+
+export function originalMessageId(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const value = raw.trim();
+  const atom = "[A-Za-z0-9!#$%&'*+\\/=?^_`{|}~-]+";
+  const dotAtom = `${atom}(?:\\.${atom})*`;
+  return new RegExp(`^<${dotAtom}@(?:${dotAtom}|\\[[\\x21-\\x5a\\x5e-\\x7e]+\\])>$`).test(value) ? value : null;
+}
+
+export async function recordEmailMessage(c: EmailReader, mailbox: string, messageId: string | null) {
+  if (messageId) {
+    await c.query("select pg_advisory_xact_lock(hashtextextended($1,0))", [
+      JSON.stringify(["message-id", mailbox, messageId]),
+    ]);
+    const existing = (
+      await c.query("select id from email where mailbox_account=$1 and message_id=$2", [mailbox, messageId])
+    ).rows[0];
+    if (existing) return existing.id;
+  }
+  return (
+    await c.query("insert into email(mailbox_account,message_id) values($1,$2) returning id", [mailbox, messageId])
+  ).rows[0]?.id;
 }

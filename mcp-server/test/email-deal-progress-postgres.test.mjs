@@ -2944,7 +2944,9 @@ function finishSummary(source, claim, extra = {}) {
 const listedSummary = async id => (await command('list-email-proposals', { deal, status: 'pending' }, actor, 'carr_reader'))
   .proposals.find(row => row.source.activity_id === id)?.email_summary;
 
-test('real intake capture verdict survives filing and the summary queue', async () => {
+test('real intake capture verdict survives filing and the summary queue', async t => {
+  const { email } = (await c.query("select email from actor where slug='joe'")).rows[0];
+  t.after(() => c.query("update actor set email=$1 where slug='joe'", [email]));
   for (const kind of ['preview', 'conflict', 'oversized', 'unknown', 'full']) {
     const payload = JSON.parse(execFileSync('python3', ['-c', `
 import json,runpy,sys
@@ -2953,13 +2955,15 @@ sys.path.insert(0, 'ops')
 f=runpy.run_path('ops/outlook-intake-selftest.py')
 t=f['IntakeTest'](); t.setUp()
 try:
-    m=f['mail']('pat@example.test', -timedelta(hours=1), kind=sys.argv[1], body='We received the LOI from the landlord.')
+    m=f['mail']('pat@example.test', -timedelta(hours=1), kind=sys.argv[1], subject='Suite question '+sys.argv[1],
+                body='We received the LOI from the landlord.')
     t.run_intake([m])
     payload=t.fake.writes('log-activity')[-1][1]
     print(json.dumps(payload))
 finally:
     t.doCleanups()
 `, kind], { cwd: new URL('../..', import.meta.url), encoding: 'utf8' }).trim().split('\n').at(-1));
+    await c.query("update actor set email=$1 where slug='joe'", [payload.email_identity.mailbox_account]);
     const source = await command('log-activity', { ...payload, ref: clientRef, idempotency_key: randomUUID() });
     await command('record-email-proposal', { idempotency_key: randomUUID(), kind: 'phase_move',
       activity_id: source.activity_id, deal, evidence_quote: 'We received the LOI from the landlord.', confidence: 0.9 });
