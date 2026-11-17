@@ -164,4 +164,93 @@ test('Home review lifecycle uses exact current domain owners on PostgreSQL', asy
     await refuses(call('list-email-proposals', {proposal_id:proposal,limit:1}), 'email_proposals_arguments_invalid');
   });
   assert.deepEqual(JSON.parse(readFileSync(new URL('../contracts/home-review.v1.json', import.meta.url))), HOME_REVIEW_CONTRACT);
+  await c.query("update actor set email='dell@example.test' where slug='dell'");
+  const addDraft = async (n, conversation, mailbox = 'joe', patch = {}) => {
+    const source = randomUUID(), draft = randomUUID();
+    await c.query(`insert into activity(id,occurred_at,actor_id,kind,summary,detail,email_source,email_context)
+      values($1,now(),$2,'email_in','Synthetic grouped source','Synthetic evidence',
+        jsonb_build_object('mailbox_owner',$4::text,'sender_email','sender@example.test'),
+        jsonb_build_object('conversation_id',$3::text,'sender',jsonb_build_object('name','Synthetic Sender')))`,
+    [source, actors.joe.id, conversation, mailbox]);
+    await c.query(`insert into email_proposal(id,kind,activity_id,evidence_quote,owner,confidence,created_by,
+        draft_subject,draft_body,created_at)
+      values($1,'reply_draft',$2,'Synthetic evidence','joe',0.95,$3,'Synthetic subject','Synthetic body',
+        now()-interval '1 hour'+$4*interval '1 minute')`, [draft,source,actors.joe.id,n]);
+    if (patch.status === 'approved_to_send') {
+      await c.query(`update email_proposal set status='approved_to_send',version=$2,resolved_by=$3,resolved_at=now(),
+        submitted_at=now(),submitted_email=$4::jsonb where id=$1`, [draft, patch.version, actors.joe.id, JSON.stringify({
+        subject:'Synthetic subject', body:'Synthetic body', sha256:'synthetic',
+        to:['sender@example.test'], cc:['dell@example.test']})]);
+    }
+    if (patch.deleted) await c.query(
+      `update activity set email_context=jsonb_set(email_context,'{lifecycle}','{"state":"deleted"}') where id=$1`, [source]);
+    return draft;
+  };
+  const decide = async (command, kept) => {
+    const args = {proposal_id:kept,base_version:1,idempotency_key:randomUUID()};
+    await call(command,command==='submit-email-draft'
+      ? {...args,subject:'Synthetic reply',body:'Synthetic body',to:['sender@example.test'],cc:['dell@example.test']}
+      : {...args,reason:'No reply needed'});
+    const event = (await c.query('select new_value from event where idempotency_key=$1',[args.idempotency_key])).rows;
+    assert.equal(event.length,1);
+    return [...event[0].new_value.covered_proposal_ids].sort();
+  };
+  const statuses = async ids => (await c.query(
+    'select status from email_proposal where id=any($1::uuid[]) order by id',[ids])).rows.map(r => r.status);
+  for (const command of ['snooze-home-inbox', 'settle-home-inbox', 'submit-email-draft', 'dismiss-email-proposal']) {
+    for (const later of (command.endsWith('home-inbox') ? [false] : [false, true])) {
+      await t.test(`merged replies: ${command}, later arrival ${later}`, async () => {
+        const conversation = randomUUID(), drafts = [];
+        for (let n=0;n<4;n++) drafts.push(await addDraft(n, conversation));
+        const kept = drafts[3];
+        const card = (await read()).items.find(i => i.source_id === kept);
+        assert.equal(card.merged_source_ids.length,4);
+        if (later) drafts.push(await addDraft(4, conversation));
+        if (command.endsWith('home-inbox')) {
+          const until = (await c.query("select now()+interval '1 day' as deadline")).rows[0].deadline.toISOString();
+          const result = await call(command,{items:[{item_id:card.item_id,base_version:card.base_version}],
+            ...(command==='snooze-home-inbox' ? {until} : {}),
+            idempotency_key:randomUUID()});
+          assert.equal(result.results[0].ok,true,JSON.stringify(result));
+          const fresh = (await read()).items.find(i => i.source_id===kept);
+          assert.equal(fresh.section,command==='snooze-home-inbox' ? 'snoozed' : 'settled');
+
+        } else {
+          const submitted = await addDraft(-5, conversation, 'joe', {status:'approved_to_send', version:2});
+          const deletedSource = await addDraft(-4, conversation, 'joe', {deleted:true});
+          const outside = [await addDraft(-3, randomUUID()), await addDraft(-2, ''), await addDraft(-1, conversation, 'dell'), submitted, deletedSource];
+          const covered = await decide(command, kept);
+          assert.deepEqual(covered, drafts.slice(0,3).sort(), 'event names exactly the covered drafts');
+          assert.equal(covered.includes(submitted), false, 'an already submitted draft stays out of covered ids');
+          assert.equal(covered.includes(deletedSource), false, 'a deleted source draft stays out of covered ids');
+          assert.deepEqual(await statuses(outside.slice(0,3)), ['pending','pending','pending'],
+            'other conversations, missing conversation IDs and other mailboxes stay pending');
+          const row = async proposal => (await c.query('select status,version from email_proposal where id=$1',[proposal])).rows[0];
+          assert.deepEqual(await row(submitted), {status:'approved_to_send', version:2},
+            'an earlier submitted reply stays submitted');
+          assert.deepEqual(await row(deletedSource), {status:'pending', version:1},
+            'a draft whose source email was deleted stays unchanged');
+          const rows = (await c.query('select id,status,resolution_reason,resolved_by,version from email_proposal where id=any($1::uuid[])',[drafts])).rows;
+          assert.equal(rows.length,drafts.length,'proposal history is retained');
+          for (const covered of drafts.slice(0,3)) {
+            const row=rows.find(r=>r.id===covered);
+            assert.equal(row.status,'dismissed');
+            assert.ok(row.resolution_reason.includes('conversation'));
+            assert.equal(row.resolved_by,actors.joe.id);
+            assert.equal(row.version,2);
+          }
+          const pending=(await read()).items.filter(i=>drafts.includes(i.source_id)&&i.source_state==='needs_attention');
+          assert.deepEqual(pending.map(i=>i.source_id),later ? [drafts[4]] : []);
+        }
+      });
+    }
+  }
+  for (const command of ['submit-email-draft', 'dismiss-email-proposal']) {
+    await t.test(`blank conversation IDs never cover each other: ${command}`, async () => {
+      const earlier = await addDraft(0, '   '), kept = await addDraft(1, '');
+      assert.deepEqual(await decide(command, kept), []);
+      assert.deepEqual(await statuses([earlier]), ['pending']);
+    });
+  }
+
 });
