@@ -49,7 +49,7 @@ function exchange(server, env, { host = APP_HOST, authorization = `Bearer ${SECR
 
 function cookie(response) {
   const value = response.headers.get("set-cookie");
-  assert.match(value, /^__Host-dealroom_session=[A-Za-z0-9_-]+; Path=\/; Max-Age=43200; Secure; HttpOnly; SameSite=Lax$/);
+  assert.match(value, /^__Host-dealroom_session=[A-Za-z0-9_-]+; Path=\/; Max-Age=2592000; Secure; HttpOnly; SameSite=Lax$/);
   assert.equal(value.includes("Domain="), false);
   return value.split(";", 1)[0];
 }
@@ -65,7 +65,7 @@ test("E2E exchange mints the normal host-pinned partner session without Google",
   assert.equal(env.OAUTH_KV.writes.length, 1);
   const written = env.OAUTH_KV.writes[0];
   assert.match(written.key, /^dealroom_session:[a-f0-9]{64}$/);
-  assert.equal(written.options.expirationTtl, 43200);
+  assert.equal(written.options.expirationTtl, 2592000);
   const stored = JSON.parse(written.value);
   assert.equal(stored.props.slug, "joe");
   assert.equal(stored.props.via, "dealroom-cookie");
@@ -146,7 +146,7 @@ test("E2E-marked sessions cannot authenticate in production or outlive normal ex
     headers: { cookie: sessionCookie },
   }), targetEnv, {});
   assert.equal((await bootstrap(handler(), { ...env, CARR_ENV: "production" })).status, 401);
-  assert.equal((await bootstrap(handler({ now: () => NOW + 43200 * 1000 }), env)).status, 401);
+  assert.equal((await bootstrap(handler({ now: () => NOW + 2592000 * 1000 }), env)).status, 401);
 });
 
 test("staging's MCP origin policy admits its normal browser cookie without widening production", async () => {
