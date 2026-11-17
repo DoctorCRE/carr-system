@@ -364,9 +364,9 @@ class LocalKeyExportTests(unittest.TestCase):
             db.close()
         self.assertEqual(rows, [
             (str(0x1001), 'Sent Items', 1_793_000_000, 1_793_000_000,
-             'to@example.test, cc@example.test, bcc@example.test', 'pair@example.test'),
+             'to@example.test, cc@example.test, bcc@example.test', '<pair@example.test>'),
             (str(0x2002), 'Inbox', 1_793_000_100, 1_793_000_110, 'to@example.test, cc@example.test',
-             'pair@example.test')])
+             '<pair@example.test>')])
         self.assertEqual(kinds, [(0x1001, 'bcc', 'bcc@example.test')])
 
     def test_a_typed_current_folder_proves_account_without_a_catalogue_entry(self):
