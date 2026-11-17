@@ -74,8 +74,9 @@ and flagged preview_only. A later full body is logged as a note.
 
 With engine_mail set in outlook.json, each email and its deal-folder attachments go to
 the engine's doors instead (lib/engine_mail.py): the engine links the email to its
-parties itself, and intake writes no activity, full-text note, contact finding, lead
-proposal or deal file to the record layer for that email.
+parties itself, and intake writes no activity, full-text note, contact finding, flag
+item or deal file to the record layer for that email. Lead proposals for unknown
+senders and the links note stay on the record layer until their engine doors exist.
 
 The private copy and decoded database live in a 0700 work folder under
 out/outlook-intake/ and are deleted before the run ends; a folder that cannot be
@@ -1310,8 +1311,9 @@ class Run:
         self.counts['delivery_failures_pending'] = sum(r['disposition'] == 'retryable' for r in mailbox['reports'].values())
         return not any(self.counts[k] for k in ('writes_failed', 'writes_deferred', 'requests_blocked'))
 
-    def engine_emails(self, mails: list[dict], since: int) -> None:
+    def engine_emails(self, mails: list[dict], matcher: Matcher, since: int) -> None:
         assert self.engine
+        leads = self.state.setdefault('engine_leads', {})
         for m in mails:
             message_id = (m.get('message_id') or '').strip().strip('<>')
             if message_id:
@@ -1319,12 +1321,14 @@ class Run:
             if (m['metadata_incomplete'] or m['sent_unix'] > self.now.timestamp() + 300
                     or (m['sent_unix'] < since and not self.engine.holds(message_id))):
                 continue
+            inbound = not _internal(m['sender'], self.settings.internal_domain)
+            if inbound and matcher.classify(m['sender']) == 'missing' and proposable(m['sender']):
+                self.lead_candidates.append((m, leads.setdefault(m['ident'], {'sent': m['sent_unix']})))
             if not message_id:
                 self.engine.count('engine_message_id_missing')
                 continue
             recipients = [{'address': address, 'kind': kind} for field, kind in (('recipients', 'to'), ('cc', 'cc'))
                           for address in dict.fromkeys(_addresses(m.get(field)))]
-            inbound = not _internal(m['sender'], self.settings.internal_domain)
             self.engine.offer(message_id, m['sent_unix'], m['full'] and bool(recipients or inbound),
                               (m['full'], len(m['text'])), inbound,
                               {'kind': 'email', 'happened_at': _iso(m['sent_unix']),
@@ -1335,7 +1339,7 @@ class Run:
 
     def emails(self, mails: list[dict], matcher: Matcher, since: int) -> None:
         if self.engine:
-            return self.engine_emails(mails, since)
+            return self.engine_emails(mails, matcher, since)
         self.reconcile([m for m in mails if not m['metadata_incomplete']])
         self.signature_findings(mails, matcher)
         delivery_reports = self.observe_delivery_failures(mails)
@@ -1719,7 +1723,8 @@ class Run:
         self.state['reads_due'] = False
         if self.ports.read_unresolved is None:
             return
-        queued = {p['sender'] for p in self.state.get('mail_unresolved', {}).values() if p.get('sender')}
+        queued = {p['sender'] for table in ('mail_unresolved', 'engine_leads')
+                  for p in self.state.get(table, {}).values() if p.get('sender')}
         deals, failures = None, 0
         for m, progress in self.lead_candidates:
             address = m['sender'].lower()
@@ -2459,6 +2464,8 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
     _prune(state, now)
     if work.engine:
         work.engine.prune()
+        oldest = (now - UNRESOLVED_DAYS).timestamp()
+        state['engine_leads'] = {k: p for k, p in state['engine_leads'].items() if p['sent'] >= oldest}
     _save(out, state)
     counts.update(mapping_counts(state), mail_ids=len(state['mail_ids']))
     if health['failing']:

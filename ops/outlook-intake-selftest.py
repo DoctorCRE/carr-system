@@ -6350,7 +6350,7 @@ class EngineMailTest(unittest.TestCase):
 
     def old_mail_writes(self):
         return [v for v, _ in self.fake.writes()
-                if v in ('log-activity', 'propose-email-lead', 'record-finding', 'attach-deal-file')]
+                if v in ('log-activity', 'record-finding', 'attach-deal-file', 'record-deal-item')]
 
     def test_switch_off_writes_the_record_layer_and_never_the_engine(self):
         self.fake.ports = self.plain_ports
@@ -6376,9 +6376,12 @@ class EngineMailTest(unittest.TestCase):
         self.assertEqual((posts[0]['kind'], posts[0]['email']['body']), ('email', 'Can we meet Thursday?'))
         self.assertEqual(self.old_mail_writes(), [])
         self.assertEqual(outcome.counts['engine_emails_stored'], 3)
+        [(_, lead)] = self.fake.writes('propose-email-lead')
+        self.assertEqual(lead['address'], 'stranger@example.test', 'unknown senders still go to the lead queue')
         self.fake.now += timedelta(minutes=30)
         self.run_intake(rows)
         self.assertEqual(len(self.engine.posts('/jobs/activities')), 3, 'a stored email is not sent again')
+        self.assertEqual(len(self.fake.intent_calls), 1, 'each unknown sender is read once')
         self.assertEqual({user for user, *_ in self.engine.calls}, {'joe'})
 
     def test_preview_waits_for_full_text_then_sends_once(self):
