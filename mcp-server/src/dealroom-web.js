@@ -49,8 +49,8 @@ const PENDING_PREFIX = "dealroom_pending:";
 const SESSION_PREFIX = "dealroom_session:";
 const ACTION_CHALLENGE_PREFIX = "dealroom_action_challenge:";
 const PENDING_TTL = 600;
-const SESSION_IDLE_TTL = 12 * 60 * 60;
-const SESSION_ABSOLUTE_TTL = 7 * 24 * 60 * 60;
+const SESSION_IDLE_TTL = 30 * 24 * 60 * 60;
+const SESSION_ABSOLUTE_TTL = 30 * 24 * 60 * 60;
 const SESSION_REFRESH_WINDOW = 60 * 60;
 const E2E_PRINCIPAL = "e2e-joe";
 const REAUTH_TTL = 10 * 60;
@@ -385,7 +385,7 @@ async function completeLogin(request, env, dependencies) {
     }
     current.session.reauthAt = now;
     await env.OAUTH_KV.put(current.key, JSON.stringify(current.session), {
-      expirationTtl: Math.max(1, Math.floor((current.session.expiresAt - now) / 1000)),
+      expirationTtl: Math.max(60, Math.floor((current.session.expiresAt - now) / 1000)),
     });
     return finish(redirect(`${origin}${safeReturnTo(pending.returnTo, origin)}`));
   }
@@ -440,6 +440,7 @@ async function sessionFor(request, env, dependencies) {
   if (session.e2ePrincipal && (session.e2ePrincipal !== E2E_PRINCIPAL || !isStagingBrowserEnvironment(env))) return null;
   const now = dependencies.now();
   let actor = dependencies.actorFromPropsFn(session.props);
+  if (!session.e2ePrincipal && dependencies.slugForEmailFn(session.props?.email) !== actor?.slug) actor = null;
   if (actor && session.e2ePrincipal) {
     if (actor.slug !== "joe" || actor.human !== true) return null;
     actor = { ...actor, display: "E2E Joe" };
@@ -475,7 +476,7 @@ async function sessionFor(request, env, dependencies) {
     refreshCookie = sessionCookie(opaque, seconds);
   }
   if (changed) {
-    const seconds = Math.max(1, Math.min(SESSION_IDLE_TTL, Math.floor((session.expiresAt - now) / 1000)));
+    const seconds = Math.max(60, Math.min(SESSION_IDLE_TTL, Math.floor((session.expiresAt - now) / 1000)));
     await env.OAUTH_KV.put(key, JSON.stringify(session), { expirationTtl: seconds });
   }
   Object.defineProperty(actor, "web_push_session", { value: await sha256(key), configurable: true });
