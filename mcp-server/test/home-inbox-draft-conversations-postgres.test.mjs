@@ -60,6 +60,10 @@ test('Home reply drafts collapse pending conversations without changing proposal
     assert.equal((await read()).length,2);
     assert.equal((await read()).find(r=>r.source_id===id(14)).title,'fallback@example.test · Reply needed');
   });
+  await add(23,'thread-b',{sender:{email:'fallback@example.test'}});
+  await t.test('a single older draft uses singular count text',async()=>{
+    assert.equal((await read()).find(r=>r.source_id===id(23)).title,'fallback@example.test · Reply needed (1 older draft)');
+  });
   await add(15,'thread-b',{status:'dismissed'});
   await t.test('resolved drafts cannot replace the pending representative',async()=>{
     assert.equal((await read()).length,2);

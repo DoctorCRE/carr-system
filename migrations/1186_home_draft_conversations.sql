@@ -98,7 +98,8 @@ language sql stable set search_path=pg_catalog,pg_temp as $$
         when 'failed' then 'Reply failed' when 'sent' then 'Reply sent'
         when 'approved_to_send' then 'Reply sending' else 'Reply draft' end||
         case when jsonb_array_length(draft_merged_ids)>1 then
-          ' ('||(jsonb_array_length(draft_merged_ids)-1)||' older drafts)' else '' end,
+          ' ('||(jsonb_array_length(draft_merged_ids)-1)||' older draft'||
+          case when jsonb_array_length(draft_merged_ids)>2 then 's' else '' end||')' else '' end,
       coalesce(result_recorded_at,submitted_at,created_at),null,false,
       coalesce(draft_subject,'Reply draft'),null,null,'Reply draft',draft_merged_ids,null,null,null from drafts
   )
