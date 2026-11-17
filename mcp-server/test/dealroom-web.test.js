@@ -550,7 +550,7 @@ test("opaque cookie session round-trips, refreshes, expires, and signs out", asy
   assert.equal(api.status, 200);
   assert.equal((await api.json()).actor.slug, "joe");
 
-  clock.now += 11.5 * 60 * 60 * 1000;
+  clock.now += (30 * 24 - 0.5) * 60 * 60 * 1000;
   api = await handler.fetch(new Request("https://dealroom.doctorcre.com/pipeline/changes",
     { headers: { cookie: session } }), environment, {});
   assert.equal(api.status, 200);
@@ -569,10 +569,84 @@ test("opaque cookie session round-trips, refreshes, expires, and signs out", asy
   const expiryHandler = identityHandler("joe.bookout.carr.us@gmail.com", expiryClock);
   const expiryCallback = await login(expiryHandler, expiryEnv, "joe.bookout.carr.us@gmail.com");
   const expiringSession = namedCookie(expiryCallback, "__Host-dealroom_session");
-  expiryClock.now += 7 * 24 * 60 * 60 * 1000 + 1;
+  expiryClock.now += 30 * 24 * 60 * 60 * 1000 + 1;
   api = await expiryHandler.fetch(new Request("https://dealroom.doctorcre.com/pipeline/changes",
     { headers: { cookie: expiringSession } }), expiryEnv, {});
   assert.equal(api.status, 401);
+});
+
+test("browser session stays valid after 13 idle hours with a 30-day cookie and KV lifetime", async () => {
+  const clock = { now: 1_800_000_000_000 };
+  const environment = env(APP_HOST);
+  const puts = [];
+  const put = environment.OAUTH_KV.put.bind(environment.OAUTH_KV);
+  environment.OAUTH_KV.put = async (key, value, options) => {
+    if (key.startsWith("dealroom_session:")) puts.push(options.expirationTtl);
+    await put(key, value);
+  };
+  const handler = identityHandler(TEST_PARTNER_EMAIL, clock);
+  const callback = await login(handler, environment, TEST_PARTNER_EMAIL);
+  assert.match(setCookies(callback).find(value => value.startsWith("__Host-dealroom_session=")), /Max-Age=2592000;/);
+  assert.deepEqual(puts, [2592000]);
+  const cookie = namedCookie(callback, "__Host-dealroom_session");
+  clock.now += 13 * 60 * 60 * 1000;
+  assert.equal((await handler.fetch(new Request(`https://${APP_HOST}/auth/session`,
+    { headers: { cookie } }), environment, {})).status, 200);
+});
+
+test("browser session refuses 31 idle days and total age over 30 days independently", async () => {
+  for (const absoluteOnly of [false, true]) {
+    const clock = { now: 1_800_000_000_000 };
+    const environment = env(APP_HOST);
+    const handler = identityHandler(TEST_PARTNER_EMAIL, clock);
+    const cookie = namedCookie(await login(handler, environment, TEST_PARTNER_EMAIL), "__Host-dealroom_session");
+    clock.now += (absoluteOnly ? 30 * 24 * 60 * 60 * 1000 + 1 : 31 * 24 * 60 * 60 * 1000);
+    const key = [...environment.OAUTH_KV.values.keys()].find(key => key.startsWith("dealroom_session:"));
+    const stored = await environment.OAUTH_KV.get(key, { type: "json" });
+    // Isolate each cap so neither expiry check can hide a missing other check.
+    if (absoluteOnly) stored.expiresAt = clock.now + 60_000;
+    else stored.createdAt = clock.now;
+    await environment.OAUTH_KV.put(key, JSON.stringify(stored));
+    assert.equal((await handler.fetch(new Request(`https://${APP_HOST}/auth/session`,
+      { headers: { cookie } }), environment, {})).status, 401);
+    assert.equal([...environment.OAUTH_KV.values.keys()].some(key => key.startsWith("dealroom_session:")), false);
+  }
+});
+
+test("removing a partner identity refuses an already-issued browser session", async () => {
+  const environment = env(APP_HOST);
+  let allowed = true;
+  const handler = createDealroomHandler({ ...identityOverrides(TEST_PARTNER_EMAIL),
+    slugForEmailFn: email => allowed && email === TEST_PARTNER_EMAIL ? "joe" : null,
+  });
+  const cookie = namedCookie(await login(handler, environment, TEST_PARTNER_EMAIL), "__Host-dealroom_session");
+  const read = () => handler.fetch(new Request(`https://${APP_HOST}/auth/session`, { headers: { cookie } }), environment, {});
+  assert.equal((await read()).status, 200);
+  allowed = false;
+  assert.equal((await read()).status, 401);
+  assert.equal([...environment.OAUTH_KV.values.keys()].some(key => key.startsWith("dealroom_session:")), false);
+  assert.equal((await handler.fetch(new Request(`https://${APP_HOST}/mcp`, {
+    method: "POST", headers: { cookie, origin: `https://${APP_HOST}` },
+  }), environment, {})).status, 401);
+});
+
+test("refresh respects the absolute end and the KV minimum retention", async () => {
+  const clock = { now: 1_800_000_000_000 };
+  const environment = env(APP_HOST);
+  const handler = identityHandler(TEST_PARTNER_EMAIL, clock);
+  const cookie = namedCookie(await login(handler, environment, TEST_PARTNER_EMAIL), "__Host-dealroom_session");
+  const put = environment.OAUTH_KV.put.bind(environment.OAUTH_KV);
+  environment.OAUTH_KV.put = async (key, value, options) => {
+    assert.equal(options.expirationTtl, 60);
+    await put(key, value);
+  };
+  clock.now += 30 * 24 * 60 * 60 * 1000 - 30_000;
+  const read = () => handler.fetch(new Request(`https://${APP_HOST}/auth/session`, { headers: { cookie } }), environment, {});
+  const refreshed = await read();
+  assert.equal(refreshed.status, 200);
+  assert.match(setCookies(refreshed)[0], /Max-Age=30;/);
+  clock.now += 30_000;
+  assert.equal((await read()).status, 401);
 });
 
 test("Program 6 browser bootstrap is feature-gated and its typed boundary refuses cross-site or unbound writes", async () => {

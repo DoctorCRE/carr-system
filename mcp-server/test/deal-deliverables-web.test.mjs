@@ -16,7 +16,7 @@ const session = {
   createdAt: now,
   expiresAt: now + 7200000,
   csrfToken: csrf,
-  props: {},
+  props: { slug: "joe", email: "partner@example.test" },
 };
 function fixture() {
   let active = true,
@@ -36,6 +36,7 @@ function fixture() {
   };
   const handler = createDealroomHandler({
     now: () => now,
+    slugForEmailFn: (email) => (email === "partner@example.test" ? "joe" : null),
     actorFromPropsFn: () => ({ slug: "joe", human: true }),
     deliverablesHandler: async (_r, _e, actor, stillActive) => {
       calls++;

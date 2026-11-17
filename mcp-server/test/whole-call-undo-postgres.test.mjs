@@ -458,10 +458,11 @@ test('authenticated app route admits single-task completion and refuses anonymou
   const now = 1700000000000;
   const opaque = randomUUID();
   const sessionKey = 'dealroom_session:' + createHash('sha256').update(opaque).digest('hex');
-  const session = { props:{slug:'joe',via:'dealroom-cookie',client_id:'dealroom-pwa'},
+  const session = { props:{slug:'joe',email:'partner@example.test',via:'dealroom-cookie',client_id:'dealroom-pwa'},
     createdAt:now,expiresAt:now+7200000,origin:'https://app.doctorcre.com',csrfToken:'synthetic-csrf' };
   let calls = 0;
   const handler = createDealroomHandler({now:()=>now,
+    slugForEmailFn:email => email === 'partner@example.test' ? 'joe' : null,
     mcpHandler:async (request,_env,_ctx,identity) => {
       calls++;
       const {params} = await request.json();
