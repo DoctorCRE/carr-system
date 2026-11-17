@@ -112,7 +112,7 @@ export function homeInboxTools({ withEnvelope, ToolError }) {
     tools[name] = {
       write: true,
       writerConnection: true,
-      description: `${command} up to 100 inbox items for the acting actor. Each item requires its base_version from read-home-inbox. Returns per-item success or version_conflict. Idempotent retries reuse the same key and arguments. ${command === 'unsettle' ? '' : 'Set reversible=true for applied/already/not_found/not_allowed receipts and exact undo. Undo with undo_of=original key; omit items for the whole batch or provide item_id keys for a subset. Undo refuses intervening changes. '} Never closes a task or acknowledges a notification.`,
+      description: `${command} up to 100 inbox items for the acting actor. Each item requires its base_version from read-home-inbox-v5. Returns per-item success or version_conflict. Idempotent retries reuse the same key and arguments. ${command === 'unsettle' ? '' : 'Set reversible=true for applied/already/not_found/not_allowed receipts and exact undo. Undo with undo_of=original key; omit items for the whole batch or provide item_id keys for a subset. Undo refuses intervening changes. '} Never closes a task or acknowledges a notification.`,
       inputSchema: { type: 'object', additionalProperties: false, properties: {
         ...(command === 'unsettle' ? {} : { reversible: { type: 'boolean' }, undo_of: { type: 'string', format: 'uuid' } }),
         idempotency_key: { type: 'string', format: 'uuid' },
