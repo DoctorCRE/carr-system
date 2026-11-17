@@ -74,10 +74,12 @@ and flagged preview_only. A later full body is logged as a note.
 
 With engine_mail set in outlook.json, each email and its deal-folder attachments go to
 the engine's doors instead (lib/engine_mail.py): the engine links the email to its
-parties itself, and intake writes no activity, full-text note, flag item or deal file
-to the record layer for that email. The links note goes to the engine too, from its
-filed-emails read. Lead proposals, signature contact findings and delivery-failure
-findings stay on the record layer until their engine doors exist.
+parties itself, and intake writes no activity, full-text note or deal file to the
+record layer for that email. The links note goes to the engine too, from its
+filed-emails read. Mail the record layer already holds is left to the copy, and its old
+email writes are not replayed. Lead proposals, signature contact findings, Outlook flag
+items and delivery-failure findings stay on the record layer until their engine doors
+exist; delivery reports are observed as before and never sent to the engine.
 
 The private copy and decoded database live in a 0700 work folder under
 out/outlook-intake/ and are deleted before the run ends; a folder that cannot be
@@ -1016,6 +1018,7 @@ class Run:
         self.engine = engine_mail.Mailbox(ports.engine, state, now, settings.owner, settings.account, self.counts,
                                           lambda: _save(out, state)) if ports and ports.engine else None
         self.message_ids: dict[str, str] = {}
+        self.file_idents: set[str] = set()
 
     def owner_key(self, verb: str, ref: str, source: str) -> str:
         legacy = key(verb, ref, source)
@@ -1263,7 +1266,7 @@ class Run:
                     report['disposition'] = 'unresolved'
                     continue
                 report['attempts'] = report.get('attempts', 0) + 1
-                if self.state.get('links_cursor') or not mailbox.get('filing_complete'):
+                if not self.engine and (self.state.get('links_cursor') or not mailbox.get('filing_complete')):
                     continue
                 sources = mailbox['sources'].get(report['original_id'], {})
                 if len(sources) != 1:
@@ -1315,12 +1318,16 @@ class Run:
     def engine_emails(self, mails: list[dict], matcher: Matcher, since: int) -> None:
         assert self.engine
         leads = self.state.setdefault('engine_leads', {})
+        copied = {(json.loads(r['payload']).get('message_id') or '').strip().strip('<>')
+                  for r in self.state.get('requests', {}).values()
+                  if r['verb'] == 'log-activity' and r['acknowledged'] and r.get('disposition') != 'moved_to_engine'
+                  and json.loads(r['payload']).get('kind') in ('email_in', 'email_out')} - {''}
         for m in mails:
             message_id = (m.get('message_id') or '').strip().strip('<>')
             if message_id:
                 self.message_ids[m['ident']] = message_id
-            if (m['metadata_incomplete'] or m['sent_unix'] > self.now.timestamp() + 300
-                    or (m['sent_unix'] < since and not self.engine.holds(message_id))):
+            if (m['metadata_incomplete'] or m['sent_unix'] > self.now.timestamp() + 300 or message_id in copied
+                    or (m['sent_unix'] < since and not self.engine.holds(message_id) and m['ident'] not in self.file_idents)):
                 continue
             inbound = not _internal(m['sender'], self.settings.internal_domain)
             if inbound and matcher.classify(m['sender']) == 'missing' and proposable(m['sender']):
@@ -1342,7 +1349,8 @@ class Run:
     def emails(self, mails: list[dict], matcher: Matcher, since: int) -> None:
         if self.engine:
             self.signature_findings(mails, matcher)
-            return self.engine_emails(mails, matcher, since)
+            reports = self.observe_delivery_failures(mails)
+            return self.engine_emails([m for m in mails if m['ident'] not in reports], matcher, since)
         self.reconcile([m for m in mails if not m['metadata_incomplete']])
         self.signature_findings(mails, matcher)
         delivery_reports = self.observe_delivery_failures(mails)
@@ -1471,11 +1479,13 @@ class Run:
                 continue
             seen = flags.get(m['ident'])
             if seen is None:  # the activity ids are only readable while intake still remembers the logging
+                engine = self.engine and self.engine.activity_id((m.get('message_id') or '').strip().strip('<>'))
+                requests = self.state.get('requests', {})
                 activities = sorted({
-                    self.state['requests'][k]['activity_id']
+                    requests[k]['activity_id']
                     for address, _ in _parties(m, self.settings.internal_domain) if (ref := matcher.ref(address))
                     for k in (self.activity_key(ref, m['ident']),)
-                    if self.state['requests'].get(k, {}).get('activity_id')})
+                    if requests.get(k, {}).get('activity_id')} | ({engine} if engine else set()))
                 if not activities:
                     self.counts['flags_unfiled'] += 1
                     continue
@@ -1539,6 +1549,8 @@ class Run:
         """Use server-confirmed filing, including matches made after local intake finished."""
         if self.engine:
             filed = self.engine.file_links()
+            self.deals.update({mail['activity_id']: mail['deal_ids'][0] for mail in self.engine.filed
+                               if len(mail.get('deal_ids') or []) == 1})
             self.counts['links_filed'] = self.counts.get('engine_notes_stored', 0)
             return filed
         queue = self.ports.carr('email-router-queue', {
@@ -1676,13 +1688,17 @@ class Run:
         done = self.state.setdefault('attachments_done', {})
         for ident, deal, result, data in prepared:
             source = f"{ident}/{result['attachment']}"
-            if self.engine.upload(source, data, result['name'], self.message_ids.get(ident), deal['id']):
+            uploaded = self.engine.upload(source, data, result['name'], self.message_ids.get(ident), deal['id'])
+            if uploaded == 'settled':
                 done[source] = int(self.now.timestamp())
-            else:
+            elif uploaded == 'again':
                 self.state['attachments_pending'] = True
-        for source in self.engine.tie_files():
-            done.pop(source, None)
+        if self.engine.tie_files():
             self.state['attachments_pending'] = True
+        done.update({source: int(self.now.timestamp()) for source, f in self.engine.files.items()
+                     if 'outcome' in f and source not in done})
+        cutoff = int((self.now - UNRESOLVED_DAYS).timestamp())
+        self.state['attachments_done'] = {source: at for source, at in done.items() if at >= cutoff}
         _save(self.out, self.state)
 
     def file_attachments(self, prepared: list[tuple[str, dict, dict, bytes]]) -> None:
@@ -2407,11 +2423,15 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         matcher = matcher or Matcher(ports.contacts(), settings.internal_domain)
         complete_mails = [m for m in mails if not m['metadata_incomplete']]
         prepared = work.prepare_attachments(complete_mails, matcher, db, files)
+        work.file_idents = {ident for ident, *_ in prepared}
         _remove(files.parent)
         _quarantine_calendar_requests(state)
         _save(out, state)
         for request in list(state.get('requests', {}).values()):
             if request['verb'] in ('record-deal-item', 'complete-deal-item', 'drop-action'):
+                continue
+            if work.engine and request['verb'] == 'log-activity' and not request['acknowledged']:
+                request.update(acknowledged=True, disposition='moved_to_engine', retry_at=None)
                 continue
             if (request['verb'] == 'record-finding'
                     and json.loads(request['payload']).get('kind') == email_contact_review.KIND):
@@ -2423,8 +2443,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         work.emails(mails, matcher, min(since, int((now - BACKFILL).timestamp())))
         work.file_attachments(prepared)
         work.counts['legacy_unmatched'] = _legacy_unmatched(state)
-        if not work.engine:
-            work.observe_flags(complete_mails, matcher)
+        work.observe_flags(complete_mails, matcher)
         work.leads(matcher)
         if not work.engine:
             work.full_text(complete_mails)
