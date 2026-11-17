@@ -75,9 +75,33 @@ test('Home reply drafts collapse pending conversations without changing proposal
     assert.equal((await read()).length,5);
     assert.deepEqual((await read(2)).map(r=>r.source_id),[id(19)]);
   });
+  await t.test('equal creation times choose a deterministic newest draft',async()=>{
+    await c.query('update email_proposal set created_at=(select created_at from email_proposal where id=$1) where id=$2',[id(13),id(12)]);
+    assert.equal((await read()).find(r=>r.merged_source_ids.includes(id(10))).source_id,id(13));
+  });
+  await add(21,'thread-a');
+  await c.query(`update activity set email_context=jsonb_set(email_context,'{lifecycle}','{"state":"deleted"}') where id=$1`,[id(121)]);
+  await add(22,'thread-a');
+  await c.query(`update activity set email_source='{"mailbox_owner":"other"}' where id=$1`,[id(122)]);
+  await t.test('deleted and mismatched-mailbox sources cannot displace a live draft',async()=>{
+    assert.equal((await read()).length,5);
+    assert.equal((await read()).find(r=>r.merged_source_ids.includes(id(10))).source_id,id(13));
+  });
   await add(20,'thread-a',{status:'failed'});
   await t.test('failed send cards retain their independent status and identity',async()=>{
     assert.equal((await read()).length,6);
     assert.equal((await read()).find(r=>r.source_id===id(20)).source_state,'failed');
+  });
+  await t.test('conversation grouping happens before the bounded card limit',async()=>{
+    await c.query(`insert into activity
+      select gen_random_uuid(),'{"mailbox_owner":"fixture"}',
+        '{"conversation_id":"large-thread","sender":{"name":"Synthetic Bulk"}}'
+      from generate_series(1,1002);
+      insert into email_proposal
+      select gen_random_uuid(),id,'fixture','reply_draft','pending',1,'Synthetic bulk',now(),null,null
+      from activity where email_context->>'conversation_id'='large-thread'`);
+    const cards=await read();
+    assert.equal(cards.length,7);
+    assert.equal(cards.find(r=>r.title.startsWith('Synthetic Bulk')).merged_source_ids.length,1002);
   });
 });
