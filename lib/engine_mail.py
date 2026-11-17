@@ -10,7 +10,8 @@ private intake state until the engine answers it, and a retry derives the same k
 the mailbox, the Message-ID and the step, so a crashed run converges. The other partner's
 mailbox derives another key and the engine answers its stored activity. An attachment is
 uploaded by hash, then tied to its email and deal in a separate call; a tie the engine
-refuses with email_not_stored waits for a later run.
+refuses with email_not_stored waits for a later run. Each run also reads one page of the
+emails filed to a deal and writes a links note about each deal for an email with links.
 """
 from __future__ import annotations
 
@@ -24,9 +25,11 @@ import re
 import stat
 from typing import Callable
 import urllib.error
+from urllib.parse import quote
 import urllib.request
 import uuid
 
+from lib import email_links
 from lib.credential_file import read_env_file
 
 FULL_TEXT_WAIT = timedelta(hours=2)
@@ -52,7 +55,7 @@ class Reply:
         return error if isinstance(error, str) and SLUG.fullmatch(error) else 'unreadable'
 
 
-Door = Callable[[str, str, bytes], Reply]
+Door = Callable[[str, str, bytes | None], Reply]
 
 
 def verdict(reply: Reply) -> str:
@@ -80,7 +83,7 @@ def connect(credentials: Path, user: str) -> Door:
     headers = {'CF-Access-Client-Id': client, 'CF-Access-Client-Secret': secret,
                'Engine-Job': JOB, 'Engine-For-User': user}
 
-    def call(method: str, path: str, body: bytes) -> Reply:
+    def call(method: str, path: str, body: bytes | None) -> Reply:
         kind = 'application/octet-stream' if method == 'PUT' else 'application/json'
         request = urllib.request.Request(url.rstrip('/') + path, data=body, method=method,
                                          headers={**headers, 'Content-Type': kind})
@@ -123,6 +126,7 @@ class Mailbox:
         book = state.setdefault('engine_mail', {'emails': {}, 'files': {}})
         self.emails: dict[str, dict] = book['emails']
         self.files: dict[str, dict] = book['files']
+        self.notes: dict[str, dict] = book.setdefault('notes', {})
         self.offers: dict[str, tuple] = {}
 
     def key(self, *parts: str) -> str:
@@ -194,6 +198,29 @@ class Mailbox:
             del self.files[source]
         self.save()
         return again
+
+    def file_links(self) -> bool:
+        """One page of this mailbox's filed emails. False until every links note is answered."""
+        after = self.state.get('engine_links_cursor')
+        reply = self.door('GET', '/jobs/filed-emails?limit=200' + (f'&after={quote(after)}' if after else ''), None)
+        if not self.answered(reply):
+            return False
+        for mail in reply.body.get('emails') or []:
+            links = sorted(email_links.extract_links(mail.get('body') or ''))
+            for deal_id in (mail.get('deal_ids') or []) if links else []:
+                self.notes.setdefault(f"{mail['activity_id']}|{deal_id}", {'sent': self.at, 'request': {
+                    'idempotency_key': self.key('links', mail['activity_id'], deal_id), 'kind': 'note',
+                    'happened_at': mail['happened_at'], 'about': [{'deal_id': deal_id}],
+                    'summary': '\n'.join(['Links from matched email', *(f'{kind}: {url}' for kind, url in links)])}})
+        self.save()
+        for note in self.notes.values():
+            if 'outcome' not in note:
+                self.answer(note, self.post('/jobs/activities', note['request']), 'notes')
+        self.save()
+        if any('outcome' not in note for note in self.notes.values()):
+            return False
+        self.state['engine_links_cursor'] = reply.body.get('next_cursor')
+        return True
 
     def post(self, path: str, request: dict) -> Reply:
         return self.door('POST', path, json.dumps(request).encode())

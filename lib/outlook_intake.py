@@ -74,9 +74,10 @@ and flagged preview_only. A later full body is logged as a note.
 
 With engine_mail set in outlook.json, each email and its deal-folder attachments go to
 the engine's doors instead (lib/engine_mail.py): the engine links the email to its
-parties itself, and intake writes no activity, full-text note, contact finding, flag
-item or deal file to the record layer for that email. Lead proposals for unknown
-senders and the links note stay on the record layer until their engine doors exist.
+parties itself, and intake writes no activity, full-text note, flag item or deal file
+to the record layer for that email. The links note goes to the engine too, from its
+filed-emails read. Lead proposals, signature contact findings and delivery-failure
+findings stay on the record layer until their engine doors exist.
 
 The private copy and decoded database live in a 0700 work folder under
 out/outlook-intake/ and are deleted before the run ends; a folder that cannot be
@@ -1334,11 +1335,13 @@ class Run:
                               {'kind': 'email', 'happened_at': _iso(m['sent_unix']),
                                'email': {'message_id': message_id, 'sender': m['sender'].lower(),
                                          'recipients': recipients, 'subject': m['subject'] or '',
-                                         'body': m['text']}})
+                                         'body': m['text'],
+                                         **({'sender_name': m['sender_name']} if m.get('sender_name') else {})}})
         self.engine.send_emails()
 
     def emails(self, mails: list[dict], matcher: Matcher, since: int) -> None:
         if self.engine:
+            self.signature_findings(mails, matcher)
             return self.engine_emails(mails, matcher, since)
         self.reconcile([m for m in mails if not m['metadata_incomplete']])
         self.signature_findings(mails, matcher)
@@ -1534,6 +1537,10 @@ class Run:
 
     def file_links(self) -> bool:
         """Use server-confirmed filing, including matches made after local intake finished."""
+        if self.engine:
+            filed = self.engine.file_links()
+            self.counts['links_filed'] = self.counts.get('engine_notes_stored', 0)
+            return filed
         queue = self.ports.carr('email-router-queue', {
             'purpose': 'links', 'limit': 200,
             **({'after': self.state['links_cursor']} if self.state.get('links_cursor') else {})})

@@ -6288,13 +6288,19 @@ class FakeEngine:
     def __init__(self):
         self.calls, self.keys, self.activities, self.files, self.documents = [], {}, {}, set(), {}
         self.refuse = []  # (path, status, error), each answered once, in order
+        self.filed, self.notes = [], []
 
     def door(self, user):
         def call(method, path, body):
             self.calls.append((user, method, path, body))
-            if self.refuse and self.refuse[0][0] == path:
+            if self.refuse and path.startswith(self.refuse[0][0]):
                 _, status, error = self.refuse.pop(0)
                 return engine_mail.Reply(status, {'error': error, 'correlation_id': 'c-1', 'hint': ''})
+            if method == 'GET':
+                after = path.partition('after=')[2]
+                page = [m for m in self.filed if m['activity_id'] > after][:2]
+                more = len([m for m in self.filed if m['activity_id'] > after]) > len(page)
+                return engine_mail.Reply(200, {'emails': page, 'next_cursor': page[-1]['activity_id'] if more else None})
             if method == 'PUT':
                 sha = path.rsplit('/', 1)[1]
                 assert hashlib.sha256(body).hexdigest() == sha
@@ -6314,6 +6320,10 @@ class FakeEngine:
         return call
 
     def store(self, request):
+        if request['kind'] == 'note':
+            self.notes.append(request)
+            return engine_mail.Reply(201, {'activity_id': f'n-{len(self.notes)}', 'existing': False,
+                                           'about': request['about'], 'unmatched': []})
         mid = request['email']['message_id']
         if 'nothing' in request['email']['subject']:
             return engine_mail.Reply(422, {'error': 'about_nothing'})
@@ -6361,7 +6371,7 @@ class EngineMailTest(unittest.TestCase):
         self.assertNotIn('engine_mail', json.loads((self.out() / intake.STATE).read_text()))
 
     def test_switch_on_sends_each_email_once_and_writes_no_old_activity(self):
-        rows = [mail(CLIENT.email, -timedelta(hours=1), message_id='<M1@Example.test>',
+        rows = [mail(CLIENT.email, -timedelta(hours=1), message_id='<M1@Example.test>', name='Pat Example',
                      recipients=f'{OWNER}, x@example.test'),
                 mail(OWNER, -timedelta(minutes=30), subject='Re: Suite question', recipients=CLIENT.email,
                      message_id='<m2@example.test>'),
@@ -6374,7 +6384,9 @@ class EngineMailTest(unittest.TestCase):
         self.assertEqual(posts[0]['email']['recipients'],
                          [{'address': OWNER, 'kind': 'to'}, {'address': 'x@example.test', 'kind': 'to'}])
         self.assertEqual((posts[0]['kind'], posts[0]['email']['body']), ('email', 'Can we meet Thursday?'))
+        self.assertEqual((posts[0]['email']['sender_name'], 'sender_name' in posts[1]['email']), ('Pat Example', False))
         self.assertEqual(self.old_mail_writes(), [])
+        self.assertNotIn('email-router-queue', [verb for verb, _ in self.fake.calls], 'links come from the engine')
         self.assertEqual(outcome.counts['engine_emails_stored'], 3)
         [(_, lead)] = self.fake.writes('propose-email-lead')
         self.assertEqual(lead['address'], 'stranger@example.test', 'unknown senders still go to the lead queue')
@@ -6441,6 +6453,56 @@ class EngineMailTest(unittest.TestCase):
         self.assertEqual(self.run_intake([row]).state, 'succeeded')
         self.assertEqual(len(self.engine.activities), 1)
 
+    def filed(self, activity_id, deal_ids, body='Listing https://www.loopnet.com/Listing/123'):
+        return {'activity_id': activity_id, 'deal_ids': deal_ids, 'outgoing': False, 'body': body,
+                'happened_at': NOW.isoformat()}
+
+    def test_links_note_is_written_once_per_filed_email_and_deal(self):
+        self.engine.filed = [self.filed('a-1', ['d-1', 'd-2']), self.filed('a-2', ['d-1'], body='No links here'),
+                             self.filed('a-3', ['d-3'])]
+        rows = [mail(CLIENT.email, -timedelta(hours=1), message_id='<l1@example.test>')]
+        outcome = self.run_intake(rows)
+        self.assertEqual(outcome.state, 'succeeded', outcome)
+        self.assertEqual([(n['about'], n['summary']) for n in self.engine.notes],
+                         [([{'deal_id': 'd-1'}], 'Links from matched email\nlisting: https://www.loopnet.com/Listing/123'),
+                          ([{'deal_id': 'd-2'}], 'Links from matched email\nlisting: https://www.loopnet.com/Listing/123')])
+        self.assertEqual(outcome.counts['links_filed'], 2)
+        self.fake.now += timedelta(minutes=30)
+        self.run_intake(rows)
+        self.assertEqual([n['about'] for n in self.engine.notes][2:], [[{'deal_id': 'd-3'}]], 'the next page')
+        self.fake.now += timedelta(minutes=30)
+        self.run_intake(rows)
+        self.assertEqual(len(self.engine.notes), 3, 'a written note is not sent again on the next pass')
+        self.assertEqual(self.old_mail_writes(), [])
+
+    def test_failed_links_note_holds_the_cursor_and_replays_its_key(self):
+        self.engine.filed = [self.filed('a-1', ['d-1'])]
+        rows = [mail(CLIENT.email, -timedelta(hours=1), message_id='<l2@example.test>')]
+        self.run_intake(rows)
+        self.engine.refuse.append(('/jobs/activities', 503, 'database_unavailable'))
+        self.engine.filed.append(self.filed('a-2', ['d-2']))
+        self.fake.now += timedelta(minutes=30)
+        self.assertEqual(self.run_intake(rows).reason, 'email_links_pending')
+        self.fake.now += timedelta(minutes=30)
+        self.assertEqual(self.run_intake(rows).state, 'succeeded')
+        keys = [json.loads(b)['idempotency_key'] for _, method, p, b in self.engine.calls
+                if method == 'POST' and p == '/jobs/activities' and json.loads(b)['kind'] == 'note']
+        self.assertEqual(len(keys), 3)
+        self.assertEqual(keys[1], keys[2], 'the refused note replays with its key')
+        self.assertEqual([n['about'] for n in self.engine.notes], [[{'deal_id': 'd-1'}], [{'deal_id': 'd-2'}]])
+
+    def test_signature_findings_keep_running_with_the_switch_on(self):
+        snapshot = {'party_id': 101, 'party_version': 7,
+                    'values': {'phone': '555-0100', 'email': CLIENT.email},
+                    'provenance': {'source': 'party', 'party_id': 101, 'party_version': 7},
+                    'unread_fields': []}
+        self.fake.contacts_rows = [intake.Contact(CLIENT.email, CLIENT.ref, CLIENT.name, contact_snapshot=snapshot)]
+        message = mail(CLIENT.email, -timedelta(hours=1), local_keys='77', message_id='<s1@example.test>',
+                       body='-- \nEmail: pat@example.test\nPhone: 555-0199')
+        self.assertEqual(self.run_intake([message]).state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('record-finding')), 1)
+        self.assertEqual(len(self.engine.activities), 1)
+
     def attachment_run(self):
         self.fake.fixture.unlink(missing_ok=True)
         ports = self.attachment_fixture()
@@ -6457,7 +6519,7 @@ class EngineMailTest(unittest.TestCase):
                           'name': 'Lease.pdf', 'sha256': hashlib.sha256(self.pdf).hexdigest()})
         self.assertEqual(self.uploads, {})
         self.assertEqual(self.old_mail_writes(), [])
-        self.assertEqual([c[1] for c in self.engine.calls], ['POST', 'PUT', 'POST'], 'the email goes first')
+        self.assertEqual([c[1] for c in self.engine.calls], ['POST', 'PUT', 'POST', 'GET'], 'the email goes first')
 
     def test_attachment_refused_until_the_email_is_stored_waits_for_the_next_run(self):
         self.engine.refuse.append(('/jobs/attachments', 409, 'email_not_stored'))
