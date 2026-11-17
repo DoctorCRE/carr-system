@@ -25,10 +25,12 @@ import uuid
 from urllib.parse import quote
 from unittest.mock import patch
 from contextlib import closing, redirect_stderr
+from dataclasses import replace
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib import email_router
+from lib import engine_mail
 from lib import model_call
 from lib import outlook_intake as intake
 from lib import unresolved_email
@@ -6278,6 +6280,241 @@ class FieldCensusTest(unittest.TestCase):
             failed = REAL_RUN(command, capture_output=True, text=True)
             self.assertEqual(failed.returncode, 1)
             self.assertNotIn('private-mailbox', previous.decode() + passed.stdout + failed.stdout + failed.stderr)
+
+
+class FakeEngine:
+    """Doors 19 and 20 as the engine's docs/new-database.md fixes them, one store for every mailbox."""
+
+    def __init__(self):
+        self.calls, self.keys, self.activities, self.files, self.documents = [], {}, {}, set(), {}
+        self.refuse = []  # (path, status, error), each answered once, in order
+
+    def door(self, user):
+        def call(method, path, body):
+            self.calls.append((user, method, path, body))
+            if self.refuse and self.refuse[0][0] == path:
+                _, status, error = self.refuse.pop(0)
+                return engine_mail.Reply(status, {'error': error, 'correlation_id': 'c-1', 'hint': ''})
+            if method == 'PUT':
+                sha = path.rsplit('/', 1)[1]
+                assert hashlib.sha256(body).hexdigest() == sha
+                fresh = sha not in self.files
+                self.files.add(sha)
+                return engine_mail.Reply(201 if fresh else 200, {'sha256': sha, 'bytes': len(body)})
+            request = json.loads(body)
+            key, args = request.pop('idempotency_key'), json.dumps(request, sort_keys=True)
+            if key in self.keys:
+                if self.keys[key][0] != args:
+                    return engine_mail.Reply(409, {'error': 'key_reuse'})
+                return engine_mail.Reply(self.keys[key][1].status, {**self.keys[key][1].body, 'replayed': True})
+            reply = self.attach(request) if path == '/jobs/attachments' else self.store(request)
+            if reply.status < 300:
+                self.keys[key] = (args, reply)
+            return reply
+        return call
+
+    def store(self, request):
+        mid = request['email']['message_id']
+        if 'nothing' in request['email']['subject']:
+            return engine_mail.Reply(422, {'error': 'about_nothing'})
+        existing = mid in self.activities
+        self.activities.setdefault(mid, request)
+        return engine_mail.Reply(201, {'activity_id': 'a-' + mid, 'existing': existing, 'about': [], 'unmatched': []})
+
+    def attach(self, request):
+        if request.get('message_id') and request['message_id'] not in self.activities:
+            return engine_mail.Reply(409, {'error': 'email_not_stored'})
+        if request['sha256'] not in self.files:
+            return engine_mail.Reply(409, {'error': 'file_not_uploaded'})
+        existing = (request.get('message_id'), request['sha256']) in self.documents
+        self.documents.setdefault((request.get('message_id'), request['sha256']), request)
+        return engine_mail.Reply(201, {'document_id': 'd-1', 'existing': existing})
+
+    def posts(self, path):
+        return [json.loads(body) for _, method, p, body in self.calls if method == 'POST' and p == path]
+
+
+class EngineMailTest(unittest.TestCase):
+    """Intake with engine_mail on: doors 19 and 20 instead of the record layer's mail writes."""
+    setUpClass = IntakeTest.setUpClass
+    copy_snapshot = IntakeTest.copy_snapshot
+    run_intake = IntakeTest.run_intake
+    out = IntakeTest.out
+    attachment_fixture = IntakeTest.attachment_fixture
+
+    def setUp(self):
+        IntakeTest.setUp(self)
+        self.engine = FakeEngine()
+        self.plain_ports = self.fake.ports
+        self.fake.ports = lambda: replace(self.plain_ports(), engine=self.engine.door('joe'))
+
+    def old_mail_writes(self):
+        return [v for v, _ in self.fake.writes()
+                if v in ('log-activity', 'propose-email-lead', 'record-finding', 'attach-deal-file')]
+
+    def test_switch_off_writes_the_record_layer_and_never_the_engine(self):
+        self.fake.ports = self.plain_ports
+        outcome = self.run_intake([mail(CLIENT.email, -timedelta(hours=1), message_id='<m1@example.test>')])
+        self.assertEqual(outcome.state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+        self.assertEqual(self.engine.calls, [])
+        self.assertNotIn('engine_mail', json.loads((self.out() / intake.STATE).read_text()))
+
+    def test_switch_on_sends_each_email_once_and_writes_no_old_activity(self):
+        rows = [mail(CLIENT.email, -timedelta(hours=1), message_id='<M1@Example.test>',
+                     recipients=f'{OWNER}, x@example.test'),
+                mail(OWNER, -timedelta(minutes=30), subject='Re: Suite question', recipients=CLIENT.email,
+                     message_id='<m2@example.test>'),
+                mail('stranger@example.test', -timedelta(minutes=20), subject='Hello', message_id='<m3@example.test>')]
+        outcome = self.run_intake(rows)
+        self.assertEqual(outcome.state, 'succeeded', outcome)
+        posts = self.engine.posts('/jobs/activities')
+        self.assertEqual([p['email']['message_id'] for p in posts],
+                         ['M1@Example.test', 'm2@example.test', 'm3@example.test'], 'case kept, brackets dropped')
+        self.assertEqual(posts[0]['email']['recipients'],
+                         [{'address': OWNER, 'kind': 'to'}, {'address': 'x@example.test', 'kind': 'to'}])
+        self.assertEqual((posts[0]['kind'], posts[0]['email']['body']), ('email', 'Can we meet Thursday?'))
+        self.assertEqual(self.old_mail_writes(), [])
+        self.assertEqual(outcome.counts['engine_emails_stored'], 3)
+        self.fake.now += timedelta(minutes=30)
+        self.run_intake(rows)
+        self.assertEqual(len(self.engine.posts('/jobs/activities')), 3, 'a stored email is not sent again')
+        self.assertEqual({user for user, *_ in self.engine.calls}, {'joe'})
+
+    def test_preview_waits_for_full_text_then_sends_once(self):
+        preview = mail(CLIENT.email, -timedelta(minutes=10), kind='preview', message_id='<p1@example.test>')
+        outcome = self.run_intake([preview])
+        self.assertEqual(outcome.counts['engine_emails_waiting'], 1)
+        self.assertEqual(self.engine.posts('/jobs/activities'), [])
+        self.fake.now += timedelta(minutes=30)
+        self.run_intake([{**preview, 'body_kind': 'full'}])
+        [sent] = self.engine.posts('/jobs/activities')
+        self.assertEqual(sent['email']['body'], 'Can we meet Thursday?')
+        self.assertEqual(self.old_mail_writes(), [])
+
+    def test_preview_is_sent_when_the_wait_expires_even_on_an_unchanged_store(self):
+        preview = mail(CLIENT.email, -timedelta(minutes=10), kind='preview', body='Short preview text',
+                       message_id='<p2@example.test>')
+        self.run_intake([preview])
+        self.fake.now += engine_mail.FULL_TEXT_WAIT - timedelta(minutes=1)
+        self.assertEqual(self.run_intake([preview], touch=False).reason, 'store_unchanged')
+        self.fake.now += timedelta(minutes=2)
+        self.assertNotEqual(self.run_intake([preview], touch=False).reason, 'store_unchanged')
+        [sent] = self.engine.posts('/jobs/activities')
+        self.assertEqual(sent['email']['body'], 'Short preview text')
+
+    def test_failed_send_is_replayed_with_the_same_key_and_second_mailbox_converges(self):
+        row = mail(CLIENT.email, -timedelta(hours=1), message_id='<r1@example.test>')
+        self.engine.refuse.append(('/jobs/activities', 503, 'database_unavailable'))
+        failed = self.run_intake([row])
+        self.assertEqual((failed.state, failed.reason), ('failed', 'writes_failed'))
+        self.fake.now += timedelta(minutes=30)
+        self.assertEqual(self.run_intake([row]).state, 'succeeded')
+        first, retry = self.engine.posts('/jobs/activities')
+        self.assertEqual(first, retry, 'the retry replays the stored request and key')
+        counts = {}
+        other = engine_mail.Mailbox(self.engine.door('dell'), {}, NOW, 'dell', PARTNER, counts, lambda: None)
+        other.offer('r1@example.test', row['sent_unix'], True, (True, 1), True,
+                    {k: v for k, v in first.items() if k != 'idempotency_key'})
+        other.send_emails()
+        self.assertEqual(counts, {'engine_emails_existing': 1})
+        self.assertNotEqual(self.engine.posts('/jobs/activities')[-1]['idempotency_key'], first['idempotency_key'])
+        self.assertEqual(len(self.engine.activities), 1)
+
+    def test_nothing_to_link_is_settled_not_retried(self):
+        row = mail('stranger@example.test', -timedelta(hours=1), subject='nothing here', message_id='<n1@example.test>')
+        outcome = self.run_intake([row])
+        self.assertEqual(outcome.state, 'succeeded')
+        self.assertEqual(outcome.counts['engine_emails_about_nothing'], 1)
+        self.fake.now += timedelta(minutes=30)
+        self.run_intake([row])
+        self.assertEqual(len(self.engine.posts('/jobs/activities')), 1)
+
+    def test_blocked_refusal_fails_the_run_and_is_tried_next_run(self):
+        row = mail(CLIENT.email, -timedelta(hours=1), message_id='<b1@example.test>')
+        self.engine.refuse.append(('/jobs/activities', 422, 'actor_not_provisioned'))
+        self.assertEqual(self.run_intake([row]).reason, 'request_blocked')
+        self.fake.now += timedelta(minutes=30)
+        self.assertEqual(self.run_intake([row]).state, 'succeeded')
+        self.assertEqual(len(self.engine.activities), 1)
+
+    def attachment_run(self):
+        self.fake.fixture.unlink(missing_ok=True)
+        ports = self.attachment_fixture()
+        with closing(sqlite3.connect(self.fake.fixture)) as con, con:
+            con.execute("UPDATE messages SET message_id = '<att@example.test>' WHERE id = 1")
+        return intake.run(self.repo, self.home, ports)
+
+    def test_attachment_is_uploaded_then_tied_to_its_email_and_deal(self):
+        outcome = self.attachment_run()
+        self.assertEqual(outcome.state, 'succeeded', outcome)
+        [tie] = self.engine.posts('/jobs/attachments')
+        self.assertEqual({k: tie[k] for k in ('message_id', 'deal_id', 'kind', 'name', 'sha256')},
+                         {'message_id': 'att@example.test', 'deal_id': 'synthetic-deal', 'kind': 'other',
+                          'name': 'Lease.pdf', 'sha256': hashlib.sha256(self.pdf).hexdigest()})
+        self.assertEqual(self.uploads, {})
+        self.assertEqual(self.old_mail_writes(), [])
+        self.assertEqual([c[1] for c in self.engine.calls], ['POST', 'PUT', 'POST'], 'the email goes first')
+
+    def test_attachment_refused_until_the_email_is_stored_waits_for_the_next_run(self):
+        self.engine.refuse.append(('/jobs/attachments', 409, 'email_not_stored'))
+        outcome = self.attachment_run()
+        self.assertEqual(outcome.state, 'succeeded')
+        self.assertEqual(outcome.counts['engine_attachments_waiting'], 1)
+        self.assertEqual(self.engine.documents, {})
+        self.fake.now += timedelta(minutes=30)
+        self.assertNotEqual(self.attachment_run().reason, 'store_unchanged')
+        self.assertEqual(len(self.engine.documents), 1)
+        self.assertEqual(len([c for c in self.engine.calls if c[1] == 'PUT']), 1, 'the bytes are not read again')
+
+    def test_attachment_whose_upload_is_lost_is_read_again(self):
+        self.engine.refuse.append(('/jobs/attachments', 409, 'file_not_uploaded'))
+        self.assertEqual(self.attachment_run().reason, 'attachments_pending')
+        self.fake.now += timedelta(minutes=30)
+        self.assertEqual(self.attachment_run().state, 'succeeded')
+        self.assertEqual(len([c for c in self.engine.calls if c[1] == 'PUT']), 2)
+        self.assertEqual(len(self.engine.documents), 1)
+
+    def test_settings_switch_needs_engine_credentials(self):
+        write_settings(self.home, self.repo, owner='joe', engine_mail=True)
+        with self.assertRaisesRegex(ValueError, 'engine_credentials'):
+            load_settings(self.home)
+        write_settings(self.home, self.repo, owner='joe', engine_mail='yes', engine_credentials='/x/engine.env')
+        with self.assertRaisesRegex(ValueError, 'engine_mail'):
+            load_settings(self.home)
+        write_settings(self.home, self.repo, owner='joe', engine_mail=True, engine_credentials=str(self.home / 'engine.env'))
+        self.assertTrue(load_settings(self.home).engine_mail)
+        write_settings(self.home, self.repo, owner='joe')
+        self.assertFalse(load_settings(self.home).engine_mail)
+
+    def test_connect_refuses_a_shared_credential_file_and_sends_access_headers(self):
+        path = self.home / 'engine.env'
+        path.write_text('ENGINE_URL=https://engine.example.test\nENGINE_ACCESS_CLIENT_ID=id-1\n'
+                        'ENGINE_ACCESS_CLIENT_SECRET=s-1\n')
+        path.chmod(0o644)
+        with self.assertRaises(PermissionError):
+            engine_mail.connect(path, 'joe')
+        path.chmod(0o600)
+        seen = []
+
+        class Answer:
+            status = 201
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return b'{"activity_id": "a-1", "existing": false}'
+
+        with patch('urllib.request.urlopen', side_effect=lambda request, timeout: seen.append(request) or Answer()):
+            reply = engine_mail.connect(path, 'joe')('POST', '/jobs/activities', b'{}')
+        self.assertEqual(reply, engine_mail.Reply(201, {'activity_id': 'a-1', 'existing': False}))
+        self.assertEqual(seen[0].full_url, 'https://engine.example.test/jobs/activities')
+        self.assertEqual([seen[0].get_header(k) for k in ('Cf-access-client-id', 'Engine-job', 'Engine-for-user')],
+                         ['id-1', 'mail_capture', 'joe'])
 
 
 if __name__ == '__main__':

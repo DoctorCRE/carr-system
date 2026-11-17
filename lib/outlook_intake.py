@@ -72,6 +72,11 @@ context, never admission evidence.
 An email whose body is still only Outlook's preview is logged with the preview
 and flagged preview_only. A later full body is logged as a note.
 
+With engine_mail set in outlook.json, each email and its deal-folder attachments go to
+the engine's doors instead (lib/engine_mail.py): the engine links the email to its
+parties itself, and intake writes no activity, full-text note, contact finding, lead
+proposal or deal file to the record layer for that email.
+
 The private copy and decoded database live in a 0700 work folder under
 out/outlook-intake/ and are deleted before the run ends; a folder that cannot be
 deleted fails the run. The report and state are 0600 there too; nothing with a
@@ -103,7 +108,7 @@ from lib.calendar_agenda import (agenda, AGENDA_SCHEMA, AGENDA_DAYS, AGENDA_ATTE
                                  AGENDA_MAX_BYTES)
 from lib import email_contact_review
 from lib.email_contact_candidates import VERSION as SIGNATURE_POLICY
-from lib import email_delivery_failure, email_links, unresolved_email
+from lib import email_delivery_failure, email_links, engine_mail, unresolved_email
 from lib.email_outcomes import business_day_deadline
 from lib.outlook_settings import load_settings, OutlookSettings
 from lib.outlook_runtime import stamp
@@ -216,6 +221,7 @@ class Ports:
     read_unresolved: Callable[[dict, date, list, list], dict] | None = None
     put_object: Callable[[str, str, bytes], dict] | None = None
     copy_attachments: Callable[[Path, list[str]], None] | None = None
+    engine: engine_mail.Door | None = None
 
 
 @dataclass
@@ -1005,6 +1011,9 @@ class Run:
         self.unmatched: set[tuple[str, str, str]] = set()
         self.attempted: set[str] = set()
         self.lead_candidates: list[tuple[dict, dict]] = []
+        self.engine = engine_mail.Mailbox(ports.engine, state, now, settings.owner, settings.account, self.counts,
+                                          lambda: _save(out, state)) if ports.engine else None
+        self.message_ids: dict[str, str] = {}
 
     def owner_key(self, verb: str, ref: str, source: str) -> str:
         legacy = key(verb, ref, source)
@@ -1301,7 +1310,32 @@ class Run:
         self.counts['delivery_failures_pending'] = sum(r['disposition'] == 'retryable' for r in mailbox['reports'].values())
         return not any(self.counts[k] for k in ('writes_failed', 'writes_deferred', 'requests_blocked'))
 
+    def engine_emails(self, mails: list[dict], since: int) -> None:
+        assert self.engine
+        for m in mails:
+            message_id = (m.get('message_id') or '').strip().strip('<>')
+            if message_id:
+                self.message_ids[m['ident']] = message_id
+            if (m['metadata_incomplete'] or m['sent_unix'] > self.now.timestamp() + 300
+                    or (m['sent_unix'] < since and not self.engine.holds(message_id))):
+                continue
+            if not message_id:
+                self.engine.count('engine_message_id_missing')
+                continue
+            recipients = [{'address': address, 'kind': kind} for field, kind in (('recipients', 'to'), ('cc', 'cc'))
+                          for address in dict.fromkeys(_addresses(m.get(field)))]
+            inbound = not _internal(m['sender'], self.settings.internal_domain)
+            self.engine.offer(message_id, m['sent_unix'], m['full'] and bool(recipients or inbound),
+                              (m['full'], len(m['text'])), inbound,
+                              {'kind': 'email', 'happened_at': _iso(m['sent_unix']),
+                               'email': {'message_id': message_id, 'sender': m['sender'].lower(),
+                                         'recipients': recipients, 'subject': m['subject'] or '',
+                                         'body': m['text']}})
+        self.engine.send_emails()
+
     def emails(self, mails: list[dict], matcher: Matcher, since: int) -> None:
+        if self.engine:
+            return self.engine_emails(mails, since)
         self.reconcile([m for m in mails if not m['metadata_incomplete']])
         self.signature_findings(mails, matcher)
         delivery_reports = self.observe_delivery_failures(mails)
@@ -1626,9 +1660,25 @@ class Run:
             self.counts['attachments_failed'] = self.counts.get('attachments_failed', 0) + 1
         return prepared
 
+    def engine_attachments(self, prepared: list[tuple[str, dict, dict, bytes]]) -> None:
+        assert self.engine
+        done = self.state.setdefault('attachments_done', {})
+        for ident, deal, result, data in prepared:
+            source = f"{ident}/{result['attachment']}"
+            if self.engine.upload(source, data, result['name'], self.message_ids.get(ident), deal['id']):
+                done[source] = int(self.now.timestamp())
+            else:
+                self.state['attachments_pending'] = True
+        for source in self.engine.tie_files():
+            done.pop(source, None)
+            self.state['attachments_pending'] = True
+        _save(self.out, self.state)
+
     def file_attachments(self, prepared: list[tuple[str, dict, dict, bytes]]) -> None:
         from lib import outlook_deal_files as filing
 
+        if self.engine:
+            return self.engine_attachments(prepared)
         done = self.state.setdefault('attachments_done', {})
         put = self.ports.put_object or filing.r2_put_object()
         for ident, deal, result, data in prepared:
@@ -2265,7 +2315,7 @@ def _run(out: Path, home: Path, ports: Ports, state: dict, settings: OutlookSett
     review_due = 'calendar_review_at' not in state or (state['calendar_review_at'] is not None
                                                       and now.timestamp() >= state['calendar_review_at'])
     from lib.outlook_field_census import SCHEMA as field_census_schema
-    if state.get('field_census_schema') == field_census_schema and state.get('account_binding') == _hash(settings.account.strip().lower()) and not state.get('decoder_degraded') and state.get('folder_account_id') == settings.folder_account_id and all(name in state for name in MAIL_STORE_COUNTERS) and 'email_index_published' in state and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and state.get('signature_policy') == SIGNATURE_POLICY and state.get('attachment_policy') == 2 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY and not state.get('reads_due'):
+    if state.get('field_census_schema') == field_census_schema and state.get('account_binding') == _hash(settings.account.strip().lower()) and not state.get('decoder_degraded') and state.get('folder_account_id') == settings.folder_account_id and all(name in state for name in MAIL_STORE_COUNTERS) and 'email_index_published' in state and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and state.get('signature_policy') == SIGNATURE_POLICY and state.get('attachment_policy') == 2 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY and not state.get('reads_due') and not engine_mail.due(state, now):
         if state.get('pending_full'):
             Run(ports, state, now, out, settings).full_text([])
             _save(out, state)
@@ -2361,9 +2411,11 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         work.emails(mails, matcher, min(since, int((now - BACKFILL).timestamp())))
         work.file_attachments(prepared)
         work.counts['legacy_unmatched'] = _legacy_unmatched(state)
-        work.observe_flags(complete_mails, matcher)
+        if not work.engine:
+            work.observe_flags(complete_mails, matcher)
         work.leads(matcher)
-        work.full_text(complete_mails)
+        if not work.engine:
+            work.full_text(complete_mails)
         mail_processed = bool(work.written or any(value for key, value in work.counts.items()
                                                   if key not in (*MAIL_STORE_COUNTERS, 'mail_rows_reusing_prior_identity',
                                                                  'decoder_alarm', 'signature_held')
@@ -2405,6 +2457,8 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
                  folder_account_id=settings.folder_account_id, account_binding=_hash(settings.account.strip().lower()),
                  mail_rows_reusing_prior_identity=work.counts['mail_rows_reusing_prior_identity'])
     _prune(state, now)
+    if work.engine:
+        work.engine.prune()
     _save(out, state)
     counts.update(mapping_counts(state), mail_ids=len(state['mail_ids']))
     if health['failing']:
@@ -2502,7 +2556,9 @@ def main(*, reconcile_binding: bool = False, reconcile_vendor: Path | None = Non
     ports = Ports(carr=carr, contacts=_contacts(carr),
                   decode=_decoder(home, settings), now=lambda: datetime.now(timezone.utc),
                   read_unresolved=lambda mail, today, deals, parties: unresolved_email.ask(
-                      mail, today, deals, parties, settings.model))
+                      mail, today, deals, parties, settings.model),
+                  engine=(engine_mail.connect(settings.engine_credentials, settings.owner)
+                          if settings.engine_mail and settings.engine_credentials else None))
     outcome = run(repo, home, ports, settings=settings, reconcile_binding=reconcile_binding,
                   legacy_decode=legacy_decode, attest_mailbox=attest_mailbox)
     print(status_line(outcome))

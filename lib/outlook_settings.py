@@ -43,6 +43,8 @@ class OutlookSettings:
     folder_account_id: int | None = None
     attachment_root: Path | None = None
     attachment_max_bytes: int = 0
+    engine_mail: bool = False
+    engine_credentials: Path | None = None
 
     @property
     def decoder(self) -> Path:
@@ -138,8 +140,12 @@ def load_settings(home: Path | None = None) -> OutlookSettings:
     if 'attachment_max_bytes' in values and (type(values['attachment_max_bytes']) is not int
                                              or values['attachment_max_bytes'] <= 0):
         fail('attachment_max_bytes', 'must be a positive integer')
+    if 'engine_mail' in values and type(values['engine_mail']) is not bool:
+        fail('engine_mail', 'must be true or false')
+    if values.get('engine_mail') and 'engine_credentials' not in values:
+        fail('engine_credentials', 'required when engine_mail is true')
     for name in sorted(expected - {'model', 'partner_cc', 'folder_account_id', 'attachment_root',
-                                   'attachment_max_bytes'}):
+                                   'attachment_max_bytes', 'engine_mail', 'engine_credentials'}):
         if name not in values:
             fail(name, 'required')
         value = values[name]
@@ -183,7 +189,14 @@ def load_settings(home: Path | None = None) -> OutlookSettings:
     for name in ('deal_prefix', 'vendor_prefix'):
         if not values[name].endswith('/'):
             fail(name, 'must end with /')
-    for name in ('mcp_credentials', 'database_credentials', 'folder_guide'):
+    if 'engine_credentials' in values:
+        engine = values['engine_credentials']
+        if not isinstance(engine, str) or not Path(engine).is_absolute() or '..' in Path(engine).parts or str(Path(engine)) != engine:
+            fail('engine_credentials', 'must be a normalized absolute path')
+        values['engine_credentials'] = Path(engine)
+    for name in ('mcp_credentials', 'database_credentials', 'folder_guide', 'engine_credentials'):
+        if name not in values:
+            continue
         values[name] = values[name].resolve()
         if values[name] == path.resolve() or values[name] == values['repo'] or values['repo'] in values[name].parents:
             fail(name, 'must point outside the repository and settings file')
