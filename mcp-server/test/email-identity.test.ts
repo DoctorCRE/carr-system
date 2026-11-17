@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { capturedEmail, guardEmailAction, lockEmailIdentity } from "../src/email-identity.ts";
+import { capturedEmail, guardEmailAction, lockEmailIdentity, originalMessageId } from "../src/email-identity.ts";
 import { ToolError } from "../src/tool-error.ts";
+
+test("original Message-ID preserves case, brackets and valid domain literals", () => {
+  assert.equal(originalMessageId(" \t<MiXeD@Example.test>\r\n"), "<MiXeD@Example.test>");
+  assert.equal(originalMessageId("<part@[127.0.0.1]>"), "<part@[127.0.0.1]>");
+  for (const value of [undefined, null, "", "bare@example.test", "<a..b@example.test>", "<<a@example.test>>", "<a@example.test> extra", "<a@b>\r\nInjected: x"]) {
+    assert.equal(originalMessageId(value), null);
+  }
+});
 
 test("email locks trim the item and preserve mailbox scope", async () => {
   const calls: { sql: string; params: unknown[] }[] = [];
