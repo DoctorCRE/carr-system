@@ -6,7 +6,16 @@ import { ToolError } from "../src/tool-error.ts";
 test("original Message-ID preserves case, brackets and valid domain literals", () => {
   assert.equal(originalMessageId(" \t<MiXeD@Example.test>\r\n"), "<MiXeD@Example.test>");
   assert.equal(originalMessageId("<part@[127.0.0.1]>"), "<part@[127.0.0.1]>");
-  for (const value of [undefined, null, "", "bare@example.test", "<a..b@example.test>", "<<a@example.test>>", "<a@example.test> extra", "<a@b>\r\nInjected: x"]) {
+  for (const value of [
+    undefined,
+    null,
+    "",
+    "bare@example.test",
+    "<a..b@example.test>",
+    "<<a@example.test>>",
+    "<a@example.test> extra",
+    "<a@b>\r\nInjected: x",
+  ]) {
     assert.equal(originalMessageId(value), null);
   }
 });

@@ -1101,7 +1101,7 @@ class Run:
         held = (self.state.setdefault('mail_unresolved', {}), self.state.setdefault('pending_full', {}))
         groups: dict[str, list[dict]] = {}
         for m in mails:
-            if mid := (m.get('message_id') or '').strip().strip('<>').lower():
+            if mid := (m.get('message_id') or '').strip().strip('<>'):
                 groups.setdefault(mid, []).append(m)
         for mid, rows in groups.items():
             target = next((m for m in rows if _store_keys(m['local_keys'])), rows[0])
