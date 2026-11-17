@@ -165,28 +165,39 @@ test('Home review lifecycle uses exact current domain owners on PostgreSQL', asy
   });
   assert.deepEqual(JSON.parse(readFileSync(new URL('../contracts/home-review.v1.json', import.meta.url))), HOME_REVIEW_CONTRACT);
   await c.query("update actor set email='dell@example.test' where slug='dell'");
+  const addDraft = async (n, conversation, mailbox = 'joe') => {
+    const source = randomUUID(), draft = randomUUID();
+    await c.query(`insert into activity(id,occurred_at,actor_id,kind,summary,detail,email_source,email_context)
+      values($1,now(),$2,'email_in','Synthetic grouped source','Synthetic evidence',
+        jsonb_build_object('mailbox_owner',$4::text,'sender_email','sender@example.test'),
+        jsonb_build_object('conversation_id',$3::text,'sender',jsonb_build_object('name','Synthetic Sender')))`,
+    [source, actors.joe.id, conversation, mailbox]);
+    await c.query(`insert into email_proposal(id,kind,activity_id,evidence_quote,owner,confidence,created_by,
+        draft_subject,draft_body,created_at)
+      values($1,'reply_draft',$2,'Synthetic evidence','joe',0.95,$3,'Synthetic subject','Synthetic body',
+        now()-interval '1 hour'+$4*interval '1 minute')`, [draft,source,actors.joe.id,n]);
+    return draft;
+  };
+  const decide = async (command, kept) => {
+    const args = {proposal_id:kept,base_version:1,idempotency_key:randomUUID()};
+    await call(command,command==='submit-email-draft'
+      ? {...args,subject:'Synthetic reply',body:'Synthetic body',to:['sender@example.test'],cc:['dell@example.test']}
+      : {...args,reason:'No reply needed'});
+    const event = (await c.query('select new_value from event where idempotency_key=$1',[args.idempotency_key])).rows;
+    assert.equal(event.length,1);
+    return [...event[0].new_value.covered_proposal_ids].sort();
+  };
+  const statuses = async ids => (await c.query(
+    'select status from email_proposal where id=any($1::uuid[]) order by id',[ids])).rows.map(r => r.status);
   for (const command of ['snooze-home-inbox', 'settle-home-inbox', 'submit-email-draft', 'dismiss-email-proposal']) {
     for (const later of (command.endsWith('home-inbox') ? [false] : [false, true])) {
       await t.test(`merged replies: ${command}, later arrival ${later}`, async () => {
         const conversation = randomUUID(), drafts = [];
-        const add = async n => {
-          const source = randomUUID(), draft = randomUUID();
-          await c.query(`insert into activity(id,occurred_at,actor_id,kind,summary,detail,email_source,email_context)
-            values($1,now(),$2,'email_in','Synthetic grouped source','Synthetic evidence',
-              '{"mailbox_owner":"joe","sender_email":"sender@example.test"}',
-              jsonb_build_object('conversation_id',$3::text,'sender',jsonb_build_object('name','Synthetic Sender')))`,
-          [source, actors.joe.id, conversation]);
-          await c.query(`insert into email_proposal(id,kind,activity_id,evidence_quote,owner,confidence,created_by,
-              draft_subject,draft_body,created_at)
-            values($1,'reply_draft',$2,'Synthetic evidence','joe',0.95,$3,'Synthetic subject','Synthetic body',
-              now()-interval '1 hour'+$4*interval '1 minute')`, [draft,source,actors.joe.id,n]);
-          drafts.push(draft);
-        };
-        for (let n=0;n<4;n++) await add(n);
+        for (let n=0;n<4;n++) drafts.push(await addDraft(n, conversation));
         const kept = drafts[3];
         const card = (await read()).items.find(i => i.source_id === kept);
         assert.equal(card.merged_source_ids.length,4);
-        if (later) await add(4);
+        if (later) drafts.push(await addDraft(4, conversation));
         if (command.endsWith('home-inbox')) {
           const until = (await c.query("select now()+interval '1 day' as deadline")).rows[0].deadline.toISOString();
           const result = await call(command,{items:[{item_id:card.item_id,base_version:card.base_version}],
@@ -197,10 +208,11 @@ test('Home review lifecycle uses exact current domain owners on PostgreSQL', asy
           assert.equal(fresh.section,command==='snooze-home-inbox' ? 'snoozed' : 'settled');
 
         } else {
-          const args = {proposal_id:kept,base_version:1,idempotency_key:randomUUID()};
-          await call(command,command==='submit-email-draft'
-            ? {...args,subject:'Synthetic reply',body:'Synthetic body',to:['sender@example.test'],cc:['dell@example.test']}
-            : {...args,reason:'No reply needed'});
+          const outside = [await addDraft(-3, randomUUID()), await addDraft(-2, ''), await addDraft(-1, conversation, 'dell')];
+          const covered = await decide(command, kept);
+          assert.deepEqual(covered, drafts.slice(0,3).sort(), 'event names exactly the covered drafts');
+          assert.deepEqual(await statuses(outside), ['pending','pending','pending'],
+            'other conversations, missing conversation IDs and other mailboxes stay pending');
           const rows = (await c.query('select id,status,resolution_reason,resolved_by,version from email_proposal where id=any($1::uuid[])',[drafts])).rows;
           assert.equal(rows.length,drafts.length,'proposal history is retained');
           for (const covered of drafts.slice(0,3)) {
@@ -215,6 +227,13 @@ test('Home review lifecycle uses exact current domain owners on PostgreSQL', asy
         }
       });
     }
+  }
+  for (const command of ['submit-email-draft', 'dismiss-email-proposal']) {
+    await t.test(`blank conversation IDs never cover each other: ${command}`, async () => {
+      const earlier = await addDraft(0, '   '), kept = await addDraft(1, '');
+      assert.deepEqual(await decide(command, kept), []);
+      assert.deepEqual(await statuses([earlier]), ['pending']);
+    });
   }
 
 });
