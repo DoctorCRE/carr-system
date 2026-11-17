@@ -617,8 +617,28 @@ class MatchingTests(unittest.TestCase):
                        recipients=original['recipients'] + [{'email': 'doctor@example.test', 'unknown': True}])
         fake = FakeJev(existing=0.1, different=0.95)
         decision = email_matching.match(current, [{'id': DEAL, 'name': 'Deal A'}], [original], client=fake)
-        self.assertEqual((decision.kind, decision.deal), ('possible_new_deal', None))
+        self.assertEqual((decision.kind, decision.deal), ('contact_only', None))
         self.assertEqual(len(fake.calls), 1)
+
+    def test_vendor_sender_never_proposes_a_new_deal(self):
+        known = {'email': 'contact@example.test', 'party_id': 'contact'}
+        unknown = {'email': 'stranger@example.test', 'unknown': True}
+        new_deal = ['possible_new_deal']
+        for sender, role, expected in [
+                (self.mail()['sender'], 'client', []),
+                (dict(known, role='other_vendor'), 'client', []),
+                (unknown, 'other_vendor', []),
+                (unknown, 'landlord_side', []),
+                (unknown, 'client', new_deal),
+                (known, 'other_vendor', new_deal),
+                (dict(known, role='client', client_id='client-without-open-deal'), 'lender', new_deal)]:
+            with self.subTest(sender=sender, role=role):
+                fake = FakeJev(existing=0.1, different=0.95, role=role)
+                server = Server([self.mail(sender=sender)])
+                counts = email_router.route(server, lambda *args: {'proposals': []}, refusal_code, {}, NOW,
+                                            matching=lambda *args: email_matching.match(*args, client=fake))
+                self.assertEqual([item['kind'] for item in server.recorded()], expected)
+                self.assertEqual(counts['contact_only'], 0 if expected else 1)
 
     def mail(self, **changes):
         return dict({'activity_id': 'current', 'deal': None, 'subject': 'Re: Practice space',
@@ -653,7 +673,8 @@ class MatchingTests(unittest.TestCase):
 
     def test_different_conversation_ids_never_fall_back_to_subject(self):
         fake = FakeJev(existing=0.1, different=0.95)
-        decision = email_matching.match(self.mail(conversation_id='new'), [{'id': DEAL}], [self.prior()], client=fake)
+        decision = email_matching.match(self.mail(conversation_id='new', sender=self.prior()['sender'] | {'role': None}),
+                                        [{'id': DEAL}], [self.prior()], client=fake)
         self.assertEqual(decision.kind, 'possible_new_deal')
         self.assertEqual(len(fake.calls), 1)
 
@@ -661,8 +682,8 @@ class MatchingTests(unittest.TestCase):
         recipients = self.mail()['recipients'] + [{'email': 'doctor@example.test', 'party_id': 'doctor',
                                                   'client_id': 'different-client', 'role': 'client'}]
         fake = FakeJev(existing=0.1, different=0.95)
-        decision = email_matching.match(self.mail(recipients=recipients), [{'id': DEAL, 'client_id': 'client-a'}],
-                                        [self.prior()], client=fake)
+        decision = email_matching.match(self.mail(recipients=recipients, sender=self.mail()['sender'] | {'role': None}),
+                                        [{'id': DEAL, 'client_id': 'client-a'}], [self.prior()], client=fake)
         self.assertEqual(decision.kind, 'possible_new_deal')
 
     def test_conflicting_filed_deals_do_not_inherit(self):
@@ -705,14 +726,14 @@ class MatchingTests(unittest.TestCase):
         def carr(verb, args):
             calls.append((verb, args))
             if verb == 'email-router-queue':
-                return {'open_deals': [{'id': DEAL}], 'emails': [self.mail()]}
+                return {'open_deals': [{'id': DEAL}], 'emails': [self.mail(sender={'email': 'doctor@example.test', 'unknown': True})]}
             return {'ok': True}
         classified = []
         def classify(source, today):
             classified.append(source['activity_id'])
             return {'proposals': []}
         counts = email_router.route(carr, classify, refusal_code, {}, NOW,
-                                    matching=lambda e, ds, hs: email_matching.match(e, ds, hs, client=FakeJev(0.1, 0.9)))
+                                    matching=lambda e, ds, hs: email_matching.match(e, ds, hs, client=FakeJev(0.1, 0.9, role='client')))
         self.assertEqual((counts['routed'], counts['recorded']), (1, 1))
         written = calls[1][1]
         self.assertEqual(written['kind'], 'possible_new_deal')
@@ -893,8 +914,8 @@ class MatchingTests(unittest.TestCase):
 
 
 class FakeJev:
-    def __init__(self, existing=0.95, different=0.05, confidence=0.9, choice=DEAL):
-        self.existing, self.different, self.confidence, self.choice = existing, different, confidence, choice
+    def __init__(self, existing=0.95, different=0.05, confidence=0.9, choice=DEAL, role='lender'):
+        self.existing, self.different, self.confidence, self.choice, self.role = existing, different, confidence, choice, role
         self.calls = []
 
     def system_one(self, **kwargs):
@@ -903,7 +924,7 @@ class FakeJev:
         return SimpleNamespace(
             nouls={'existing': NoulAnswer(noul=self.existing), 'different': NoulAnswer(noul=self.different)},
             choices={'deal': ChoiceAnswer(choice=self.choice, confidence=self.confidence, probabilities={self.choice: 1.0}),
-                     'role': ChoiceAnswer(choice='lender', confidence=0.9, probabilities={'lender': 1.0})})
+                     'role': ChoiceAnswer(choice=self.role, confidence=0.9, probabilities={self.role: 1.0})})
 
 
 class SummaryIntegration(unittest.TestCase):
