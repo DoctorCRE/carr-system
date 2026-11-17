@@ -24,6 +24,7 @@ ROLES = {
     'attorney': 'Attorney providing legal services for either side.',
     'other_vendor': 'Any other vendor, contractor, architect or service provider.',
 }
+VENDOR_ROLES = frozenset(ROLES) - {'client'}
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,12 @@ def thread_match(email: dict, deals: list[dict], history: list[dict]) -> dict | 
 def _description(deal: dict) -> str:
     participants = ', '.join(f"{p.get('name', '')} ({p.get('role', '')})" for p in deal.get('participants', []))
     return '; '.join(str(deal.get(k) or '') for k in ('name', 'property', 'city', 'client', 'phase')) + '; participants: ' + participants
+
+
+def _vendor_sender(email: dict, role: str) -> bool:
+    """The record decides when the sender is known; the model's role reading only covers an unknown sender."""
+    sender = email.get('sender') or {}
+    return sender.get('role') in VENDOR_ROLES or (sender.get('unknown') is True and role in VENDOR_ROLES)
 
 
 def _probability(value) -> float:
@@ -172,7 +179,7 @@ def match(email: dict, deals: list[dict], history: list[dict], *, client=None, s
                         identity_candidates[0])
         return MatchDecision('file_to_deal', selected['deal'], role, min(existing, confidence),
                              candidates=identity_candidates, evidence=evidence)
-    if existing <= LOW and different >= HIGH and not missing:
+    if existing <= LOW and different >= HIGH and not missing and not _vendor_sender(email, role):
         return MatchDecision('possible_new_deal', sender_role=role, confidence=min(different, 1-existing),
                              text='Possible separate transaction. Review existing deals before creating one.',
                              outcome='new', evidence=evidence)
