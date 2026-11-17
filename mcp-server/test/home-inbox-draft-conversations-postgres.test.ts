@@ -78,12 +78,16 @@ test("Home reply drafts collapse pending conversations without changing proposal
   assert.equal((await read()).length, 4, "baseline reproduces four cards for one conversation");
   const before = (await c.query("select * from email_proposal order by id")).rows;
   if (!process.env.HOME_DRAFT_BASELINE) await c.query(migration("1186_home_draft_conversations.sql"));
+  if (!process.env.HOME_DRAFT_BASELINE) {
+    const commands = migration("1187_home_reply_card_commands.sql");
+    await c.query(commands.slice(commands.indexOf("do $wording$")));
+  }
   await t.test("four pending drafts yield the newest card and all covered IDs", async () => {
     const cards = await read();
     assert.equal(cards.length, 1);
     assert.equal(cards[0]?.source_id, id(13));
     assert.deepEqual(cards[0]?.merged_source_ids, [id(13), id(12), id(11), id(10)]);
-    assert.equal(cards[0]?.title, "Synthetic Sender · Reply needed (3 older drafts)");
+    assert.equal(cards[0]?.title, "Synthetic Sender · Reply needed (3 earlier emails)");
     assert.equal(cards[0]?.context_label, "Synthetic subject");
     assert.deepEqual((await c.query("select * from email_proposal order by id")).rows, before);
   });
@@ -96,7 +100,7 @@ test("Home reply drafts collapse pending conversations without changing proposal
   await t.test("a single older draft uses singular count text", async () => {
     assert.equal(
       (await read()).find((r) => r.source_id === id(23))?.title,
-      "fallback@example.test · Reply needed (1 older draft)",
+      "fallback@example.test · Reply needed (1 earlier email)",
     );
   });
   await add(15, "thread-b", { status: "dismissed" });

@@ -153,6 +153,23 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     if (row.owner !== owner) fail('email_draft_not_owner');
     return row;
   };
+  async function dismissCoveredDrafts(c, actor, row) {
+    if (row.kind !== 'reply_draft' || row.status !== 'pending') return [];
+    const { rows } = await c.query(`update email_proposal p set status='dismissed',version=p.version+1,
+        resolved_by=$2,resolved_at=now(),resolution_reason='Covered by the reply decision for this conversation',
+        deferred_until=null
+      from email_proposal kept join activity source on source.id=kept.activity_id, activity covered
+      where kept.id=$1 and covered.id=p.activity_id and p.owner=kept.owner and p.owner=$3
+        and p.kind='reply_draft' and p.status='pending'
+        and (p.created_at,p.id)<(kept.created_at,kept.id)
+        and nullif(btrim(source.email_context->>'conversation_id'),'') is not null
+        and btrim(covered.email_context->>'conversation_id')=btrim(source.email_context->>'conversation_id')
+        and source.email_source->>'mailbox_owner'=$3 and covered.email_source->>'mailbox_owner'=$3
+        and coalesce(source.email_context#>>'{lifecycle,state}','live')='live'
+        and coalesce(covered.email_context#>>'{lifecycle,state}','live')='live'
+      returning p.id`, [row.id,actor.id,actor.slug]);
+    return rows.map(covered => covered.id);
+  }
   const draftRecipients = async (c, row, lock = false) => {
     const source = (await c.query(`select email_source from activity where id=$1${lock ? ' for share' : ''}`,
       [row.activity_id])).rows[0]?.email_source;
@@ -467,8 +484,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             submitted_email=$2::jsonb,submitted_at=now(),resolved_by=$3,resolved_at=now(),
             send_result=null,result_recorded_at=null where id=$1`,
           [row.id, JSON.stringify(submitted), actor.id]);
+          const covered = await dismissCoveredDrafts(c, actor, row);
           await writeEvent(c, actor, 'submit-email-draft', row.deal_id ? 'deal' : 'activity', row.deal_id ?? row.activity_id, {
-            new: { proposal_id: row.id, sha256: submitted.sha256, recipient_binding: {
+            new: { proposal_id: row.id, covered_proposal_ids: covered, sha256: submitted.sha256, recipient_binding: {
               sha256: sha256(JSON.stringify(recipients)), cc_owner: row.owner === 'joe' ? 'dell' : 'joe',
               cc_sha256: sha256(recipients.cc[0]) } },
             cause: 'human_stated', idempotency_key: args.idempotency_key });
@@ -1043,7 +1061,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'dismiss-email-proposal': {
       write: true, humanOnly: true, humanCallerOnly: true,
-      description: 'Joe or Dell dismisses one pending email proposal at the version they read, with a reason kept in deal history. Only the mailbox owner can dismiss a reply draft. The router never re-creates a dismissed proposal for the same deal, email and kind. If Joe later confirms the same proposal through its confirm verb, the confirmation wins and the row becomes confirmed with the dismissal kept as a note. Changes nothing else.',
+      description: 'Joe or Dell dismisses one pending email proposal at the version they read, with a reason kept in deal history. Only the mailbox owner can dismiss a reply draft. The router never re-creates a dismissed proposal for the same deal, email and kind. If Joe later confirms the same proposal through its confirm verb, the confirmation wins and the row becomes confirmed with the dismissal kept as a note. For reply drafts, also dismisses earlier pending drafts covered by this conversation.',
       inputSchema: { type: 'object', additionalProperties: false,
         required: ['idempotency_key', 'proposal_id', 'base_version', 'reason'],
         properties: {
@@ -1066,8 +1084,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             fail('version_conflict', { current_version: row.version, hint: 'surface this to the human and re-read; NEVER auto-retry' });
           await c.query(`update email_proposal set status='dismissed',version=version+1,resolved_by=$2,
             resolved_at=now(),resolution_reason=$3,resolution_note=$4,deferred_until=null where id=$1`, [row.id, actor.id, args.reason.trim(),args.note ?? null]);
+          const covered = await dismissCoveredDrafts(c, actor, row);
           await writeEvent(c, actor, 'dismiss-email-proposal', row.deal_id ? 'deal' : 'activity', row.deal_id ?? row.activity_id, {
-            new: { proposal_id: row.id, kind: row.kind, activity_id: row.activity_id, reason: args.reason.trim(), note: args.note ?? null },
+            new: { proposal_id: row.id, covered_proposal_ids: covered, kind: row.kind, activity_id: row.activity_id, reason: args.reason.trim(), note: args.note ?? null },
             cause: 'human_stated', idempotency_key: args.idempotency_key });
           return { ok: true, proposal_id: row.id, status: 'dismissed', version: row.version + 1 };
         });
