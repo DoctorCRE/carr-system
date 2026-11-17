@@ -39,6 +39,7 @@ test("Home reply drafts collapse pending conversations without changing proposal
     create table ops.notification(id uuid,recipient_actor uuid,subject_type text,subject_ref text,
       severity text,created_at timestamptz,reason text,deep_link text);
     create table ops.notification_read(notification_id uuid,recipient_actor uuid,read_at timestamptz);
+    create table ops.home_inbox_write(actor_id uuid,idempotency_key uuid,request jsonb,result jsonb);
     create function ops.notification_visible(uuid) returns boolean language sql as $$select true$$;
     create table deal(id uuid,name text);
     create table loop_item(id uuid,title text);
@@ -78,10 +79,6 @@ test("Home reply drafts collapse pending conversations without changing proposal
   assert.equal((await read()).length, 4, "baseline reproduces four cards for one conversation");
   const before = (await c.query("select * from email_proposal order by id")).rows;
   if (!process.env.HOME_DRAFT_BASELINE) await c.query(migration("1186_home_draft_conversations.sql"));
-  if (!process.env.HOME_DRAFT_BASELINE) {
-    const commands = migration("1187_home_reply_card_commands.sql");
-    await c.query(commands.slice(commands.indexOf("do $wording$")));
-  }
   await t.test("four pending drafts yield the newest card and all covered IDs", async () => {
     const cards = await read();
     assert.equal(cards.length, 1);
