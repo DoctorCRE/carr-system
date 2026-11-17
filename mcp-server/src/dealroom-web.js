@@ -440,7 +440,7 @@ async function sessionFor(request, env, dependencies) {
   if (session.e2ePrincipal && (session.e2ePrincipal !== E2E_PRINCIPAL || !isStagingBrowserEnvironment(env))) return null;
   const now = dependencies.now();
   let actor = dependencies.actorFromPropsFn(session.props);
-  if (!session.e2ePrincipal && dependencies.slugForEmailFn(session.props?.email) !== actor?.slug) actor = null;
+  if (!session.e2ePrincipal && dependencies.slugForEmailFn(session.props?.email) !== session.props?.slug) actor = null;
   if (actor && session.e2ePrincipal) {
     if (actor.slug !== "joe" || actor.human !== true) return null;
     actor = { ...actor, display: "E2E Joe" };
