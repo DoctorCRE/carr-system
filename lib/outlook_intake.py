@@ -1012,7 +1012,7 @@ class Run:
         self.attempted: set[str] = set()
         self.lead_candidates: list[tuple[dict, dict]] = []
         self.engine = engine_mail.Mailbox(ports.engine, state, now, settings.owner, settings.account, self.counts,
-                                          lambda: _save(out, state)) if ports.engine else None
+                                          lambda: _save(out, state)) if ports and ports.engine else None
         self.message_ids: dict[str, str] = {}
 
     def owner_key(self, verb: str, ref: str, source: str) -> str:
