@@ -165,7 +165,7 @@ test('Home review lifecycle uses exact current domain owners on PostgreSQL', asy
   });
   assert.deepEqual(JSON.parse(readFileSync(new URL('../contracts/home-review.v1.json', import.meta.url))), HOME_REVIEW_CONTRACT);
   await c.query("update actor set email='dell@example.test' where slug='dell'");
-  const addDraft = async (n, conversation, mailbox = 'joe') => {
+  const addDraft = async (n, conversation, mailbox = 'joe', patch = {}) => {
     const source = randomUUID(), draft = randomUUID();
     await c.query(`insert into activity(id,occurred_at,actor_id,kind,summary,detail,email_source,email_context)
       values($1,now(),$2,'email_in','Synthetic grouped source','Synthetic evidence',
@@ -176,6 +176,14 @@ test('Home review lifecycle uses exact current domain owners on PostgreSQL', asy
         draft_subject,draft_body,created_at)
       values($1,'reply_draft',$2,'Synthetic evidence','joe',0.95,$3,'Synthetic subject','Synthetic body',
         now()-interval '1 hour'+$4*interval '1 minute')`, [draft,source,actors.joe.id,n]);
+    if (patch.status === 'approved_to_send') {
+      await c.query(`update email_proposal set status='approved_to_send',version=$2,resolved_by=$3,resolved_at=now(),
+        submitted_at=now(),submitted_email=$4::jsonb where id=$1`, [draft, patch.version, actors.joe.id, JSON.stringify({
+        subject:'Synthetic subject', body:'Synthetic body', sha256:'synthetic',
+        to:['sender@example.test'], cc:['dell@example.test']})]);
+    }
+    if (patch.deleted) await c.query(
+      `update activity set email_context=jsonb_set(email_context,'{lifecycle}','{"state":"deleted"}') where id=$1`, [source]);
     return draft;
   };
   const decide = async (command, kept) => {
@@ -208,11 +216,20 @@ test('Home review lifecycle uses exact current domain owners on PostgreSQL', asy
           assert.equal(fresh.section,command==='snooze-home-inbox' ? 'snoozed' : 'settled');
 
         } else {
-          const outside = [await addDraft(-3, randomUUID()), await addDraft(-2, ''), await addDraft(-1, conversation, 'dell')];
+          const submitted = await addDraft(-5, conversation, 'joe', {status:'approved_to_send', version:2});
+          const deletedSource = await addDraft(-4, conversation, 'joe', {deleted:true});
+          const outside = [await addDraft(-3, randomUUID()), await addDraft(-2, ''), await addDraft(-1, conversation, 'dell'), submitted, deletedSource];
           const covered = await decide(command, kept);
           assert.deepEqual(covered, drafts.slice(0,3).sort(), 'event names exactly the covered drafts');
-          assert.deepEqual(await statuses(outside), ['pending','pending','pending'],
+          assert.equal(covered.includes(submitted), false, 'an already submitted draft stays out of covered ids');
+          assert.equal(covered.includes(deletedSource), false, 'a deleted source draft stays out of covered ids');
+          assert.deepEqual(await statuses(outside.slice(0,3)), ['pending','pending','pending'],
             'other conversations, missing conversation IDs and other mailboxes stay pending');
+          const row = async proposal => (await c.query('select status,version from email_proposal where id=$1',[proposal])).rows[0];
+          assert.deepEqual(await row(submitted), {status:'approved_to_send', version:2},
+            'an earlier submitted reply stays submitted');
+          assert.deepEqual(await row(deletedSource), {status:'pending', version:1},
+            'a draft whose source email was deleted stays unchanged');
           const rows = (await c.query('select id,status,resolution_reason,resolved_by,version from email_proposal where id=any($1::uuid[])',[drafts])).rows;
           assert.equal(rows.length,drafts.length,'proposal history is retained');
           for (const covered of drafts.slice(0,3)) {

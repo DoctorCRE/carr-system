@@ -90,8 +90,11 @@ language sql stable set search_path=pg_catalog,pg_temp as $$
       'Call '||to_char(started_at at time zone 'America/Chicago','Mon DD HH24:MI'),null,
       null,'Call',jsonb_build_array(id::text),null,null,null from sessions
     union all
-    select 'email_proposal:'||id,'email_proposal',id::text,version::text||':'||md5(draft_merged_ids::text),
-      md5(jsonb_build_array(draft_subject,sender_label,draft_merged_ids)::text),
+    select 'email_proposal:'||id,'email_proposal',id::text,
+      case when jsonb_array_length(draft_merged_ids)=1 then version::text
+        else version::text||':'||md5(draft_merged_ids::text) end,
+      case when jsonb_array_length(draft_merged_ids)=1 then md5(coalesce(draft_subject,''))
+        else md5(jsonb_build_array(draft_subject,sender_label,draft_merged_ids)::text) end,
       case when status='failed' then 'failed' when status='sent' then 'done'
         when status='approved_to_send' then 'working' else 'needs_attention' end,
       sender_label||' · '||case status when 'pending' then 'Reply needed'

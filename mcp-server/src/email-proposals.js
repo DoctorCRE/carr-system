@@ -449,7 +449,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'submit-email-draft': {
       write: true, humanOnly: true, humanCallerOnly: true,
-      description: 'The owning partner submits the exact final subject, body and displayed to/cc arrays from a review card. Missing or changed recipients refuse email_draft_recipients_mismatch. Approval freezes the original sender as recipient, the other partner actor.email as cc, and the supplied attachment paths, sha256 and byte sizes. Paths must be canonical absolute paths under the local attachment root. Missing copy address refuses. Enqueues for that partner’s Mac; does not send mail.',
+      description: 'The owning partner submits the exact final subject, body and displayed to/cc arrays from a review card. Missing or changed recipients refuse email_draft_recipients_mismatch. Approval freezes the original sender as recipient, the other partner actor.email as cc, and the supplied attachment paths, sha256 and byte sizes. Paths must be canonical absolute paths under the local attachment root. Missing copy address refuses. Enqueues for that partner’s Mac; does not send mail. For reply drafts, also dismisses earlier pending drafts covered by this conversation.',
       inputSchema: { type: 'object', additionalProperties: false,
         required: [...Object.keys(draftProperties), 'subject', 'body'], properties: { ...draftProperties,
           subject: { type: 'string', minLength: 1, maxLength: 998 }, body: { type: 'string', maxLength: 20000 },

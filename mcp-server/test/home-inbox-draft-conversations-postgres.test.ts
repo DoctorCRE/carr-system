@@ -13,6 +13,8 @@ type DraftOptions = {
 type DraftCard = {
   source_id: string;
   source_state: string;
+  source_version: string;
+  material_version: string;
   merged_source_ids: string[];
   title: string;
   context_label: string | null;
@@ -76,6 +78,15 @@ test("Home reply drafts collapse pending conversations without changing proposal
         [id(actor)],
       )
     ).rows;
+  const legacyVersions = async (n: number) =>
+    (
+      await c.query<{ source_version: string; material_version: string }>(
+        `select version::text || ':' || md5('') source_version,
+          md5(coalesce(draft_subject, '')) || ':' || md5('') material_version
+         from email_proposal where id=$1`,
+        [id(n)],
+      )
+    ).rows[0];
   assert.equal((await read()).length, 4, "baseline reproduces four cards for one conversation");
   const before = (await c.query("select * from email_proposal order by id")).rows;
   if (!process.env.HOME_DRAFT_BASELINE) await c.query(migration("1186_home_draft_conversations.sql"));
@@ -86,12 +97,20 @@ test("Home reply drafts collapse pending conversations without changing proposal
     assert.deepEqual(cards[0]?.merged_source_ids, [id(13), id(12), id(11), id(10)]);
     assert.equal(cards[0]?.title, "Synthetic Sender · Reply needed (3 earlier emails)");
     assert.equal(cards[0]?.context_label, "Synthetic subject");
+    const groupedLegacy = await legacyVersions(13);
+    assert.notEqual(cards[0]?.source_version, groupedLegacy?.source_version);
+    assert.notEqual(cards[0]?.material_version, groupedLegacy?.material_version);
     assert.deepEqual((await c.query("select * from email_proposal order by id")).rows, before);
   });
   await add(14, "thread-b", { sender: { email: "fallback@example.test" } });
   await t.test("two conversations yield two cards even with identical subjects", async () => {
-    assert.equal((await read()).length, 2);
-    assert.equal((await read()).find((r) => r.source_id === id(14))?.title, "fallback@example.test · Reply needed");
+    const cards = await read();
+    const alone = cards.find((r) => r.source_id === id(14));
+    const legacy = await legacyVersions(14);
+    assert.equal(cards.length, 2);
+    assert.equal(alone?.title, "fallback@example.test · Reply needed");
+    assert.equal(alone?.source_version, legacy?.source_version);
+    assert.equal(alone?.material_version, legacy?.material_version);
   });
   await add(23, "thread-b", { sender: { email: "fallback@example.test" } });
   await t.test("a single older draft uses singular count text", async () => {
