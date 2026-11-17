@@ -10,8 +10,15 @@ private intake state until the engine answers it, and a retry derives the same k
 the mailbox, the Message-ID and the step, so a crashed run converges. The other partner's
 mailbox derives another key and the engine answers its stored activity. An attachment is
 uploaded by hash, then tied to its email and deal in a separate call; a tie the engine
-refuses with email_not_stored waits for a later run. Each run also reads one page of the
-emails filed to a deal and writes a links note about each deal for an email with links.
+refuses with email_not_stored waits for a later run, and the file counts as done only
+once its tie settles. Each run also reads one page of the emails filed to a deal and
+writes a links note about each deal for an email with links.
+
+As the door doc says, a 5xx or a lost connection is retried with the same key and any
+other 4xx is final: counted and settled, except email_not_stored and a file to upload
+again. A refusal of the caller itself (401, 403, an unknown job or unprovisioned actor)
+would refuse every request alike, so it fails the run and is tried again next run
+instead of settling a mailbox's mail.
 """
 from __future__ import annotations
 
@@ -37,10 +44,7 @@ KEEP = timedelta(days=30)
 TIMEOUT = 60
 JOB = 'mail_capture'
 CREDENTIALS = ('ENGINE_URL', 'ENGINE_ACCESS_CLIENT_ID', 'ENGINE_ACCESS_CLIENT_SECRET')
-# Refusals a retry cannot change: the email or file is settled and counted, never retried.
-SETTLED = frozenset({'about_nothing', 'message_id_invalid', 'missing_required', 'invalid_field_value',
-                     'not_found', 'database_refused_the_statement', 'filed_to_another_deal',
-                     'sha256_mismatch', 'unsupported_file', 'too_large'})
+CALLER = frozenset({'unauthorized', 'unknown_job', 'actor_not_provisioned'})
 SLUG = re.compile(r'[a-z][a-z0-9_]{0,63}')
 
 
@@ -59,7 +63,7 @@ Door = Callable[[str, str, bytes | None], Reply]
 
 
 def verdict(reply: Reply) -> str:
-    """done, settled, later, upload (the file must be sent again), retry or blocked."""
+    """done, settled, later, upload (the file must be sent again), retry, or caller (fix the setup)."""
     if 200 <= reply.status < 300:
         return 'done'
     if reply.status == 0 or reply.status >= 500:
@@ -68,7 +72,7 @@ def verdict(reply: Reply) -> str:
         return 'later'
     if reply.error == 'file_not_uploaded':
         return 'upload'
-    return 'settled' if reply.error in SETTLED else 'blocked'
+    return 'caller' if reply.status in (401, 403) or reply.error in CALLER else 'settled'
 
 
 def connect(credentials: Path, user: str) -> Door:
@@ -128,6 +132,7 @@ class Mailbox:
         self.files: dict[str, dict] = book['files']
         self.notes: dict[str, dict] = book.setdefault('notes', {})
         self.offers: dict[str, tuple] = {}
+        self.filed: list[dict] = []
 
     def key(self, *parts: str) -> str:
         return str(uuid.uuid5(uuid.NAMESPACE_URL, '|'.join(('engine', self.mailbox, *parts))))
@@ -137,6 +142,9 @@ class Mailbox:
 
     def holds(self, message_id: str) -> bool:
         return message_id in self.emails
+
+    def activity_id(self, message_id: str) -> str | None:
+        return self.emails.get(message_id, {}).get('activity_id')
 
     def offer(self, message_id: str, sent: int, ready: bool, rank: tuple, inbound: bool, activity: dict) -> None:
         """One decoded copy of an email; the most complete copy of each Message-ID is the one sent."""
@@ -159,19 +167,19 @@ class Mailbox:
                 self.answer(entry, self.post('/jobs/activities', entry['request']), 'emails')
         self.save()
 
-    def upload(self, source: str, data: bytes, name: str, message_id: str | None, deal_id: str) -> bool:
-        """Store the bytes; False when they are still needed by a later run."""
+    def upload(self, source: str, data: bytes, name: str, message_id: str | None, deal_id: str) -> str:
+        """Store the bytes: kept (a tie follows), settled (refused for good) or again (read them next run)."""
         sha256 = hashlib.sha256(data).hexdigest()
         reply = self.door('PUT', f'/jobs/files/{sha256}', data)
+        if not self.answered(reply):
+            return 'again'
         if verdict(reply) == 'settled':
             self.count('engine_files_' + reply.error)
-            return True
-        if not self.answered(reply):
-            return False
-        self.files[source] = {'sent': self.at, 'sha256': sha256, 'name': name,
-                              'message_id': message_id, 'deal_id': deal_id}
+            return 'settled'
+        self.files.setdefault(source, {'sent': self.at, 'sha256': sha256, 'name': name,
+                                       'message_id': message_id, 'deal_id': deal_id})
         self.save()
-        return True
+        return 'kept'
 
     def tie_files(self) -> list[str]:
         """Tie each uploaded file to its email and deal. Returns sources whose bytes must be read again."""
@@ -183,7 +191,7 @@ class Mailbox:
             if 'seen' in email and 'outcome' not in email:
                 self.count('engine_attachments_waiting')
                 continue
-            message_id = None if email.get('outcome') in SETTLED else entry['message_id']
+            message_id = entry['message_id'] if email.get('outcome') in (None, 'stored', 'existing') else None
             request = {'sha256': entry['sha256'], 'name': entry['name'], 'kind': 'other',
                        'deal_id': entry['deal_id'], **({'message_id': message_id} if message_id else {})}
             request['idempotency_key'] = self.key('attachment', message_id or '', entry['deal_id'], entry['sha256'])
@@ -200,15 +208,24 @@ class Mailbox:
         return again
 
     def file_links(self) -> bool:
-        """One page of this mailbox's filed emails. False until every links note is answered."""
+        """One page of this mailbox's filed emails, kept as filed. False until every links note is answered.
+
+        The engine pages by activity id, and copied activities keep their old random ids, so a late
+        filing can sort before any cursor: the scan restarts after its last page, and a note is
+        written only for an email of the last KEEP days, the notes kept for that long."""
         after = self.state.get('engine_links_cursor')
         reply = self.door('GET', '/jobs/filed-emails?limit=200' + (f'&after={quote(after)}' if after else ''), None)
         if not self.answered(reply):
             return False
-        for mail in reply.body.get('emails') or []:
+        self.filed = [mail for mail in reply.body.get('emails') or []
+                      if isinstance(mail, dict) and mail.get('activity_id') and mail.get('happened_at')]
+        for mail in self.filed:
+            happened = int(datetime.fromisoformat(mail['happened_at']).timestamp())
             links = sorted(email_links.extract_links(mail.get('body') or ''))
-            for deal_id in (mail.get('deal_ids') or []) if links else []:
-                self.notes.setdefault(f"{mail['activity_id']}|{deal_id}", {'sent': self.at, 'request': {
+            if not links or happened < self.at - KEEP.total_seconds():
+                continue
+            for deal_id in mail.get('deal_ids') or []:
+                self.notes.setdefault(f"{mail['activity_id']}|{deal_id}", {'sent': happened, 'request': {
                     'idempotency_key': self.key('links', mail['activity_id'], deal_id), 'kind': 'note',
                     'happened_at': mail['happened_at'], 'about': [{'deal_id': deal_id}],
                     'summary': '\n'.join(['Links from matched email', *(f'{kind}: {url}' for kind, url in links)])}})
@@ -226,11 +243,11 @@ class Mailbox:
         return self.door('POST', path, json.dumps(request).encode())
 
     def answered(self, reply: Reply) -> bool:
+        """Whether the engine answered for good; a retry or a caller refusal is counted as the run's failure."""
         judged = verdict(reply)
-        if judged in ('retry', 'blocked', 'later', 'upload'):
+        if judged in ('retry', 'caller'):
             self.count('writes_failed' if judged == 'retry' else 'requests_blocked')
-            return False
-        return True
+        return judged in ('done', 'settled')
 
     def answer(self, entry: dict, reply: Reply, what: str) -> None:
         if not self.answered(reply):
@@ -241,12 +258,15 @@ class Mailbox:
             self.count(f'engine_{what}_{reply.error}')
             return
         entry['outcome'] = 'existing' if reply.body.get('existing') is True else 'stored'
+        if isinstance(reply.body.get('activity_id'), str):
+            entry['activity_id'] = reply.body['activity_id']
         self.count(f'engine_{what}_{entry["outcome"]}')
         if what == 'emails' and entry.get('inbound'):
             self.state['last_email_in_filed_at'] = self.at
 
     def prune(self) -> None:
         oldest = self.at - KEEP.total_seconds()
-        for table in (self.emails, self.files):
-            for name in [name for name, entry in table.items() if entry['sent'] < oldest]:
+        for table in (self.emails, self.files, self.notes):
+            for name in [name for name, entry in table.items()
+                         if entry['sent'] < oldest and (table is not self.notes or 'outcome' in entry)]:
                 del table[name]
