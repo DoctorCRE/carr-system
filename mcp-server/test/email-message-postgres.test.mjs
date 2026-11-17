@@ -1,0 +1,43 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import pg from 'pg';
+import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
+import { executeRegisteredTool } from '../src/tools.js';
+
+test('future mail stores one exact Message-ID per mailbox and keeps contact links', async t => {
+  const fixture = await acquireDisposablePostgres({ prefix: 'email-message-', snapshot: true });
+  const c = new pg.Client(fixture.connection);
+  await c.connect();
+  t.after(async () => { await c.end(); await fixture.close(); });
+  const actor = { ...(await c.query("select id,slug from actor where slug='joe'")).rows[0], human: true };
+  await c.query("update actor set email='owner@example.test' where id=$1", [actor.id]);
+  const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Message fixture',$1,$1) returning id", [actor.id])).rows[0].id;
+  const ref = party;
+  const capture = async (message_id, item_id = randomUUID()) => {
+    await c.query('begin');
+    try {
+      const result = await executeRegisteredTool(c, actor, 'log-activity', {
+        idempotency_key: randomUUID(), ref, kind: 'email_in', summary: 'Synthetic email', message_id,
+        email_identity: { mailbox_owner: 'joe', mailbox_account: 'owner@example.test', item_id },
+      });
+      await c.query('commit');
+      return result;
+    } catch (e) { await c.query('rollback'); throw e; }
+  };
+  const first = await capture(' \t<MiXeD@Example.test>\r\n');
+  const retry = await capture('<MiXeD@Example.test>');
+  assert.equal(retry.activity_id, first.activity_id);
+  assert.deepEqual((await c.query('select message_id,mailbox_account from email')).rows,
+    [{ message_id: '<MiXeD@Example.test>', mailbox_account: 'owner@example.test' }]);
+  assert.equal((await c.query('select count(*)::int n from activity where party_id=$1', [party])).rows[0].n, 1);
+  await assert.rejects(c.query("insert into email(mailbox_account,message_id) values('owner@example.test','<MiXeD@Example.test>')"), e => e.code === '23505');
+  await c.query("insert into email(mailbox_account,message_id) values('other@example.test','<MiXeD@Example.test>')");
+  for (const missing of [null, '', 'bad', '<a b@example.test>', '<<a@example.test>>', '<a@example.test> junk', 'bare@example.test']) {
+    const result = await capture(missing);
+    assert.equal((await c.query('select e.message_id from activity a join email e on e.id=a.email_id where a.id=$1', [result.activity_id])).rows[0].message_id, null);
+  }
+  await capture('<mixed@Example.test>');
+  assert.equal((await c.query('select count(*)::int n from email where message_id is not null')).rows[0].n, 3);
+  assert.equal((await c.query("select count(*)::int n from pg_indexes where indexname='email_mailbox_message_id'")).rows[0].n, 1);
+});

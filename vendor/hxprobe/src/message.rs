@@ -179,7 +179,7 @@ fn revision(block: usize, data: &[u8]) -> Option<(u64, Revision)> {
         item_class: string(ITEM_CLASS),
         conversation_index: index,
         in_reply_to: string(IN_REPLY_TO).map(|s| s.trim_matches(['<', '>']).to_string()),
-        message_id: string(MESSAGE_ID).map(|s| s.trim_matches(['<', '>']).to_string()),
+        message_id: string(MESSAGE_ID),
         subject: string(SUBJECT),
         subject_set: slots[&SUBJECT].is_some(),
         sender_set: slots[&SENDER].is_some(),
@@ -423,6 +423,13 @@ pub(crate) mod tests {
         v.extend([0, 0]);
         v.extend(object);
         v
+    }
+
+    #[test]
+    fn message_id_keeps_original_header() {
+        let raw = "<MiXeD@Example.test>";
+        let (_, decoded) = revision(0, &message(70, 10, &[(MESSAGE_ID, utf16(raw))])).unwrap();
+        assert_eq!(decoded.message_id.as_deref(), Some(raw));
     }
 
     #[test]
