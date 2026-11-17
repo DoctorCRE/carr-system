@@ -188,8 +188,9 @@ test('Home review lifecycle uses exact current domain owners on PostgreSQL', asy
         assert.equal(card.merged_source_ids.length,4);
         if (later) await add(4);
         if (command.endsWith('home-inbox')) {
+          const until = (await c.query("select now()+interval '1 day' as deadline")).rows[0].deadline.toISOString();
           const result = await call(command,{items:[{item_id:card.item_id,base_version:card.base_version}],
-            ...(command==='snooze-home-inbox' ? {until:new Date(Date.now()+86400000).toISOString()} : {}),
+            ...(command==='snooze-home-inbox' ? {until} : {}),
             idempotency_key:randomUUID()});
           assert.equal(result.results[0].ok,true,JSON.stringify(result));
           const fresh = (await read()).items.find(i => i.source_id===kept);
