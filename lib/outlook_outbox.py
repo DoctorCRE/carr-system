@@ -364,7 +364,11 @@ def main() -> int:
         settings = load_settings()
         settings.require_repo(repo)
         repo = settings.repo
-        engine = engine_mail.connect(settings.engine_credentials, settings.owner) if settings.engine_outbox else None
+        engine = None
+        if settings.engine_outbox:
+            if settings.engine_credentials is None:
+                raise ValueError('engine_credentials_required')
+            engine = engine_mail.connect(settings.engine_credentials, settings.owner)
         counts = run(settings, send.default_ports(), engine)
         print('outlook-outbox ' + ' '.join(f'{key}={value}' for key, value in counts.items()))
         failed = bool(counts['failed'] or counts['receipt_failed'])
