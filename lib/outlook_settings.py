@@ -44,6 +44,7 @@ class OutlookSettings:
     attachment_root: Path | None = None
     attachment_max_bytes: int = 0
     engine_mail: bool = False
+    engine_outbox: bool = False
     engine_credentials: Path | None = None
 
     @property
@@ -140,12 +141,15 @@ def load_settings(home: Path | None = None) -> OutlookSettings:
     if 'attachment_max_bytes' in values and (type(values['attachment_max_bytes']) is not int
                                              or values['attachment_max_bytes'] <= 0):
         fail('attachment_max_bytes', 'must be a positive integer')
-    if 'engine_mail' in values and type(values['engine_mail']) is not bool:
-        fail('engine_mail', 'must be true or false')
+    for name in ('engine_mail', 'engine_outbox'):
+        if name in values and type(values[name]) is not bool:
+            fail(name, 'must be true or false')
+    if values.get('engine_outbox') and not values.get('engine_mail'):
+        fail('engine_outbox', 'requires engine_mail, which carries the sent reply to the engine')
     if values.get('engine_mail') and 'engine_credentials' not in values:
         fail('engine_credentials', 'required when engine_mail is true')
     for name in sorted(expected - {'model', 'partner_cc', 'folder_account_id', 'attachment_root',
-                                   'attachment_max_bytes', 'engine_mail', 'engine_credentials'}):
+                                   'attachment_max_bytes', 'engine_mail', 'engine_outbox', 'engine_credentials'}):
         if name not in values:
             fail(name, 'required')
         value = values[name]
