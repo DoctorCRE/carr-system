@@ -72,6 +72,15 @@ context, never admission evidence.
 An email whose body is still only Outlook's preview is logged with the preview
 and flagged preview_only. A later full body is logged as a note.
 
+With engine_mail set in outlook.json, each email and its deal-folder attachments go to
+the engine's doors instead (lib/engine_mail.py): the engine links the email to its
+parties itself, and intake writes no activity, full-text note or deal file to the
+record layer for that email. The links note goes to the engine too, from its
+filed-emails read. Mail the record layer already holds is left to the copy, and its old
+email writes are not replayed. Lead proposals, signature contact findings, Outlook flag
+items and delivery-failure findings stay on the record layer until their engine doors
+exist; delivery reports are observed as before and never sent to the engine.
+
 The private copy and decoded database live in a 0700 work folder under
 out/outlook-intake/ and are deleted before the run ends; a folder that cannot be
 deleted fails the run. The report and state are 0600 there too; nothing with a
@@ -103,7 +112,7 @@ from lib.calendar_agenda import (agenda, AGENDA_SCHEMA, AGENDA_DAYS, AGENDA_ATTE
                                  AGENDA_MAX_BYTES)
 from lib import email_contact_review
 from lib.email_contact_candidates import VERSION as SIGNATURE_POLICY
-from lib import email_delivery_failure, email_links, unresolved_email
+from lib import email_delivery_failure, email_links, engine_mail, unresolved_email
 from lib.email_outcomes import business_day_deadline
 from lib.outlook_settings import load_settings, OutlookSettings
 from lib.outlook_runtime import stamp
@@ -216,6 +225,7 @@ class Ports:
     read_unresolved: Callable[[dict, date, list, list], dict] | None = None
     put_object: Callable[[str, str, bytes], dict] | None = None
     copy_attachments: Callable[[Path, list[str]], None] | None = None
+    engine: engine_mail.Door | None = None
 
 
 @dataclass
@@ -1005,6 +1015,10 @@ class Run:
         self.unmatched: set[tuple[str, str, str]] = set()
         self.attempted: set[str] = set()
         self.lead_candidates: list[tuple[dict, dict]] = []
+        self.engine = engine_mail.Mailbox(ports.engine, state, now, settings.owner, settings.account, self.counts,
+                                          lambda: _save(out, state)) if ports and ports.engine else None
+        self.message_ids: dict[str, str] = {}
+        self.file_idents: set[str] = set()
 
     def owner_key(self, verb: str, ref: str, source: str) -> str:
         legacy = key(verb, ref, source)
@@ -1252,7 +1266,7 @@ class Run:
                     report['disposition'] = 'unresolved'
                     continue
                 report['attempts'] = report.get('attempts', 0) + 1
-                if self.state.get('links_cursor') or not mailbox.get('filing_complete'):
+                if not self.engine and (self.state.get('links_cursor') or not mailbox.get('filing_complete')):
                     continue
                 sources = mailbox['sources'].get(report['original_id'], {})
                 if len(sources) != 1:
@@ -1301,7 +1315,42 @@ class Run:
         self.counts['delivery_failures_pending'] = sum(r['disposition'] == 'retryable' for r in mailbox['reports'].values())
         return not any(self.counts[k] for k in ('writes_failed', 'writes_deferred', 'requests_blocked'))
 
+    def engine_emails(self, mails: list[dict], matcher: Matcher, since: int) -> None:
+        assert self.engine
+        leads = self.state.setdefault('engine_leads', {})
+        copied = {(json.loads(r['payload']).get('message_id') or '').strip().strip('<>')
+                  for r in self.state.get('requests', {}).values()
+                  if r['verb'] == 'log-activity' and r['acknowledged'] and r.get('disposition') != 'moved_to_engine'
+                  and json.loads(r['payload']).get('kind') in ('email_in', 'email_out')} - {''}
+        for m in mails:
+            message_id = (m.get('message_id') or '').strip().strip('<>')
+            if message_id:
+                self.message_ids[m['ident']] = message_id
+            if (m['metadata_incomplete'] or m['sent_unix'] > self.now.timestamp() + 300 or message_id in copied
+                    or (m['sent_unix'] < since and not self.engine.holds(message_id) and m['ident'] not in self.file_idents)):
+                continue
+            inbound = not _internal(m['sender'], self.settings.internal_domain)
+            if inbound and matcher.classify(m['sender']) == 'missing' and proposable(m['sender']):
+                self.lead_candidates.append((m, leads.setdefault(m['ident'], {'sent': m['sent_unix']})))
+            if not message_id:
+                self.engine.count('engine_message_id_missing')
+                continue
+            recipients = [{'address': address, 'kind': kind} for field, kind in (('recipients', 'to'), ('cc', 'cc'))
+                          for address in dict.fromkeys(_addresses(m.get(field)))]
+            self.engine.offer(message_id, m['sent_unix'], m['full'] and bool(recipients or inbound),
+                              (m['full'], len(m['text'])), inbound,
+                              {'kind': 'email', 'happened_at': _iso(m['sent_unix']),
+                               'email': {'message_id': message_id, 'sender': m['sender'].lower(),
+                                         'recipients': recipients, 'subject': m['subject'] or '',
+                                         'body': m['text'],
+                                         **({'sender_name': m['sender_name']} if m.get('sender_name') else {})}})
+        self.engine.send_emails()
+
     def emails(self, mails: list[dict], matcher: Matcher, since: int) -> None:
+        if self.engine:
+            self.signature_findings(mails, matcher)
+            reports = self.observe_delivery_failures(mails)
+            return self.engine_emails([m for m in mails if m['ident'] not in reports], matcher, since)
         self.reconcile([m for m in mails if not m['metadata_incomplete']])
         self.signature_findings(mails, matcher)
         delivery_reports = self.observe_delivery_failures(mails)
@@ -1430,11 +1479,13 @@ class Run:
                 continue
             seen = flags.get(m['ident'])
             if seen is None:  # the activity ids are only readable while intake still remembers the logging
+                engine = self.engine and self.engine.activity_id((m.get('message_id') or '').strip().strip('<>'))
+                requests = self.state.get('requests', {})
                 activities = sorted({
-                    self.state['requests'][k]['activity_id']
+                    requests[k]['activity_id']
                     for address, _ in _parties(m, self.settings.internal_domain) if (ref := matcher.ref(address))
                     for k in (self.activity_key(ref, m['ident']),)
-                    if self.state['requests'].get(k, {}).get('activity_id')})
+                    if requests.get(k, {}).get('activity_id')} | ({engine} if engine else set()))
                 if not activities:
                     self.counts['flags_unfiled'] += 1
                     continue
@@ -1496,6 +1547,12 @@ class Run:
 
     def file_links(self) -> bool:
         """Use server-confirmed filing, including matches made after local intake finished."""
+        if self.engine:
+            filed = self.engine.file_links()
+            self.deals.update({mail['activity_id']: mail['deal_ids'][0] for mail in self.engine.filed
+                               if len(mail.get('deal_ids') or []) == 1})
+            self.counts['links_filed'] = self.counts.get('engine_notes_stored', 0)
+            return filed
         queue = self.ports.carr('email-router-queue', {
             'purpose': 'links', 'limit': 200,
             **({'after': self.state['links_cursor']} if self.state.get('links_cursor') else {})})
@@ -1626,9 +1683,29 @@ class Run:
             self.counts['attachments_failed'] = self.counts.get('attachments_failed', 0) + 1
         return prepared
 
+    def engine_attachments(self, prepared: list[tuple[str, dict, dict, bytes]]) -> None:
+        assert self.engine
+        done = self.state.setdefault('attachments_done', {})
+        for ident, deal, result, data in prepared:
+            source = f"{ident}/{result['attachment']}"
+            uploaded = self.engine.upload(source, data, result['name'], self.message_ids.get(ident), deal['id'])
+            if uploaded == 'settled':
+                done[source] = int(self.now.timestamp())
+            elif uploaded == 'again':
+                self.state['attachments_pending'] = True
+        if self.engine.tie_files():
+            self.state['attachments_pending'] = True
+        done.update({source: int(self.now.timestamp()) for source, f in self.engine.files.items()
+                     if 'outcome' in f and source not in done})
+        cutoff = int((self.now - UNRESOLVED_DAYS).timestamp())
+        self.state['attachments_done'] = {source: at for source, at in done.items() if at >= cutoff}
+        _save(self.out, self.state)
+
     def file_attachments(self, prepared: list[tuple[str, dict, dict, bytes]]) -> None:
         from lib import outlook_deal_files as filing
 
+        if self.engine:
+            return self.engine_attachments(prepared)
         done = self.state.setdefault('attachments_done', {})
         put = self.ports.put_object or filing.r2_put_object()
         for ident, deal, result, data in prepared:
@@ -1669,7 +1746,8 @@ class Run:
         self.state['reads_due'] = False
         if self.ports.read_unresolved is None:
             return
-        queued = {p['sender'] for p in self.state.get('mail_unresolved', {}).values() if p.get('sender')}
+        queued = {p['sender'] for table in ('mail_unresolved', 'engine_leads')
+                  for p in self.state.get(table, {}).values() if p.get('sender')}
         deals, failures = None, 0
         for m, progress in self.lead_candidates:
             address = m['sender'].lower()
@@ -2265,7 +2343,7 @@ def _run(out: Path, home: Path, ports: Ports, state: dict, settings: OutlookSett
     review_due = 'calendar_review_at' not in state or (state['calendar_review_at'] is not None
                                                       and now.timestamp() >= state['calendar_review_at'])
     from lib.outlook_field_census import SCHEMA as field_census_schema
-    if state.get('field_census_schema') == field_census_schema and state.get('account_binding') == _hash(settings.account.strip().lower()) and not state.get('decoder_degraded') and state.get('folder_account_id') == settings.folder_account_id and all(name in state for name in MAIL_STORE_COUNTERS) and 'email_index_published' in state and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and state.get('signature_policy') == SIGNATURE_POLICY and state.get('attachment_policy') == 2 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY and not state.get('reads_due'):
+    if state.get('field_census_schema') == field_census_schema and state.get('account_binding') == _hash(settings.account.strip().lower()) and not state.get('decoder_degraded') and state.get('folder_account_id') == settings.folder_account_id and all(name in state for name in MAIL_STORE_COUNTERS) and 'email_index_published' in state and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and state.get('signature_policy') == SIGNATURE_POLICY and state.get('attachment_policy') == 2 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY and not state.get('reads_due') and not engine_mail.due(state, now):
         if state.get('pending_full'):
             Run(ports, state, now, out, settings).full_text([])
             _save(out, state)
@@ -2345,11 +2423,15 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         matcher = matcher or Matcher(ports.contacts(), settings.internal_domain)
         complete_mails = [m for m in mails if not m['metadata_incomplete']]
         prepared = work.prepare_attachments(complete_mails, matcher, db, files)
+        work.file_idents = {ident for ident, *_ in prepared}
         _remove(files.parent)
         _quarantine_calendar_requests(state)
         _save(out, state)
         for request in list(state.get('requests', {}).values()):
             if request['verb'] in ('record-deal-item', 'complete-deal-item', 'drop-action'):
+                continue
+            if work.engine and request['verb'] == 'log-activity' and not request['acknowledged']:
+                request.update(acknowledged=True, disposition='moved_to_engine', retry_at=None)
                 continue
             if (request['verb'] == 'record-finding'
                     and json.loads(request['payload']).get('kind') == email_contact_review.KIND):
@@ -2363,7 +2445,8 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         work.counts['legacy_unmatched'] = _legacy_unmatched(state)
         work.observe_flags(complete_mails, matcher)
         work.leads(matcher)
-        work.full_text(complete_mails)
+        if not work.engine:
+            work.full_text(complete_mails)
         mail_processed = bool(work.written or any(value for key, value in work.counts.items()
                                                   if key not in (*MAIL_STORE_COUNTERS, 'mail_rows_reusing_prior_identity',
                                                                  'decoder_alarm', 'signature_held')
@@ -2405,6 +2488,10 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
                  folder_account_id=settings.folder_account_id, account_binding=_hash(settings.account.strip().lower()),
                  mail_rows_reusing_prior_identity=work.counts['mail_rows_reusing_prior_identity'])
     _prune(state, now)
+    if work.engine:
+        work.engine.prune()
+        oldest = (now - UNRESOLVED_DAYS).timestamp()
+        state['engine_leads'] = {k: p for k, p in state['engine_leads'].items() if p['sent'] >= oldest}
     _save(out, state)
     counts.update(mapping_counts(state), mail_ids=len(state['mail_ids']))
     if health['failing']:
@@ -2502,7 +2589,9 @@ def main(*, reconcile_binding: bool = False, reconcile_vendor: Path | None = Non
     ports = Ports(carr=carr, contacts=_contacts(carr),
                   decode=_decoder(home, settings), now=lambda: datetime.now(timezone.utc),
                   read_unresolved=lambda mail, today, deals, parties: unresolved_email.ask(
-                      mail, today, deals, parties, settings.model))
+                      mail, today, deals, parties, settings.model),
+                  engine=(engine_mail.connect(settings.engine_credentials, settings.owner)
+                          if settings.engine_mail and settings.engine_credentials else None))
     outcome = run(repo, home, ports, settings=settings, reconcile_binding=reconcile_binding,
                   legacy_decode=legacy_decode, attest_mailbox=attest_mailbox)
     print(status_line(outcome))
