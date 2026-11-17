@@ -2955,7 +2955,8 @@ sys.path.insert(0, 'ops')
 f=runpy.run_path('ops/outlook-intake-selftest.py')
 t=f['IntakeTest'](); t.setUp()
 try:
-    m=f['mail']('pat@example.test', -timedelta(hours=1), kind=sys.argv[1], body='We received the LOI from the landlord.')
+    m=f['mail']('pat@example.test', -timedelta(hours=1), kind=sys.argv[1], subject='Suite question '+sys.argv[1],
+                body='We received the LOI from the landlord.')
     t.run_intake([m])
     payload=t.fake.writes('log-activity')[-1][1]
     print(json.dumps(payload))
