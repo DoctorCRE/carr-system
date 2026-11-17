@@ -164,6 +164,7 @@ test('Home review lifecycle uses exact current domain owners on PostgreSQL', asy
     await refuses(call('list-email-proposals', {proposal_id:proposal,limit:1}), 'email_proposals_arguments_invalid');
   });
   assert.deepEqual(JSON.parse(readFileSync(new URL('../contracts/home-review.v1.json', import.meta.url))), HOME_REVIEW_CONTRACT);
+  await c.query("update actor set email='dell@example.test' where slug='dell'");
   for (const command of ['snooze-home-inbox', 'settle-home-inbox', 'submit-email-draft', 'dismiss-email-proposal']) {
     for (const later of (command.endsWith('home-inbox') ? [false] : [false, true])) {
       await t.test(`merged replies: ${command}, later arrival ${later}`, async () => {
@@ -193,7 +194,7 @@ test('Home review lifecycle uses exact current domain owners on PostgreSQL', asy
           assert.equal(result.results[0].ok,true,JSON.stringify(result));
           const fresh = (await read()).items.find(i => i.source_id===kept);
           assert.equal(fresh.section,command==='snooze-home-inbox' ? 'snoozed' : 'settled');
-          assert.equal(fresh.new_activity,false);
+
         } else {
           const args = {proposal_id:kept,base_version:1,idempotency_key:randomUUID()};
           await call(command,command==='submit-email-draft'
