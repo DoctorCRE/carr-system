@@ -1,6 +1,6 @@
 // Send assistant saves to DoctorCRE Engine from the Worker.
 import { derivedIdempotencyKey } from "./derived-key.ts";
-import { isInvoiceEvidence } from "./invoice-automation.js";
+import { isInvoiceEvidence } from "./invoice-evidence.ts";
 import { ToolError } from "./tool-error.ts";
 import type { VerbInputs } from "./verb-contract.ts";
 

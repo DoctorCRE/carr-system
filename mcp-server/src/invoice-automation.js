@@ -1,19 +1,11 @@
 // Local readers submit derived invoice facts. No provider, raw message or send path.
 import { canExercisePartnerAuthority } from "./partner-authority.js";
 import { derivedIdempotencyKey } from "./derived-key.ts";
-import { isCalendarDate } from "./calendar-date.ts";
+import { isInvoiceEvidence } from "./invoice-evidence.ts";
 const normal = value => typeof value === "string" ? value.trim().replace(/\s+/g, " ").toLowerCase() : "";
 const candidateDeals = (invoice,deals) => deals.filter(d=>normal(d.name)===normal(invoice.deal_name));
 const dateText = value => value instanceof Date ? value.toISOString().slice(0, 10) : value;
 const schema = properties => ({type:"object",additionalProperties:false,properties});
-
-export function isInvoiceEvidence({ native_ref, from_address, deal_name, occurred_at }, now) {
-  const occurred = Date.parse(occurred_at);
-  return /^local-mail:\S/.test(native_ref || "") && !!normal(deal_name) &&
-    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(from_address || "") &&
-    /^\d{4}-\d{2}-\d{2}T/.test(occurred_at || "") && isCalendarDate(occurred_at.slice(0, 10)) &&
-    occurred <= now;
-}
 
 // Exact deal name is necessary. A corroborating client or complete premises
 // address is necessary too. Contradictory supplied fields and multiple matches
