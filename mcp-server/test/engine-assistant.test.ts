@@ -657,7 +657,11 @@ test("invoice capture retries with a key derived from the caller's save", async 
     const attempt = attempts++;
     return attempt === 0
       ? Response.json({ error: "database_unavailable" }, { status: 503 })
-      : Response.json({ invoice_id: savedId, evidence_ref: invoice.native_ref, ...(attempt === 1 && { replayed: true }) });
+      : Response.json({
+          invoice_id: savedId,
+          evidence_ref: invoice.native_ref,
+          ...(attempt === 1 && { replayed: true }),
+        });
   });
   for (const [actor, idempotency_key, receipt] of [
     [mailboxPartner, key, { replayed: true }],
