@@ -7,6 +7,15 @@ type EngineEnv = {
   ENGINE_ACCESS_CLIENT_SECRET?: string;
 };
 
+export function assistantOldRole(kind: unknown, id: string) {
+  if (kind === "lead" || kind === "client" || kind === "vendor") return { kind, id };
+  return null;
+}
+
+type OldRoleSubject = { old_role: NonNullable<ReturnType<typeof assistantOldRole>> };
+type DealSubject = { deal_id: string };
+type PartySubject = { party_id: string };
+
 type Save =
   | {
       path: "/jobs/activities";
@@ -16,7 +25,7 @@ type Save =
         kind: string;
         happened_at?: string;
         summary: string;
-        about: ({ deal_id: string } | { party_id: string })[];
+        about: (DealSubject | PartySubject)[];
       };
     }
   | {
@@ -24,17 +33,16 @@ type Save =
       id: "next_step_id";
       body: {
         idempotency_key: string;
-        deal_id: string;
         what: string;
         owner?: string;
         due_on?: string;
         replaces: "current";
-      };
+      } & (DealSubject | OldRoleSubject);
     }
   | {
       path: "/jobs/next-steps/complete";
       id: "next_step_id";
-      body: { idempotency_key: string } & ({ deal_id: string } | { party_id: string });
+      body: { idempotency_key: string } & (DealSubject | PartySubject | OldRoleSubject);
     }
   | {
       path: "/jobs/activities/deal-note";
@@ -120,6 +128,10 @@ export async function saveAssistantChange(env: EngineEnv, partner: string, save:
       const note = dealNoteReceipt(result, save.body.plan !== undefined);
       if (!note) continue;
       return { ...receipt, ...note };
+    }
+    if ("old_role" in save.body) {
+      if (!isUuid(result.party_id)) continue;
+      return { ...receipt, party_id: result.party_id };
     }
     return receipt;
   }
