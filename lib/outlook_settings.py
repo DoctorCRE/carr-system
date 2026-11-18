@@ -45,6 +45,7 @@ class OutlookSettings:
     attachment_max_bytes: int = 0
     engine_mail: bool = False
     engine_credentials: Path | None = None
+    engine_cadence: bool = False
 
     @property
     def decoder(self) -> Path:
@@ -140,12 +141,13 @@ def load_settings(home: Path | None = None) -> OutlookSettings:
     if 'attachment_max_bytes' in values and (type(values['attachment_max_bytes']) is not int
                                              or values['attachment_max_bytes'] <= 0):
         fail('attachment_max_bytes', 'must be a positive integer')
-    if 'engine_mail' in values and type(values['engine_mail']) is not bool:
-        fail('engine_mail', 'must be true or false')
-    if values.get('engine_mail') and 'engine_credentials' not in values:
-        fail('engine_credentials', 'required when engine_mail is true')
+    for switch in ('engine_mail', 'engine_cadence'):
+        if switch in values and type(values[switch]) is not bool:
+            fail(switch, 'must be true or false')
+        if values.get(switch) and 'engine_credentials' not in values:
+            fail('engine_credentials', f'required when {switch} is true')
     for name in sorted(expected - {'model', 'partner_cc', 'folder_account_id', 'attachment_root',
-                                   'attachment_max_bytes', 'engine_mail', 'engine_credentials'}):
+                                   'attachment_max_bytes', 'engine_mail', 'engine_credentials', 'engine_cadence'}):
         if name not in values:
             fail(name, 'required')
         value = values[name]
