@@ -4,9 +4,9 @@ The doors are fixed in the engine repository's docs/new-database.md, "Doors the 
 system calls". The bridge calls them only when the capture config sets engine_calls;
 otherwise nothing here runs and the call's suggestions go to the capture Worker as before.
 
-Door 19 stores the call and its per-deal notes. Tasks and changes marked for review
-use door 21. Automatic phase and next-step changes use doors 16 and 18, with final
-refusals kept as suggestions for review. Email drafts stay with the capture Worker.
+Door 19 stores the call and its per-deal notes. Phase moves and tasks for review use
+door 21. Automatic next steps use door 18, with final refusals kept as suggestions
+for review. Email drafts stay with the capture Worker.
 
 Keys derive from the session and the item, so a crashed run's retry converges. A 5xx or a
 lost connection is retried next run with the same key, and a refusal of the caller itself
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import fcntl
 import json
 from pathlib import Path
 import re
@@ -41,7 +42,7 @@ class Move:
     body: Dict[str, Any]
     fallback: Optional[Dict[str, Any]] = None
     answer: str = "proposal_id"
-    deal_read: Optional[str] = None
+    refused: Optional[str] = None
 
 
 def connector(config: Dict[str, Any]) -> Optional[Connect]:
@@ -137,13 +138,9 @@ def moves(session_dir: Path, report: Dict[str, Any], recorder: str) -> Iterator[
             name = f"deal_updates:{index}:phase_move"
             target = {"to": phase["value"], **({"on": phase["started_on"]} if phase.get("started_on") else {})}
             suggestion = proposal(name, "phase_move", update["deal_id"], update["evidence"], **target)
-            if phase.get("apply") == "automatic":
-                deal = f"/jobs/deals/{update['deal_id']}"
-                saved = {"idempotency_key": key(session, name, "phase_move"), "phase": target}
-                yield Move(phase, name, f"{deal}/changes", saved, suggestion,
-                           answer="phase_changed_at", deal_read=deal)
-            else:
-                yield Move(phase, name, PROPOSALS, suggestion)
+            # Door 16's latest change ID cannot establish the phase at the time of the call.
+            refused = "missing_phase_chronology" if phase.get("apply") == "automatic" else None
+            yield Move(phase, name, PROPOSALS, suggestion, refused=refused)
 
 
 def worker_drafts(shaped: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -163,9 +160,9 @@ class Run:
         self.outcomes: Dict[str, Dict[str, Any]] = {}
         self.blocked = False
 
-    def request(self, method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Optional[engine_mail.Reply]:
+    def request(self, path: str, body: Dict[str, Any]) -> Optional[engine_mail.Reply]:
         """The final answer, or None when it must be retried next run."""
-        reply = self.door(method, path, json.dumps(body).encode() if body is not None else None)
+        reply = self.door("POST", path, json.dumps(body).encode())
         judged = engine_mail.verdict(reply)
         if judged in ("retry", "caller"):
             self.log(f"ENGINE {judged} session={self.session_dir.name} path={path} "
@@ -176,7 +173,13 @@ class Run:
 
     def publish(self) -> bool:
         """True once the call and every suggestion it moves have a final answer."""
-        with post_call.session_lock(self.session_dir):
+        lock_path = self.session_dir / ".engine-publish.lock"
+        lock_path.touch(mode=0o600, exist_ok=True)
+        with lock_path.open("a+") as lock:
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return False
             return self._publish()
 
     def _publish(self) -> bool:
@@ -184,16 +187,13 @@ class Run:
         stored = report.get("engine_call") or {}
         if "outcome" not in stored:
             request = call(self.session_dir, report)
-            reply = self.request("POST", "/jobs/activities", request) if request else None
+            reply = self.request("/jobs/activities", request) if request else None
             if request and reply is None:
                 return False
             stored = settled(reply, "activity_id") if reply else {"outcome": "about_nothing"}
         activity_id = stored.get("activity_id")
         for move in moves(self.session_dir, report, self.recorder):
             if "engine" in move.item or self.blocked:
-                continue
-            if activity_id is None and move.path == PROPOSALS:
-                self.outcomes[move.key] = {"outcome": "call_not_stored"}
                 continue
             self.outcomes[move.key] = self.send(move, activity_id)
         self.outcomes = {name: outcome for name, outcome in self.outcomes.items() if outcome}
@@ -202,61 +202,38 @@ class Run:
         return not self.blocked
 
     def send(self, move: Move, activity_id: Optional[str]) -> Dict[str, Any]:
-        if move.fallback is None:
-            body = {**move.body, "activity_id": activity_id} if move.path == PROPOSALS else move.body
-            reply = self.request("POST", move.path, body)
-            return settled(reply, move.answer) if reply else {}
+        path, body, answer = move.path, move.body, move.answer
+        reason = move.refused
+        if move.fallback is not None:
+            reason = (move.item.get("engine_pending") or {}).get("refused")
+            if reason is None:
+                if confident(body["what"]):
+                    reply = self.request(path, body)
+                    if reply is None:
+                        return {}
+                    if engine_mail.verdict(reply) == "done":
+                        return {**settled(reply, answer), "outcome": "applied"}
+                    reason = reply.error
+                else:
+                    reason = "below_confidence_bar"
+                self.checkpoint_refusal(move, reason)
+            path, body, answer = PROPOSALS, move.fallback, "proposal_id"
+        refused = {"refused": reason} if reason is not None else {}
+        if path == PROPOSALS:
+            if activity_id is None:
+                return {"outcome": "call_not_stored", **refused}
+            body = {**body, "activity_id": activity_id}
+        reply = self.request(path, body)
+        return {**settled(reply, answer), **refused} if reply else {}
 
-        reason = (move.item.get("engine_pending") or {}).get("refused")
-        if reason is None:
-            reply = self.apply(move)
-            if reply is None:
-                return {}
-            if engine_mail.verdict(reply) == "done":
-                return {**settled(reply, move.answer), "outcome": "applied"}
-            reason = reply.error
-            self.checkpoint(move, "refused", reason)
-        refused = {"refused": reason}
-        if activity_id is None:
-            return {"outcome": "call_not_stored", **refused}
-        reply = self.request("POST", PROPOSALS, {**move.fallback, "activity_id": activity_id})
-        return {**settled(reply, "proposal_id"), **refused} if reply else {}
-
-    def apply(self, move: Move) -> Optional[engine_mail.Reply]:
-        if move.deal_read is None:
-            if not confident(move.body["what"]):
-                return engine_mail.Reply(422, {"error": "below_confidence_bar"})
-            return self.request("POST", move.path, move.body)
-
-        body = (move.item.get("engine_pending") or {}).get("request")
-        if body is None:
-            reply = self.request("GET", move.deal_read)
-            if reply is None or engine_mail.verdict(reply) != "done":
-                return reply
-            deal = reply.body
-            if (move.deal_read != f"/jobs/deals/{deal.get('deal_id')}" or "next_step" not in deal
-                    or "phase" not in deal or (deal["phase"] is not None and not isinstance(deal["phase"], str))
-                    or type(deal.get("change_id")) is not int or deal["change_id"] < 0):
-                self.log(f"ENGINE retry session={self.session_dir.name} error=invalid_deal_read")
-                self.blocked = True
-                return None
-            if deal["phase"] == move.body["phase"]["to"]:
-                return engine_mail.Reply(200, {})
-            # The write can succeed before its reply is lost. A retry must use the same read.
-            body = {
-                **move.body, "seen_change_id": deal["change_id"], "phase": {**move.body["phase"], "from": deal["phase"]},
-            }
-            self.checkpoint(move, "request", body)
-        return self.request("POST", move.path, body)
-
-    def checkpoint(self, move: Move, field: str, value: object) -> None:
-        with post_call.update_report(self.session_dir, locked=True) as report:
+    def checkpoint_refusal(self, move: Move, reason: str) -> None:
+        with post_call.update_report(self.session_dir) as report:
             current = next(current for current in moves(self.session_dir, report, self.recorder)
                            if current.key == move.key)
-            current.item.setdefault("engine_pending", {})[field] = value
+            current.item.setdefault("engine_pending", {})["refused"] = reason
 
     def record(self, stored: Dict[str, Any]) -> None:
-        with post_call.update_report(self.session_dir, locked=True) as report:
+        with post_call.update_report(self.session_dir) as report:
             report["engine_call"] = stored
             for move in moves(self.session_dir, report, self.recorder):
                 outcome = self.outcomes.get(move.key)
@@ -267,8 +244,11 @@ class Run:
                 if outcome["outcome"] == "applied":
                     move.item["applied_automatically"] = True
                 elif "refused" in outcome:
+                    reason = outcome["refused"]
                     move.item.update(apply="review", review_reason=(
-                        f"Could not apply automatically ({outcome['refused']}); review it here."))
+                        "Check whether the deal moved after the call before applying this phase change."
+                        if reason == "missing_phase_chronology"
+                        else f"Could not apply automatically ({reason}); review it here."))
             changes = [update[field] for update in report.get("deal_updates", [])
                        for field in post_call.AUTOMATIC_FIELDS if isinstance(update.get(field), dict)]
             report["automatic"] = {"finished_at": post_call.now(),
