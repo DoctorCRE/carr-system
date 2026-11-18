@@ -22,6 +22,7 @@ spec.loader.exec_module(capture_bridge)
 DEAL_A = "00000000-0000-4000-8000-00000000000a"
 DEAL_B = "00000000-0000-4000-8000-00000000000b"
 ACTIVITY = "00000000-0000-4000-8000-0000000000c1"
+STEP_REQUEST_ID = "f95dab00-3914-5553-ab22-347dac699f7d"
 
 
 def report():
@@ -132,9 +133,11 @@ class EngineCalls(unittest.TestCase):
         self.assertEqual({k: task[k] for k in ("kind", "deal_id", "what", "due_on", "activity_id")},
                          {"kind": "next_step", "deal_id": DEAL_A, "what": "Call the landlord",
                           "due_on": "2026-10-30", "activity_id": ACTIVITY})
-        self.assertEqual(step, {"idempotency_key": step["idempotency_key"], "deal_id": DEAL_A,
-                                "what": "Send the lease draft", "due_on": "2026-11-02", "owner": "joe",
-                                "replaces": "current"})
+        self.assertEqual(step, {
+            "idempotency_key": STEP_REQUEST_ID, "deal_id": DEAL_A, "what": "Send the lease draft",
+            "due_on": "2026-11-02", "owner": "joe", "replaces": "current",
+            "call": {"activity_id": ACTIVITY, "evidence_quote": "we will send the lease draft Monday"},
+        })
         self.assertEqual({k: phase[k] for k in ("kind", "deal_id", "evidence", "to")},
                          {"kind": "phase_move", "deal_id": DEAL_A, "evidence": "we will send the lease draft Monday",
                           "to": "negotiation"})
@@ -148,6 +151,33 @@ class EngineCalls(unittest.TestCase):
             "post_call_items": [{"kind": "assigned_action"}, {"kind": "email_draft"}],
             "bindings": [{"remote": "post_call", "index": 0}, {"remote": "legacy"}, {"remote": "post_call", "index": 1}]})
         self.assertEqual((drafts, bindings), ([{"kind": "email_draft"}], [{"remote": "post_call", "index": 1}]))
+
+    def test_automatic_step_omits_call_when_the_link_is_incomplete(self):
+        for activity_id, evidence in ((None, "Send it Monday"), (ACTIVITY, ""), (ACTIVITY, " \t\n")):
+            with self.subTest(activity_id=activity_id, evidence=evidence):
+                data = report()
+                data["deal_updates"][0]["evidence"] = evidence
+                post_call.write_private(self.session / post_call.REPORT_FILE, data)
+                call_reply = {"activity_id": activity_id} if activity_id else {}
+                engine = FakeEngine({"/jobs/activities": [Reply(201, call_reply)]})
+
+                self.assertTrue(self.publish(engine))
+                step = next(body for _, path, body in engine.calls if path == "/jobs/next-steps")
+                self.assertNotIn("call", step)
+
+    def test_automatic_step_replays_its_call_link_after_a_lost_reply(self):
+        engine = FakeEngine()
+
+        def lose_step_reply(method, path, body):
+            reply = engine(method, path, body)
+            return Reply(0, {}) if path == "/jobs/next-steps" else reply
+
+        self.assertFalse(self.publish(lose_step_reply))
+        self.assertTrue(self.publish(engine))
+        first, retried = [body for _, path, body in engine.calls if path == "/jobs/next-steps"]
+        self.assertEqual(first, retried)
+        self.assertEqual(retried["call"]["activity_id"], ACTIVITY)
+        self.assertTrue(self.saved()["deal_updates"][0]["next_step"]["applied_automatically"])
 
     def test_named_tasks_keep_both_owners_and_undated_replacement_clears_date(self):
         data = report()
