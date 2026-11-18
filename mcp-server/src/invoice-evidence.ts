@@ -1,3 +1,4 @@
+// Validate local invoice evidence before either capture route saves it.
 import { isCalendarDate } from "./calendar-date.ts";
 
 type InvoiceEvidence = {
