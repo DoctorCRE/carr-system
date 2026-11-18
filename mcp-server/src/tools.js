@@ -278,27 +278,9 @@ async function resolveAssistantStepSubject(client, ref) {
   return { type, id: result.rows[0].subject_id };
 }
 
-async function saveAssistantEmailStep(client, actor, args, env) {
-  if (actor.human !== true || actor.slug !== 'joe') throw new ToolError({ error: 'joe_confirmation_required' });
-  if (!UUID_KEY.test(args.idempotency_key)) throw new ToolError({ error: 'invalid_idempotency_key', field: 'idempotency_key' });
-  await guardEmailAction(client, args, ToolError);
-  const current = await TOOLS['preview-email-next-step'].handler(client, actor, args);
-  if (current.proposal_digest !== args.proposal_digest) throw new ToolError({ error: 'email_next_step_proposal_stale' });
-  const old_role = assistantOldRole(current.subject_type, current.subject_id);
-  if (!old_role) throw new ToolError({ error: 'next_action_subject_unsupported' });
-  const { id, replayed } = await saveAssistantChange(env, actor.slug, {
-    path: '/jobs/next-steps', id: 'next_step_id', body: {
-      idempotency_key: derivedIdempotencyKey('email-next-action', args.idempotency_key),
-      old_role, what: current.text, due_on: current.next_date, owner: current.owner, replaces: 'current',
-    },
-  });
-  return { ...current, status: 'confirmed', requires_confirmation: false,
-    next_action_id: id, email_proposal_id: null, ...(replayed && { replayed }) };
-}
-
 async function saveAssistantVerb(client, actor, verb, args, env) {
   if (verb === 'log-outreach') throw new ToolError({ error: 'engine_assistant_outreach_unavailable' });
-  if (verb === 'confirm-email-next-step' && !args.deal) return saveAssistantEmailStep(client, actor, args, env);
+  if (verb === 'confirm-email-next-step') throw new ToolError({ error: 'engine_assistant_email_step_on_home' });
   const partner = partnerAuthoritySlugForActor(actor);
   const activity = verb === 'log-activity' && isEngineActivity(args);
   const step = verb === 'set-next-action';
