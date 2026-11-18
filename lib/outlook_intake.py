@@ -78,8 +78,10 @@ parties itself, and intake writes no activity, full-text note or deal file to th
 record layer for that email. The links note goes to the engine too, from its
 filed-emails read. Mail the record layer already holds is left to the copy, and its old
 email writes are not replayed. The partner's calendar agenda and new-matter
-lead proposals go to the engine too. Signature contact findings, Outlook flag items
-and delivery-failure findings stay on the record layer.
+lead proposals go to the engine too. Pending Engine lead requests stay in the ledger
+while the switch is off and resume with the same payload and key when it is on again.
+Signature contact findings, Outlook flag items and delivery-failure findings stay on
+the record layer.
 
 The private copy and decoded database live in a 0700 work folder under
 out/outlook-intake/ and are deleted before the run ends; a folder that cannot be
@@ -408,6 +410,11 @@ def _clean_name(name: str | None, subject: str | None) -> str | None:
     if not name or '@' in name or name == (subject or '').strip() or re.search(r'\.\w{2,4}$', name):
         return None
     return name
+
+
+def _trim_utf16(text: str, limit: int) -> str:
+    """Match the Engine's JS string length without cutting an emoji in half."""
+    return text.encode('utf-16-le', errors='surrogatepass')[:2 * limit].decode('utf-16-le', errors='ignore')
 
 
 def in_window(now: datetime, settings: OutlookSettings) -> bool:
@@ -1741,6 +1748,9 @@ class Run:
         assert self.engine
         if args['applies_to'] == 'new_matter':
             request = {k: v for k, v in args.items() if k not in ('deal', 'party', 'idempotency_key')}
+            for field, limit in (('display_name', 200), ('summary', 300), ('evidence_quote', 500)):
+                if request.get(field):
+                    request[field] = _trim_utf16(request[field], limit)
             request['idempotency_key'] = self.engine.key('email-lead', args['address'], args['message_ref'])
             progress['read'] = 'new_matter'
             progress.setdefault('request', request)
@@ -1775,8 +1785,11 @@ class Run:
             return
         queued = {p['sender'] for table in ('mail_unresolved', 'engine_leads')
                   for p in self.state.get(table, {}).values() if p.get('sender')}
+        engine_leads = self.state.get('engine_leads', {})
         deals, failures = None, 0
         for m, progress in self.lead_candidates:
+            if not self.engine and 'request' in engine_leads.get(m['ident'], {}):
+                continue
             address = m['sender'].lower()
             name = _clean_name(m['sender_name'], m['subject'])
             request_key = self.owner_key('propose-email-lead', _hash(address), f'read|{m["ident"]}')
@@ -2513,7 +2526,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         except CarrError:
             publication = 'retry'
         if publication == 'retry':
-            # An agenda failure leaves the mail watermark intact.
+            # Display only: mail and its watermark carry on; the next run retries.
             state.pop('calendar_review_at', None)
         else:
             state['calendar_review_at'] = min((e['end_unix'] for e in events
@@ -2548,7 +2561,8 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
     if work.engine:
         work.engine.prune()
         oldest = (now - UNRESOLVED_DAYS).timestamp()
-        state['engine_leads'] = {k: p for k, p in state['engine_leads'].items() if p['sent'] >= oldest}
+        state['engine_leads'] = {k: p for k, p in state['engine_leads'].items()
+                                 if 'request' in p or p['sent'] >= oldest}
     _save(out, state)
     counts.update(mapping_counts(state), mail_ids=len(state['mail_ids']))
     if health['failing']:

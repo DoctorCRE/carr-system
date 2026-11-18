@@ -252,15 +252,13 @@ class Mailbox:
             self.count('engine_agenda_superseded')
             return 'superseded'
         self.count('engine_agenda_' + reply.error)
-        return 'retry' if result == 'retry' else 'refused'
+        return 'retry' if result in ('retry', 'caller') else 'refused'
 
     def propose_lead(self, request: dict) -> str | None:
         reply = self.post('/jobs/proposals/email-lead', request)
-        result = verdict(reply)
-        if result == 'retry':
-            self.count('writes_failed')
+        if not self.answered(reply):
             return None
-        if result != 'done':
+        if verdict(reply) == 'settled':
             self.count('engine_leads_' + reply.error)
             return 'refused'
         if reply.body.get('status') == 'known_party':

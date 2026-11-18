@@ -6455,6 +6455,76 @@ class EngineMailTest(unittest.TestCase):
         self.assertEqual(self.run_intake(touch=False).reason, 'store_unchanged')
         self.assertEqual(self.fake.board_calls, [])
 
+    def test_agenda_caller_refusal_retries_an_unchanged_store(self):
+        self.engine.refuse.append(('/jobs/calendar/agenda', 403, 'unknown_job'))
+        outcome = self.run_intake()
+        self.assertEqual((outcome.state, outcome.counts['calendar_agenda_failed']), ('succeeded', 1))
+        self.assertEqual(self.engine.agendas, {})
+        self.assertEqual(self.run_intake(touch=False).counts.get('calendar_agenda_published'), 1)
+        self.assertIn('joe', self.engine.agendas)
+
+    def assert_lead_retries_caller_refusal(self, status, error):
+        path = '/jobs/proposals/email-lead'
+        self.engine.refuse.append((path, status, error))
+        self.fake.intent_reply = read('new_matter', 'Needs a suite.')
+        row = mail('stranger@example.test', -timedelta(hours=1), message_id='<r1@example.test>')
+        failed = self.run_intake([row])
+        self.assertEqual((failed.state, failed.reason), ('failed', 'request_blocked'))
+        self.assertEqual(failed.counts['lead_refused'], 0)
+        self.assertEqual(self.engine.leads, {})
+        self.fake.now += timedelta(minutes=30)
+        retry = self.run_intake(touch=False)
+        self.assertEqual((retry.state, retry.counts['lead_proposed']), ('succeeded', 1))
+        first, second = self.engine.posts(path)
+        self.assertEqual(first, second)
+        self.assertEqual(len(self.fake.intent_calls), 1)
+
+    def test_lead_retries_http_401(self):
+        self.assert_lead_retries_caller_refusal(401, 'access_denied')
+
+    def test_lead_retries_http_403(self):
+        self.assert_lead_retries_caller_refusal(403, 'access_denied')
+
+    def test_lead_retries_unknown_job(self):
+        self.assert_lead_retries_caller_refusal(403, 'unknown_job')
+
+    def test_lead_retries_unprovisioned_actor(self):
+        self.assert_lead_retries_caller_refusal(422, 'actor_not_provisioned')
+
+    def test_pending_engine_lead_waits_through_switch_off(self):
+        path = '/jobs/proposals/email-lead'
+        self.engine.refuse.append((path, 503, 'database_unavailable'))
+        self.fake.intent_reply = read('new_matter', 'Needs a suite.')
+        row = mail('stranger@example.test', -timedelta(hours=1), message_id='<r1@example.test>')
+        self.assertEqual(self.run_intake([row]).reason, 'writes_failed')
+        engine_ports = self.fake.ports
+        self.fake.ports = self.plain_ports
+        self.assertEqual(self.run_intake([row], touch=False).state, 'succeeded')
+        self.assertEqual(self.fake.writes('propose-email-lead'), [])
+        [held] = self.engine.posts(path)
+        self.fake.now += timedelta(hours=2)
+        other = mail(CLIENT.email, -timedelta(hours=1), message_id='<r2@example.test>')
+        with patch.object(intake, 'UNRESOLVED_DAYS', timedelta(hours=2)):
+            after_pause = self.run_intake([other])
+            self.assertEqual(after_pause.state, 'succeeded', after_pause.reason)
+            self.fake.ports = engine_ports
+            self.assertEqual(self.run_intake([other], touch=False).counts['lead_proposed'], 1)
+        self.assertEqual(self.engine.posts(path), [held, held])
+        self.assertEqual(len(self.fake.intent_calls), 1)
+
+    def test_engine_lead_text_fits_utf16_limits(self):
+        name = 'A' * 199 + '📍'
+        summary = 'B' * 298 + '📍' + 's'
+        quote = 'C' * 498 + '📍' + 'q'
+        self.fake.intent_reply = read('new_matter', summary, quote=quote)
+        row = mail('stranger@example.test', -timedelta(hours=1), name=name, body=quote,
+                   message_id='<r1@example.test>')
+        outcome = self.run_intake([row])
+        self.assertEqual(outcome.counts['lead_proposed'], 1)
+        [request] = self.engine.posts('/jobs/proposals/email-lead')
+        self.assertEqual((request['display_name'], request['summary'], request['evidence_quote']),
+                         (name[:-1], summary[:-1], quote[:-1]))
+
     def test_lead_replays_identical_payload_after_engine_commits_and_response_is_lost(self):
         self.fake.intent_reply = read('new_matter', 'Needs a suite.', quote='Can we meet Thursday?')
         row = mail('stranger@example.test', -timedelta(hours=1), name='Pat Example', message_id='<r1@example.test>')
