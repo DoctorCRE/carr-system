@@ -33,7 +33,7 @@ type Save =
     };
 
 const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
-const errorSlug = /^[a-z][a-z0-9_]{0,63}$/;
+export const engineErrorSlug = /^[a-z][a-z0-9_]{0,63}$/;
 
 export async function saveAssistantChange(env: EngineEnv, partner: string, save: Save) {
   const url = URL.parse(env.ENGINE_URL ?? "");
@@ -83,7 +83,7 @@ export async function saveAssistantChange(env: EngineEnv, partner: string, save:
       throw new ToolError({
         error: code === "key_reuse" ? code : "engine_assistant_refused",
         engine_status: response.status,
-        ...(typeof code === "string" && errorSlug.test(code) ? { engine_error: code } : {}),
+        ...(typeof code === "string" && engineErrorSlug.test(code) ? { engine_error: code } : {}),
       });
     }
     const id = result?.[save.id];

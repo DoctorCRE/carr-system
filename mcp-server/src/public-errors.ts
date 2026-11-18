@@ -1,6 +1,7 @@
 // Convert internal errors into closed public error responses.
 
 import { isValidCorrelationId, logLine } from "./correlation.ts";
+import { engineErrorSlug } from "./engine-assistant.ts";
 import { ToolError } from "./tool-error.ts";
 
 /** The public JSON-RPC/HTTP refusal shape. Every optional field is opt-in per code. */
@@ -542,7 +543,7 @@ export function publicError(
   if (
     code === "engine_assistant_refused" &&
     typeof payload?.engine_error === "string" &&
-    /^[a-z][a-z0-9_]{0,63}$/.test(payload.engine_error)
+    engineErrorSlug.test(payload.engine_error)
   )
     result.engine_error = payload.engine_error;
   if (
