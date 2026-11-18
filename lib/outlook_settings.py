@@ -44,6 +44,7 @@ class OutlookSettings:
     attachment_root: Path | None = None
     attachment_max_bytes: int = 0
     engine_mail: bool = False
+    engine_outbox: bool = False
     engine_router: bool = False
     engine_credentials: Path | None = None
     engine_cadence: bool = False
@@ -163,14 +164,17 @@ def _validate_settings(path: Path, values: dict) -> OutlookSettings:
     if 'attachment_max_bytes' in values and (type(values['attachment_max_bytes']) is not int
                                              or values['attachment_max_bytes'] <= 0):
         fail('attachment_max_bytes', 'must be a positive integer')
-    for switch in ('engine_mail', 'engine_router', 'engine_cadence'):
+    for switch in ('engine_mail', 'engine_outbox', 'engine_router', 'engine_cadence'):
         if switch in values and type(values[switch]) is not bool:
             fail(switch, 'must be true or false')
+    if values.get('engine_outbox') and not values.get('engine_mail'):
+        fail('engine_outbox', 'requires engine_mail, which carries the sent reply to the engine')
+    for switch in ('engine_mail', 'engine_router', 'engine_cadence'):
         if values.get(switch) and 'engine_credentials' not in values:
             fail('engine_credentials', f'required when {switch} is true')
-    for name in sorted(expected - {'model', 'partner_cc', 'folder_account_id', 'attachment_root',
-                                   'attachment_max_bytes', 'engine_mail', 'engine_router', 'engine_credentials',
-                                   'engine_cadence'}):
+    for name in sorted(expected - {'model', 'partner_cc', 'folder_account_id', 'attachment_root', 'attachment_max_bytes',
+                                   'engine_mail', 'engine_outbox', 'engine_router', 'engine_cadence',
+                                   'engine_credentials'}):
         if name not in values:
             fail(name, 'required')
         value = values[name]

@@ -24,6 +24,7 @@ import sys
 import tempfile
 import time
 import unittest
+import uuid
 from unittest.mock import patch
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -2041,6 +2042,282 @@ finally:
             self.assertEqual(self.worker.run(self.settings, self.ports)['deferred'], 1)
         self.assertEqual(self.sent, [])
         self.assertEqual(self.calls, [])
+
+
+class FakeReplyDoor:
+    """Door 22 as the engine answers it (src/reply-drafts.ts), for one partner's job."""
+
+    def __init__(self, owner, *drafts):
+        self.owner, self.page_size = owner, 100
+        self.drafts = {d['draft_id']: dict(d, status='approved') for d in drafts}
+        self.calls, self.keys, self.refuse = [], {}, []
+
+    def __call__(self, method, path, body):
+        from lib.engine_mail import Reply
+        self.calls.append((method, path, json.loads(body) if body else None))
+        if self.refuse and path.startswith(self.refuse[0][0]):
+            _, status, error = self.refuse.pop(0)
+            return Reply(status, {'error': error, 'correlation_id': 'c-1', 'hint': ''})
+        if method == 'GET':
+            query = {k: v[0] for k, v in parse_qs(urlsplit(path).query).items()}
+            listed = sorted(d['draft_id'] for d in self.drafts.values() if d['draft_id'] > query.get('after', '') and (
+                d['status'] == 'failed' and d.get('reason', '').startswith('unconfirmed_after_')
+                if query.get('unconfirmed') == 'true' else d['status'] == 'approved'))
+            page = listed[:min(int(query['limit']), self.page_size)]
+            return Reply(200, {'owner': self.owner, 'next_cursor': page[-1] if len(listed) > len(page) else None,
+                               'drafts': [{k: self.drafts[i][k] for k in ('draft_id', 'version', 'to', 'cc', 'subject',
+                                                                         'body', 'sha256', 'document_ids')} for i in page]})
+        request = json.loads(body)
+        key, args = request.pop('idempotency_key'), json.dumps(request, sort_keys=True)
+        if key in self.keys:
+            if self.keys[key][0] != args:
+                return Reply(409, {'error': 'key_reuse'})
+            return Reply(200, {**self.keys[key][1].body, 'replayed': True})
+        draft = self.drafts.get(path.split('/')[3])
+        if draft is None:
+            return Reply(404, {'error': 'not_found'})
+        fields = {'sent': {'version', 'sha256', 'status', 'sent_item_id', 'sent_at'},
+                  'failed': {'version', 'sha256', 'status', 'reason'}}.get(request.get('status'))
+        if set(request) != fields:
+            return Reply(400, {'error': 'invalid_field_value'})
+        if request['version'] != draft['version'] or request['sha256'] != draft['sha256']:
+            return Reply(409, {'error': 'draft_changed', 'version': draft['version']})
+        if draft['status'] == 'sent' and request['status'] == 'sent' and draft['sent_item_id'] != request['sent_item_id']:
+            return Reply(409, {'error': 'already_sent', 'sent_item_id': draft['sent_item_id']})
+        draft.update(status=request['status'], reason=request.get('reason', ''), sent_item_id=request.get('sent_item_id'))
+        reply = Reply(200, {'draft_id': draft['draft_id'], 'version': draft['version'], 'status': request['status']})
+        self.keys[key] = (args, reply)
+        return reply
+
+    def deliveries(self):
+        return [body for method, path, body in self.calls if method == 'POST' and path.endswith('/delivery')]
+
+
+class EngineOutboxTests(unittest.TestCase):
+    """engine_outbox on: door 22 replaces outbox-for-sender and record-email-sent."""
+    setUp = OutboxTests.setUp
+    carr = OutboxTests.carr
+
+    def door(self, **draft):
+        row = dict(draft_id=self.draft['proposal_id'], version=self.draft['version'], to='client@example.test',
+                   cc='partner@example.test', subject=self.draft['subject'], body=self.draft['body'],
+                   sha256=self.draft['sha256'], document_ids=[])
+        return FakeReplyDoor('joe', dict(row, **draft))
+
+    def run_outbox(self, door):
+        return self.worker.run(self.settings, self.ports, door)
+
+    def key(self, version=2):
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, f"outlook-outbox|{self.draft['proposal_id']}|{version}"))
+
+    def receipts(self):
+        return list((self.settings.send_state / 'outbox').glob('*.json'))
+
+    def test_sends_an_approved_draft_and_records_it_through_door_22_only(self):
+        door = self.door()
+        counts = self.run_outbox(door)
+        self.assertEqual((counts['sent'], counts['failed'], counts['receipt_failed']), (1, 0, 0))
+        self.assertEqual(self.sent, [send_mod.Mail(('client@example.test',), ('partner@example.test',), (),
+                                                   'Submitted subject', 'Submitted final text.')])
+        self.assertEqual(door.deliveries(), [dict(
+            idempotency_key=str(uuid.uuid5(uuid.UUID(self.key()), 'sent:sent-42')), version=2,
+            sha256=self.draft['sha256'], status='sent', sent_item_id='sent-42',
+            sent_at=datetime.fromtimestamp(int(NOW), timezone.utc).isoformat())])
+        self.assertEqual({verb for verb, _ in self.calls}, {'mail-contact-policy'})
+        self.assertEqual([p for m, p, _ in door.calls if m == 'GET'],
+                         ['/jobs/reply-drafts?limit=100', '/jobs/reply-drafts?unconfirmed=true&limit=100'])
+        self.assertEqual(self.receipts(), [])
+        self.assertEqual(self.run_outbox(door)['sent'], 0)
+        self.assertEqual(len(self.sent), 1)
+
+    def test_body_check_is_counted_because_door_22_takes_no_reason_on_sent(self):
+        counts = self.run_outbox(self.door())
+        self.assertEqual(counts['sent_body_unverified'], 1)
+        self.sent_body_fingerprint = send_mod.body_fingerprint('Other text.')
+        self.mailbox.sent.clear()
+        self.ports.out = Path(self.tmp) / 'second'
+        counts = self.run_outbox(self.door(draft_id='22222222-2222-4333-8444-555555555555'))
+        self.assertEqual(counts['sent_body_mismatch'], 1)
+        self.assertIn('body_mismatch', (self.ports.out / send_mod.LEDGER).read_text())
+
+    def test_crash_between_send_and_record_converges_without_a_second_send(self):
+        door = self.door()
+        door.refuse.append(('/jobs/reply-drafts/' + self.draft['proposal_id'], 503, 'database_unavailable'))
+        self.assertEqual(self.run_outbox(door)['receipt_failed'], 1)
+        [saved] = self.receipts()
+        self.assertEqual(saved.stem, self.key())
+        saved.unlink()  # The crash also lost the receipt; only the send ledger remembers the press.
+        self.clock.t += 120
+        counts = self.run_outbox(door)
+        self.assertEqual((counts['sent'], counts['receipt_failed']), (1, 0))
+        self.assertEqual(len(self.sent), 1)
+        first, second = door.deliveries()
+        self.assertEqual(first, second)
+        self.assertEqual(door.drafts[self.draft['proposal_id']]['status'], 'sent')
+
+    def test_saved_receipt_replays_with_the_same_key(self):
+        door = self.door()
+        door.refuse.append(('/jobs/reply-drafts/' + self.draft['proposal_id'], 503, 'database_unavailable'))
+        self.run_outbox(door)
+        counts = self.run_outbox(door)
+        self.assertEqual((counts['sent'], counts['receipt_failed']), (0, 0))
+        self.assertEqual(len(self.sent), 1)
+        first, second = door.deliveries()
+        self.assertEqual(first, second)
+        self.assertEqual(self.receipts(), [])
+
+    def test_final_refusal_is_not_retried_and_keeps_its_draft_fenced(self):
+        door = self.door()
+        door.refuse.append(('/jobs/reply-drafts/' + self.draft['proposal_id'], 409, 'draft_changed'))
+        counts = self.run_outbox(door)
+        self.assertEqual((counts['receipt_failed'], counts['receipt_refused']), (1, 1))
+        door.drafts[self.draft['proposal_id']]['version'] = 3  # The partner approved it again.
+        counts = self.run_outbox(door)
+        self.assertEqual((counts['sent'], counts['receipt_refused']), (0, 1))
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(len(door.deliveries()), 1)
+        [saved] = self.receipts()
+        self.assertEqual(json.loads(saved.read_text())['refused'], 'draft_changed')
+
+    def reapprove_after_unpressed_refusal(self, door, status, refusal):
+        door.refuse.append(('/jobs/reply-drafts/' + self.draft['proposal_id'], status, refusal))
+        self.assertEqual(self.run_outbox(door)['sent'], 0)
+        self.assertEqual(self.sent, [])
+        door.drafts[self.draft['proposal_id']].update(version=3, cc='partner@example.test')
+        counts = self.run_outbox(door)
+        self.assertEqual((counts['sent'], counts['failed'], counts['receipt_failed']), (1, 0, 0))
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(self.receipts(), [])
+        return [(d['version'], d['status']) for d in door.deliveries()]
+
+    def test_unsendable_draft_refused_as_changed_lets_its_reapproval_send(self):
+        self.assertEqual(self.reapprove_after_unpressed_refusal(
+            self.door(cc='someone-else@example.test'), 409, 'draft_changed'), [(2, 'failed'), (3, 'sent')])
+
+    def test_replayed_unsendable_receipt_refused_as_changed_lets_its_reapproval_send_that_run(self):
+        self.assertEqual(self.reapprove_after_unpressed_refusal(
+            self.door(cc='someone-else@example.test'), 503, 'database_unavailable'),
+            [(2, 'failed'), (2, 'failed'), (3, 'sent')])
+
+    def test_aborted_press_refused_as_stale_lets_its_reapproval_send(self):
+        original = self.ports.open_form
+
+        def abort_once(item):
+            form = original(item)
+            def abort(**kwargs):
+                self.ports.open_form = original
+                raise send_mod.UserActive('user_active')
+            form.press = abort
+            return form
+        self.ports.open_form = abort_once
+        self.assertEqual(self.reapprove_after_unpressed_refusal(self.door(), 409, 'version_conflict'),
+                         [(2, 'failed'), (3, 'sent')])
+
+    def test_access_refusal_is_tried_again_next_run(self):
+        door = self.door()
+        door.refuse.append(('/jobs/reply-drafts/' + self.draft['proposal_id'], 401, 'unauthorized'))
+        self.assertEqual(self.run_outbox(door)['receipt_failed'], 1)
+        self.assertEqual(self.run_outbox(door)['receipt_failed'], 0)
+        self.assertEqual(len(door.deliveries()), 2)
+        self.assertEqual(self.receipts(), [])
+
+    def test_failure_reason_goes_to_the_door(self):
+        door = self.door(cc='someone-else@example.test')
+        counts = self.run_outbox(door)
+        self.assertEqual((counts['sent'], counts['failed']), (0, 1))
+        self.assertEqual(door.deliveries(), [dict(idempotency_key=self.key(), version=2, sha256=self.draft['sha256'],
+                                                  status='failed', reason='submission_recipients_invalid')])
+        self.assertEqual(self.sent, [])
+
+    def test_unconfirmed_draft_found_in_sent_items_records_sent(self):
+        door = self.door()
+        self.ports.confirm_seconds = 0
+        self.ports.open_form = self.press_without_sent_copy()
+        self.run_outbox(door)
+        self.clock.t += send_mod.DUPLICATE_WINDOW + 60
+        self.assertEqual(self.run_outbox(door)['failed'], 1)
+        self.assertEqual(door.drafts[self.draft['proposal_id']]['status'], 'failed')
+        self.assertEqual(door.drafts[self.draft['proposal_id']]['reason'], f'unconfirmed_after_{send_mod.DUPLICATE_WINDOW}')
+        self.mailbox.sent.append(SentRow(ACCOUNT, 'client@example.test; partner@example.test',
+                                         self.draft['subject'], int(NOW), 'sent-77'))
+        self.run_outbox(door)
+        self.assertEqual(door.drafts[self.draft['proposal_id']]['status'], 'sent')
+        self.assertEqual(door.deliveries()[-1]['sent_item_id'], 'sent-77')
+        self.assertEqual(len(self.pressed), 1)
+
+    def press_without_sent_copy(self):
+        self.pressed = []
+        test = self
+
+        class Form:
+            def read(self):
+                return send_mod.fields(test.pressed_item)
+
+            def press(self, **kwargs):
+                test.pressed.append(1)
+                return 'fake'
+
+            def closed(self):
+                return True
+
+            def discard(self):
+                pass
+
+        def open_form(item):
+            self.pressed_item = item
+            return Form()
+        return open_form
+
+    def test_draft_with_documents_stays_approved_and_unsent(self):
+        door = self.door(document_ids=['33333333-2222-4333-8444-555555555555'])
+        counts = self.run_outbox(door)
+        self.assertEqual((counts['sent'], counts['failed'], counts['attachments_unsupported']), (0, 1, 1))
+        self.assertEqual((self.sent, door.deliveries()), ([], []))
+        self.assertEqual(door.drafts[self.draft['proposal_id']]['status'], 'approved')
+
+    def test_every_page_of_approved_drafts_is_read(self):
+        door = self.door()
+        door.page_size = 1
+        other = dict(door.drafts[self.draft['proposal_id']], draft_id='22222222-2222-4333-8444-555555555555',
+                     to='other@example.test')
+        door.drafts[other['draft_id']] = other
+        self.run_outbox(door)
+        self.assertEqual(sorted(p.split('/')[3] for m, p, _ in door.calls if m == 'POST'), sorted(door.drafts))
+
+    def test_queue_for_another_partner_is_refused(self):
+        door = self.door()
+        door.owner = 'dell'
+        with self.assertRaisesRegex(ValueError, 'outbox_identity_or_schema_mismatch'):
+            self.run_outbox(door)
+        self.assertEqual(self.sent, [])
+
+    def test_main_reads_the_switch(self):
+        from lib import outlook_runtime
+        door = self.door()
+        on = replace(self.settings, engine_mail=True, engine_outbox=True, engine_credentials=Path('/x/engine.env'))
+        for settings, expected in ((self.settings, None), (on, door)):
+            with self.subTest(engine_outbox=settings.engine_outbox), \
+                 patch.object(self.worker, 'load_settings', return_value=settings), \
+                 patch.object(type(settings), 'require_repo'), \
+                 patch.object(send_mod, 'default_ports', return_value=self.ports), \
+                 patch.object(self.worker.engine_mail, 'connect', return_value=door) as connect, \
+                 patch.object(self.worker, 'run', return_value=dict(failed=0, receipt_failed=0, deferred=0)) as run, \
+                 patch.object(self.worker, 'receipt_line', return_value=''), redirect_stdout(StringIO()):
+                self.assertEqual(self.worker.main(), 0)
+                self.assertEqual(run.call_args.args[2], expected)
+                self.assertEqual(connect.call_count, int(expected is not None))
+
+    def test_settings_switch_needs_engine_mail(self):
+        def settings(**values):
+            write_settings(self.home, ROOT, owner='joe', account=ACCOUNT, internal_domain='example.test',
+                           services=['outbox'], partner_cc='partner@example.test', **values)
+            return load_settings(self.home)
+        with self.assertRaisesRegex(ValueError, 'engine_outbox.*requires engine_mail'):
+            settings(engine_outbox=True)
+        with self.assertRaisesRegex(ValueError, 'engine_outbox.*true or false'):
+            settings(engine_outbox='yes', engine_mail=True, engine_credentials='/x/engine.env')
+        self.assertFalse(settings().engine_outbox)
+        self.assertTrue(settings(engine_outbox=True, engine_mail=True, engine_credentials='/x/engine.env').engine_outbox)
 
 
 class AttachmentTests(unittest.TestCase):
