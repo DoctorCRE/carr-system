@@ -250,12 +250,20 @@ function assertActivityTime(occurred_at) {
 
 const ENGINE_ACTIVITY_FIELDS = new Set(['idempotency_key', 'ref', 'kind', 'summary', 'detail', 'owed', 'occurred_at']);
 
-// Door 19 hashes happened_at, so a replay needs the timestamp the caller supplied.
 function isEngineActivity(args) {
+  const { occurred_at } = args;
   return ['call', 'meeting', 'note'].includes(args.kind) &&
-    typeof args.occurred_at === 'string' && /T.*(?:Z|[+-]\d\d:\d\d)$/.test(args.occurred_at) &&
-    isCalendarDate(args.occurred_at.slice(0, 10)) && Number.isFinite(Date.parse(args.occurred_at)) &&
+    (occurred_at === undefined || (typeof occurred_at === 'string' && /T.*(?:Z|[+-]\d\d:\d\d)$/.test(occurred_at) &&
+      isCalendarDate(occurred_at.slice(0, 10)) && Number.isFinite(Date.parse(occurred_at)))) &&
     Object.keys(args).every(field => ENGINE_ACTIVITY_FIELDS.has(field));
+}
+
+function dealNoteInput(args) {
+  if (typeof args.text !== "string" || !args.text.trim()) throw new ToolError({ error: "text_required" });
+  const hasPlan = args.next_step !== undefined || args.next_date !== undefined;
+  if (hasPlan && (typeof args.next_step !== "string" || !args.next_step.trim() || !isCalendarDate(args.next_date)))
+    throw new ToolError({ error: "next_step_and_date_required", hint: "supply a next step and a calendar date together" });
+  return { text: args.text.trim(), plan: hasPlan ? { what: args.next_step.trim(), due_on: args.next_date } : undefined };
 }
 
 async function saveAssistantVerb(client, actor, verb, args, env) {
@@ -263,13 +271,43 @@ async function saveAssistantVerb(client, actor, verb, args, env) {
   if (!partner) return;
   const activity = verb === 'log-activity' && isEngineActivity(args);
   const step = verb === 'set-next-action' && !Object.hasOwn(args, 'expected_action') && !args.work_request;
-  if (!activity && !step) return;
+  const completion = verb === 'complete-action';
+  const dealNote = verb === 'add-deal-note';
+  if (!activity && !step && !completion && !dealNote) return;
 
-  const subject = await resolveSubject(client, args.ref);
-  if (subject.type !== 'deal') return;
+  const subject = await resolveSubject(client, dealNote ? args.deal : args.ref);
+  if (dealNote && subject.type !== 'deal') throw new ToolError({ error: "not_a_deal", resolved: subject });
+  if (subject.type !== 'deal' && !(completion && subject.type === 'party')) return;
 
   const { idempotency_key } = args;
   if (!UUID_KEY.test(idempotency_key)) throw new ToolError({ error: 'invalid_idempotency_key', field: 'idempotency_key' });
+
+  if (completion) {
+    const target = subject.type === 'deal' ? { deal_id: subject.id } : { party_id: subject.id };
+    const { id, replayed } = await saveAssistantChange(env, partner, {
+      path: '/jobs/next-steps/complete', id: 'next_step_id', body: { idempotency_key, ...target },
+    });
+    const outcome = args.outcome?.trim();
+    if (outcome) {
+      await saveAssistantChange(env, partner, {
+        path: '/jobs/activities', id: 'activity_id', body: {
+          idempotency_key: derivedIdempotencyKey('complete-action-outcome', idempotency_key),
+          kind: 'note', about: [target], summary: outcome,
+        },
+      });
+    }
+    return { ok: true, subject, count: 1, completed: [{ next_action_id: id }], ...(replayed && { replayed }) };
+  }
+
+  if (dealNote) {
+    const { text, plan } = dealNoteInput(args);
+    const { id, next_step_id, ...receipt } = await saveAssistantChange(env, partner, {
+      path: '/jobs/activities/deal-note', id: 'activity_id',
+      body: { idempotency_key, deal_id: subject.id, text, plan },
+    });
+    return { ok: true, deal_id: subject.id, note_id: id, activity_id: id, ...receipt,
+      ...(next_step_id && { next_step_id, next_action_id: next_step_id }) };
+  }
 
   if (activity) {
     assertActivityTime(args.occurred_at);
@@ -9499,7 +9537,8 @@ registerTools({
 
   "add-deal-note": {
     write: true,
-    afterCommit: (...args) => overdueUpdates.process(...args),
+    afterCommit: (c, actor, args, result, transact) =>
+      result.activity_id ? result : overdueUpdates.process(c, actor, args, result, transact),
     description: "Record a partner status update in the immutable deal thread. Jev checks the content against overdue actions. Only supported completion resolves them, with evidence and undo; uncertainty stays open for Home review. Supply next_step and next_date together, or Doc prompts for the missing plan. Other partners' actions and manual attention remain unchanged.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, deal: { type: "string" }, text: { type: "string" },
@@ -9508,24 +9547,21 @@ registerTools({
     handler: async (c, actor, args) => withEnvelope(c, actor, "add-deal-note", args, async () => {
       const s = await resolveSubject(c, args.deal);
       if (s.type !== "deal") throw new ToolError({ error: "not_a_deal", resolved: s });
-      if (typeof args.text !== "string" || !args.text.trim()) throw new ToolError({ error: "text_required" });
-      const hasPlan = args.next_step !== undefined || args.next_date !== undefined;
-      if (hasPlan && (typeof args.next_step !== "string" || !args.next_step.trim() || !isCalendarDate(args.next_date)))
-        throw new ToolError({ error: "next_step_and_date_required", hint: "supply a next step and a calendar date together" });
+      const { text, plan } = dealNoteInput(args);
       await lockDealField(c, s.id, "next_date");
       await lockDealField(c, s.id, "next_step");
       const note = await c.query(
         "insert into deal_note (deal_id, kind, text, actor_id) values ($1,'note',$2,$3) returning id, created_at /* dealroom:add-note */",
-        [s.id, args.text.trim(), actor.id],
+        [s.id, text, actor.id],
       );
-      const assessment = await overdueUpdates.prepare(c, actor, s.id, note.rows[0].id, args.text.trim(), args.idempotency_key);
+      const assessment = await overdueUpdates.prepare(c, actor, s.id, note.rows[0].id, text, args.idempotency_key);
       await writeEvent(c, actor, "add-deal-note", "deal", s.id, {
-        field: "note", new: { note: args.text.trim() }, idempotency_key: args.idempotency_key,
+        field: "note", new: { note: text }, idempotency_key: args.idempotency_key,
       });
-      const plan = hasPlan ? await appendDealNextStep(c, actor, s.id,
-        args.next_step.trim(), args.next_date, args.idempotency_key, assessment.preserved_action_ids) : null;
+      const step = plan ? await appendDealNextStep(c, actor, s.id,
+        plan.what, plan.due_on, args.idempotency_key, assessment.preserved_action_ids) : null;
       return { ok: true, deal_id: s.id, note_id: note.rows[0].id, created_at: note.rows[0].created_at,
-        ...assessment, ...(plan ? { next_step_id: plan.next_step_id, next_action_id: plan.next_action_id, next_step_required: false } : {}) };
+        ...assessment, ...(step ? { next_step_id: step.next_step_id, next_action_id: step.next_action_id, next_step_required: false } : {}) };
     }),
   },
 

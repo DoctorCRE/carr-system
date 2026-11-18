@@ -3,12 +3,12 @@ import { type TestContext, test } from "node:test";
 import { Pool } from "@neondatabase/serverless";
 import { publicError } from "../src/public-errors.ts";
 import { NOW } from "./helpers/fixed-clock.ts";
-import { executeRegisteredTool, record, ToolError } from "./helpers/legacy-test-registry.ts";
+import { derivedIdempotencyKey, executeRegisteredTool, record, ToolError } from "./helpers/legacy-test-registry.ts";
 
 const { callTool } = record(await import(new URL("../src/mcp.js", import.meta.url).href));
 const identity = record(await import(new URL("../src/identity.js", import.meta.url).href));
 const { connectionForGrant } = record(identity.authenticatedIdentity);
-assert.ok(typeof callTool === "function" && typeof connectionForGrant === "function");
+assert.ok(typeof callTool === "function");
 
 const deal = "01000000-0000-4000-8000-000000000001";
 const savedId = "01000000-0000-4000-8000-000000000002";
@@ -47,7 +47,7 @@ function legacy({ writes = false, subject = "deal" } = {}) {
   };
 }
 
-function engine(t: TestContext, respond: (body: unknown) => Response, enabled = "true") {
+function engine(t: TestContext, respond: (body: unknown, path: string) => Response, enabled = "true") {
   const calls: {
     path: string;
     headers: Headers;
@@ -60,7 +60,7 @@ function engine(t: TestContext, respond: (body: unknown) => Response, enabled = 
     assert.ok(typeof body === "string");
     const parsed: unknown = JSON.parse(body);
     calls.push({ path: url.pathname, headers: new Headers(headers), method, redirect, body: parsed });
-    return respond(parsed);
+    return respond(parsed, url.pathname);
   });
   return {
     calls,
@@ -165,15 +165,22 @@ test("unsupported activity does not spill into the engine", async (t) => {
   const upstream = engine(t, () => assert.fail("unmoved activity made an engine request"));
   const c = legacy({ writes: true });
   const { occurred_at, ...withoutTime } = activity;
-  const reply = record(await executeRegisteredTool(c, agent, "log-activity", withoutTime, upstream.env));
+  const reply = record(
+    await executeRegisteredTool(
+      c,
+      agent,
+      "log-activity",
+      { ...withoutTime, human_quote: "Keep this verbatim." },
+      upstream.env,
+    ),
+  );
   assert.equal(reply.activity_id, savedId);
   assert.ok(c.changes.some((sql) => sql.startsWith("insert into activity")));
   assert.equal(upstream.calls.length, 0);
 });
 
-test("call-verb uses the partner grant and lets the engine default the owner", async (t) => {
-  const upstream = engine(t, () => Response.json({ next_step_id: savedId }, { status: 201 }));
-  const c = legacy();
+function worker(t: TestContext, query: (sql: string) => Promise<unknown> = legacy().query) {
+  assert.ok(typeof connectionForGrant === "function");
   t.mock.method(Pool.prototype, "connect", async () => ({
     async query(sql: string) {
       if (sql.startsWith("select id from actor")) return { rows: [{ id: agent.id }] };
@@ -192,12 +199,17 @@ test("call-verb uses the partner grant and lets the engine default the owner", a
           ],
         };
       if (/^(begin|commit|rollback)|set_config\(/.test(sql)) return { rows: [] };
-      return c.query(sql);
+      return query(sql);
     },
     release() {},
   }));
   t.mock.method(Pool.prototype, "end", async () => {});
-  const actor: unknown = connectionForGrant({ slug: "dell" });
+  return connectionForGrant({ slug: "dell" });
+}
+
+test("call-verb uses the partner grant and lets the engine default the owner", async (t) => {
+  const upstream = engine(t, () => Response.json({ next_step_id: savedId }, { status: 201 }));
+  const actor: unknown = worker(t);
   assert.ok(actor);
   const env = { ...upstream.env, DATABASE_URL_WRITER: "postgres://fixture@synthetic.invalid/fixture" };
   const result = record(
@@ -218,6 +230,295 @@ test("call-verb uses the partner grant and lets the engine default the owner", a
     replaces: "current",
     due_on: "2026-10-20",
   });
+});
+
+test("untimed deal calls, meetings and notes let the engine assign the first save time", async (t) => {
+  let attempts = 0;
+  const upstream = engine(t, () =>
+    ++attempts % 2
+      ? Response.json({ error: "database_unavailable" }, { status: 503 })
+      : Response.json({ activity_id: savedId, replayed: true }, { status: 201 }),
+  );
+  const { occurred_at, ...untimed } = activity;
+  for (const [index, kind] of ["call", "meeting", "note"].entries()) {
+    const idempotency_key = `01000000-0000-4000-8000-00000000001${index}`;
+    const reply = record(
+      await executeRegisteredTool(legacy(), agent, "log-activity", { ...untimed, kind, idempotency_key }, upstream.env),
+    );
+    assert.equal(reply.activity_id, savedId);
+    assert.equal(reply.replayed, true);
+    const expected = {
+      idempotency_key,
+      kind,
+      about: [{ deal_id: deal }],
+      summary: "Reviewed the specimen\n\nFollow up on the measurements.",
+    };
+    for (const request of upstream.calls.slice(index * 2, index * 2 + 2)) {
+      assert.equal(request.path, "/jobs/activities");
+      assert.deepEqual(request.body, expected);
+    }
+  }
+  assert.equal(upstream.calls.length, 6);
+});
+
+test("completes the sponsor's current step by deal or party and preserves its replay", async (t) => {
+  const upstream = engine(t, () =>
+    Response.json({
+      next_step_id: savedId,
+      status: "done",
+      replayed: true,
+    }),
+  );
+  for (const type of ["deal", "party"]) {
+    const reply = await executeRegisteredTool(
+      legacy({ subject: type }),
+      agent,
+      "complete-action",
+      { idempotency_key: key, ref: deal, outcome: "  " },
+      upstream.env,
+    );
+    assert.deepEqual(reply, {
+      ok: true,
+      subject: { type, id: deal },
+      count: 1,
+      completed: [{ next_action_id: savedId }],
+      replayed: true,
+    });
+  }
+  assert.deepEqual(
+    upstream.calls.map(({ path, body, headers }) => [path, body, headers.get("Engine-For-User")]),
+    [
+      ["/jobs/next-steps/complete", { idempotency_key: key, deal_id: deal }, "dell"],
+      ["/jobs/next-steps/complete", { idempotency_key: key, party_id: deal }, "dell"],
+    ],
+  );
+});
+
+test("a completion refusal is final and does not fall through to legacy writes", async (t) => {
+  const upstream = engine(t, () => Response.json({ error: "no_open_step" }, { status: 409 }));
+  await assert.rejects(
+    executeRegisteredTool(
+      legacy(),
+      agent,
+      "complete-action",
+      { idempotency_key: key, ref: deal, outcome: "The example survey was sent." },
+      upstream.env,
+    ),
+    {
+      payload: { error: "engine_assistant_refused", engine_status: 409, engine_error: "no_open_step" },
+    },
+  );
+  assert.equal(upstream.calls.length, 1);
+  assert.equal(upstream.calls[0]?.path, "/jobs/next-steps/complete");
+});
+
+for (const type of ["deal", "party"]) {
+  test(`a ${type} completion replays and saves its outcome after three note failures`, async (t) => {
+    const noteId = "01000000-0000-4000-8000-000000000005";
+    let closed = false;
+    let noteAttempts = 0;
+    const upstream = engine(t, (_, path) => {
+      if (path === "/jobs/next-steps/complete") {
+        const replayed = closed;
+        closed = true;
+        return Response.json({ next_step_id: savedId, status: "done", replayed });
+      }
+      assert.equal(path, "/jobs/activities");
+      return ++noteAttempts <= 3
+        ? Response.json({ error: "database_unavailable" }, { status: 503 })
+        : Response.json({ activity_id: noteId }, { status: 201 });
+    });
+    const c = legacy({ subject: type });
+    const summary = "The example survey was sent.";
+    const args = { idempotency_key: key, ref: deal, outcome: `  ${summary}  ` };
+    const complete = () => executeRegisteredTool(c, agent, "complete-action", { ...args }, upstream.env);
+    await assert.rejects(complete(), { payload: { error: "engine_assistant_unavailable" } });
+    assert.equal(noteAttempts, 3);
+    assert.deepEqual(await complete(), {
+      ok: true,
+      subject: { type, id: deal },
+      count: 1,
+      completed: [{ next_action_id: savedId }],
+      replayed: true,
+    });
+    const target = { [`${type}_id`]: deal };
+    const completion = ["/jobs/next-steps/complete", { idempotency_key: key, ...target }];
+    const note = [
+      "/jobs/activities",
+      {
+        idempotency_key: derivedIdempotencyKey("complete-action-outcome", key),
+        kind: "note",
+        about: [target],
+        summary,
+      },
+    ];
+    assert.deepEqual(
+      upstream.calls.map(({ path, body }) => [path, body]),
+      [completion, note, note, note, completion, note],
+    );
+  });
+}
+
+test("completion of an excluded record uses the legacy handler", async (t) => {
+  const upstream = engine(t, () => assert.fail("legacy completion made an engine request"));
+  const args = { idempotency_key: key, ref: deal };
+  for (const subject of ["client", "lead", "vendor"])
+    await assert.rejects(
+      executeRegisteredTool(legacy({ subject }), agent, "complete-action", args, upstream.env),
+      LegacyReached,
+    );
+  assert.equal(upstream.calls.length, 0);
+});
+
+test("the Worker files a deal note and Home review without running legacy after-commit work", async (t) => {
+  const upstream = engine(t, () =>
+    Response.json(
+      {
+        activity_id: savedId,
+        proposal_id: key,
+        next_step_required: false,
+      },
+      { status: 201 },
+    ),
+  );
+  const c = legacy();
+  const reads: string[] = [];
+  const actor: unknown = worker(t, (sql) => {
+    reads.push(sql);
+    return c.query(sql);
+  });
+  const background: Promise<unknown>[] = [];
+  const env = {
+    ...upstream.env,
+    DATABASE_URL_WRITER: "postgres://fixture@synthetic.invalid/fixture",
+    ctx: { waitUntil: (task: Promise<unknown>) => background.push(task) },
+  };
+  const reply = await callTool(env, actor, "call-verb", {
+    verb: "add-deal-note",
+    args: { idempotency_key: key, deal, text: "  The example survey was sent.  " },
+  });
+  await Promise.all(background);
+  assert.deepEqual(reply, {
+    ok: true,
+    deal_id: deal,
+    note_id: savedId,
+    activity_id: savedId,
+    proposal_id: key,
+    next_step_required: false,
+  });
+  assert.equal(reads.length, 1);
+  assert.match(reads[0] ?? "", /v_ref_index/);
+  assert.equal(upstream.calls.length, 1);
+  assert.equal(upstream.calls[0]?.path, "/jobs/activities/deal-note");
+  assert.deepEqual(upstream.calls[0]?.body, {
+    idempotency_key: key,
+    deal_id: deal,
+    text: "The example survey was sent.",
+  });
+});
+
+test("a deal note and replacement plan replay as a single engine save", async (t) => {
+  let attempts = 0;
+  const upstream = engine(t, () =>
+    Response.json(
+      ++attempts === 1
+        ? { activity_id: savedId, next_step_required: false }
+        : { activity_id: savedId, next_step_id: key, next_step_required: false, replayed: true },
+      { status: 201 },
+    ),
+  );
+  const reply = await executeRegisteredTool(
+    legacy(),
+    agent,
+    "add-deal-note",
+    {
+      idempotency_key: key,
+      deal,
+      text: "The example survey was sent.",
+      next_step: "  Review it  ",
+      next_date: "2026-10-20",
+    },
+    upstream.env,
+  );
+  assert.deepEqual(reply, {
+    ok: true,
+    deal_id: deal,
+    note_id: savedId,
+    activity_id: savedId,
+    next_step_id: key,
+    next_action_id: key,
+    next_step_required: false,
+    replayed: true,
+  });
+  assert.equal(upstream.calls.length, 2);
+  for (const { path, body } of upstream.calls) {
+    assert.equal(path, "/jobs/activities/deal-note");
+    assert.deepEqual(body, {
+      idempotency_key: key,
+      deal_id: deal,
+      text: "The example survey was sent.",
+      plan: { what: "Review it", due_on: "2026-10-20" },
+    });
+  }
+});
+
+test("a deal note surfaced without a plan date asks for a next step", async (t) => {
+  const upstream = engine(t, () =>
+    Response.json(
+      {
+        activity_id: savedId,
+        proposal_id: null,
+        next_step_required: true,
+      },
+      { status: 201 },
+    ),
+  );
+  const reply = record(
+    await executeRegisteredTool(
+      legacy(),
+      agent,
+      "add-deal-note",
+      { idempotency_key: key, deal, text: "The example survey was sent." },
+      upstream.env,
+    ),
+  );
+  assert.equal(reply.proposal_id, null);
+  assert.equal(reply.next_step_required, true);
+  assert.equal(upstream.calls.length, 1);
+});
+
+test("a partial deal note plan is refused before either save path", async (t) => {
+  const upstream = engine(t, () => assert.fail("incomplete plan made an engine request"));
+  await assert.rejects(
+    executeRegisteredTool(
+      legacy(),
+      agent,
+      "add-deal-note",
+      {
+        idempotency_key: key,
+        deal,
+        text: "The example survey was sent.",
+        next_step: "Review it",
+      },
+      upstream.env,
+    ),
+    (error: unknown) => error instanceof ToolError && error.payload.error === "next_step_and_date_required",
+  );
+  assert.equal(upstream.calls.length, 0);
+});
+
+test("off leaves deal note and completion execution on the legacy path", async (t) => {
+  const upstream = engine(t, () => assert.fail("off made an engine request"), "false");
+  const args = { idempotency_key: key };
+  for (const [verb, fields] of [
+    ["complete-action", { ref: deal }],
+    ["add-deal-note", { deal, text: "The example survey was sent." }],
+  ] as const)
+    await assert.rejects(
+      executeRegisteredTool(legacy(), agent, verb, { ...args, ...fields }, upstream.env),
+      LegacyReached,
+    );
+  assert.equal(upstream.calls.length, 0);
 });
 
 test("a future activity is still refused before either write path", async (t) => {
