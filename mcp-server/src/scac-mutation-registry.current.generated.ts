@@ -200,7 +200,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "advance-leads": {
     ingress_key: "mcp-tool:advance-leads",
     source_locator: "mcp-server/src/lead-automation.js",
-    schema_digest: "04c691c2cb639985e5d8ab3f360510859fd3664b69caad2671333ab5f2f95b61",
+    schema_digest: "03666e9e17e49fe9818eefa6c2f295c7dac165e02c4d71661f0c5fb491f4cb56",
     write: true,
     human_only: false,
     human_caller_only: false,
@@ -1460,7 +1460,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "lead-stage-preview": {
     ingress_key: "mcp-tool:lead-stage-preview",
     source_locator: "mcp-server/src/lead-automation.js",
-    schema_digest: "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    schema_digest: "ba6dc023c91b08f12bbcc89ac65d3dcc0ca5536c6d54dfd0efbb86a471921c21",
     write: false,
     human_only: false,
     human_caller_only: false,
