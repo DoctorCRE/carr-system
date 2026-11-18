@@ -45,6 +45,7 @@ class OutlookSettings:
     attachment_max_bytes: int = 0
     engine_mail: bool = False
     engine_credentials: Path | None = None
+    engine_cadence: bool = False
 
     @property
     def decoder(self) -> Path:
@@ -97,7 +98,21 @@ _PATHS = frozenset({'repo', 'profile', 'vendor', 'copy_helper', 'folder_guide', 
 
 def load_settings(home: Path | None = None) -> OutlookSettings:
     path = (home or Path.home()) / '.config/carr/outlook.json'
+    return _validate_settings(path, _read_settings(path))
 
+
+def load_cadence_settings() -> OutlookSettings | None:
+    path = Path.home() / '.config/carr/outlook.json'
+    try:
+        values = _read_settings(path)
+    except (SettingsError, OSError):
+        return None
+    if values.get('engine_cadence') is not True:
+        return None
+    return _validate_settings(path, values)
+
+
+def _read_settings(path: Path) -> dict:
     def fail(field: str, reason: str):
         raise SettingsError(f'{path}: field {field}: {reason}')
 
@@ -124,6 +139,13 @@ def load_settings(home: Path | None = None) -> OutlookSettings:
             fail('json', 'invalid JSON')
     if not isinstance(values, dict):
         fail('json', 'must be an object')
+    return values
+
+
+def _validate_settings(path: Path, values: dict) -> OutlookSettings:
+    def fail(field: str, reason: str):
+        raise SettingsError(f'{path}: field {field}: {reason}')
+
     expected = {field.name for field in fields(OutlookSettings)} - {'source'}
     if 'model' in values and (not isinstance(values['model'], str)
                               or not re.fullmatch(r'[a-z0-9][a-z0-9.-]{0,63}', values['model'])):
@@ -140,12 +162,13 @@ def load_settings(home: Path | None = None) -> OutlookSettings:
     if 'attachment_max_bytes' in values and (type(values['attachment_max_bytes']) is not int
                                              or values['attachment_max_bytes'] <= 0):
         fail('attachment_max_bytes', 'must be a positive integer')
-    if 'engine_mail' in values and type(values['engine_mail']) is not bool:
-        fail('engine_mail', 'must be true or false')
-    if values.get('engine_mail') and 'engine_credentials' not in values:
-        fail('engine_credentials', 'required when engine_mail is true')
+    for switch in ('engine_mail', 'engine_cadence'):
+        if switch in values and type(values[switch]) is not bool:
+            fail(switch, 'must be true or false')
+        if values.get(switch) and 'engine_credentials' not in values:
+            fail('engine_credentials', f'required when {switch} is true')
     for name in sorted(expected - {'model', 'partner_cc', 'folder_account_id', 'attachment_root',
-                                   'attachment_max_bytes', 'engine_mail', 'engine_credentials'}):
+                                   'attachment_max_bytes', 'engine_mail', 'engine_credentials', 'engine_cadence'}):
         if name not in values:
             fail(name, 'required')
         value = values[name]
