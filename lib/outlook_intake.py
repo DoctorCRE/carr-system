@@ -77,9 +77,11 @@ the engine's doors instead (lib/engine_mail.py): the engine links the email to i
 parties itself, and intake writes no activity, full-text note or deal file to the
 record layer for that email. The links note goes to the engine too, from its
 filed-emails read. Mail the record layer already holds is left to the copy, and its old
-email writes are not replayed. Lead proposals, signature contact findings, Outlook flag
-items and delivery-failure findings stay on the record layer until their engine doors
-exist; delivery reports are observed as before and never sent to the engine.
+email writes are not replayed. The partner's calendar agenda and new-matter
+lead proposals go to the engine too. Pending Engine lead requests stay in the ledger
+while the switch is off and resume with the same payload and key when it is on again.
+Signature contact findings, Outlook flag items and delivery-failure findings stay on
+the record layer.
 
 The private copy and decoded database live in a 0700 work folder under
 out/outlook-intake/ and are deleted before the run ends; a folder that cannot be
@@ -408,6 +410,11 @@ def _clean_name(name: str | None, subject: str | None) -> str | None:
     if not name or '@' in name or name == (subject or '').strip() or re.search(r'\.\w{2,4}$', name):
         return None
     return name
+
+
+def _trim_utf16(text: str, limit: int) -> str:
+    """Match the Engine's JS string length without cutting an emoji in half."""
+    return text.encode('utf-16-le', errors='surrogatepass')[:2 * limit].decode('utf-16-le', errors='ignore')
 
 
 def in_window(now: datetime, settings: OutlookSettings) -> bool:
@@ -1737,6 +1744,29 @@ class Run:
         self.state['attachments_done'] = {source: at for source, at in done.items() if at >= cutoff}
         _save(self.out, self.state)
 
+    def stage_engine_lead(self, progress: dict, args: dict) -> None:
+        assert self.engine
+        if args['applies_to'] == 'new_matter':
+            request = {k: v for k, v in args.items() if k not in ('deal', 'party', 'idempotency_key')}
+            for field, limit in (('display_name', 200), ('summary', 300), ('evidence_quote', 500)):
+                if request.get(field):
+                    request[field] = _trim_utf16(request[field], limit)
+            request['idempotency_key'] = self.engine.key('email-lead', args['address'], args['message_ref'])
+            progress['read'] = 'new_matter'
+            progress.setdefault('request', request)
+
+    def send_engine_lead(self, progress: dict) -> None:
+        assert self.engine
+        request = progress['request']
+        outcome = self.engine.propose_lead(request)
+        if outcome is None:
+            return
+        self.counts[LEAD_OUTCOMES.get(outcome, 'lead_already_queued')] += 1
+        if outcome != 'refused':
+            progress['sender'] = _hash(request['address'])
+        del progress['request']
+        _save(self.out, self.state)
+
     def leads(self, matcher: Matcher) -> None:
         """Read each unresolved email from an unknown sender once; queue business for a partner's review.
 
@@ -1747,17 +1777,25 @@ class Run:
         MAX_FAILURES_IN_A_ROW. Once a sender is on the queue, that address's later email is not read
         again: the queue holds one row per address. A refused proposal does not count as queued."""
         self.state['reads_due'] = False
+        if self.engine:
+            for progress in self.state['engine_leads'].values():
+                if 'request' in progress:
+                    self.send_engine_lead(progress)
         if self.ports.read_unresolved is None:
             return
         queued = {p['sender'] for table in ('mail_unresolved', 'engine_leads')
                   for p in self.state.get(table, {}).values() if p.get('sender')}
+        engine_leads = self.state.get('engine_leads', {})
         deals, failures = None, 0
         for m, progress in self.lead_candidates:
+            if not self.engine and 'request' in engine_leads.get(m['ident'], {}):
+                continue
             address = m['sender'].lower()
             name = _clean_name(m['sender_name'], m['subject'])
             request_key = self.owner_key('propose-email-lead', _hash(address), f'read|{m["ident"]}')
             if 'read' in progress:
-                self.count_lead_disposition(progress, request_key)
+                if not self.engine:
+                    self.count_lead_disposition(progress, request_key)
                 continue
             if _hash(address) in queued:
                 progress['read'] = 'sender_queued'
@@ -1801,12 +1839,20 @@ class Run:
                 progress.pop(stale, None)
             progress['read'] = read['applies_to']
             self.counts['lead_' + read['applies_to']] += 1
-            _save(self.out, self.state)
             args = {'idempotency_key': request_key, 'address': address,
                     'display_name': (name or '')[:200] or None, 'summary': read['summary'] or 'Not business.',
                     'first_seen_at': _iso(m['sent_unix']), 'message_ref': m['ident'],
                     'applies_to': read['applies_to'], 'confidence': read['confidence'],
                     **{k: read[k] for k in ('deal', 'party', 'evidence_quote') if read[k] is not None}}
+            if self.engine:
+                self.stage_engine_lead(progress, args)
+                _save(self.out, self.state)
+                if 'request' in progress:
+                    self.send_engine_lead(progress)
+                if 'sender' in progress:
+                    queued.add(progress['sender'])
+                continue
+            _save(self.out, self.state)
             if self.write('propose-email-lead', args, name or _domain(address)):
                 if read['applies_to'] == 'not_business':
                     continue
@@ -2345,6 +2391,9 @@ def _run(out: Path, home: Path, ports: Ports, state: dict, settings: OutlookSett
     hydration_due = bool(state.get('pending_full')) and now.timestamp() >= state.get('hydration_check_at', 0)
     review_due = 'calendar_review_at' not in state or (state['calendar_review_at'] is not None
                                                       and now.timestamp() >= state['calendar_review_at'])
+    review_due |= bool(ports.engine) != state.get('calendar_agenda_engine', False)
+    if ports.engine:
+        pending_writes |= any('request' in progress for progress in state.get('engine_leads', {}).values())
     from lib.outlook_field_census import SCHEMA as field_census_schema
     if state.get('field_census_schema') == field_census_schema and state.get('account_binding') == _hash(settings.account.strip().lower()) and not state.get('decoder_degraded') and state.get('folder_account_id') == settings.folder_account_id and all(name in state for name in MAIL_STORE_COUNTERS) and 'email_index_published' in state and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and state.get('signature_policy') == SIGNATURE_POLICY and state.get('attachment_policy') == 2 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY and not state.get('reads_due') and not engine_mail.due(state, now):
         if state.get('pending_full'):
@@ -2436,6 +2485,15 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
             if work.engine and request['verb'] == 'log-activity' and not request['acknowledged']:
                 request.update(acknowledged=True, disposition='moved_to_engine', retry_at=None)
                 continue
+            if work.engine and request['verb'] == 'propose-email-lead' and not request['acknowledged']:
+                args = json.loads(request['payload'])
+                if args.get('applies_to') == 'new_matter':
+                    progress = state.setdefault('engine_leads', {}).setdefault(args['message_ref'], {
+                        'sent': int(datetime.fromisoformat(args['first_seen_at']).timestamp())})
+                    work.stage_engine_lead(progress, args)
+                request.update(acknowledged=True, disposition='moved_to_engine', retry_at=None)
+                _save(out, state)
+                continue
             if (request['verb'] == 'record-finding'
                     and json.loads(request['payload']).get('kind') == email_contact_review.KIND):
                 continue
@@ -2458,15 +2516,24 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         snapshot, agenda_counts = agenda(events, meta, settings, now)
         work.counts.update(agenda_counts)
         try:
-            publish_agenda(ports.carr, snapshot)
+            if work.engine:
+                publication = work.engine.publish_agenda(snapshot)
+                state['calendar_agenda_engine'] = True
+            else:
+                state.pop('calendar_agenda_engine', None)
+                publish_agenda(ports.carr, snapshot)
+                publication = 'published'
+        except CarrError:
+            publication = 'retry'
+        if publication == 'retry':
+            # Display only: mail and its watermark carry on; the next run retries.
+            state.pop('calendar_review_at', None)
+        else:
             state['calendar_review_at'] = min((e['end_unix'] for e in events
                 if now.timestamp() < e['end_unix']),
                 default=None)
-            work.counts.update(calendar_agenda_published=1, calendar_agenda_failed=0)
-        except CarrError:
-            # Display only: mail and its watermark carry on; the next run retries.
-            state.pop('calendar_review_at', None)
-            work.counts.update(calendar_agenda_published=0, calendar_agenda_failed=1)
+        work.counts.update(calendar_agenda_published=int(publication == 'published'),
+                           calendar_agenda_failed=int(publication in ('refused', 'retry')))
     except CarrError as error:
         work.report(out)
         _save(out, state)
@@ -2494,7 +2561,8 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
     if work.engine:
         work.engine.prune()
         oldest = (now - UNRESOLVED_DAYS).timestamp()
-        state['engine_leads'] = {k: p for k, p in state['engine_leads'].items() if p['sent'] >= oldest}
+        state['engine_leads'] = {k: p for k, p in state['engine_leads'].items()
+                                 if 'request' in p or p['sent'] >= oldest}
     _save(out, state)
     counts.update(mapping_counts(state), mail_ids=len(state['mail_ids']))
     if health['failing']:
