@@ -48,20 +48,42 @@ class FakeEngine:
 
     def __init__(self, refuse=None):
         self.calls, self.refuse, self.stored = [], {path: list(r) for path, r in (refuse or {}).items()}, {}
+        self.requests = {}
+        self.deal = {"deal_id": DEAL_A, "phase": "site_selection", "change_id": 7,
+                     "next_step": {"id": "old-step", "due_on": "2026-11-02"}}
 
     def __call__(self, method, path, body):
-        request = json.loads(body)
+        request = json.loads(body) if body is not None else None
         self.calls.append((method, path, request))
         if self.refuse.get(path):
             return self.refuse[path].pop(0)
-        first = request["idempotency_key"] not in self.stored
-        answer = self.stored.setdefault(request["idempotency_key"], {
+        if method == "GET" and path == f"/jobs/deals/{DEAL_A}":
+            return Reply(200, self.deal.copy())
+        key = request["idempotency_key"]
+        if key in self.stored:
+            if self.requests[key] != request:
+                return Reply(409, {"error": "key_reuse"})
+            return Reply(200, {**self.stored[key], "replayed": True})
+        if path == f"/jobs/deals/{DEAL_A}/changes":
+            if (request["seen_change_id"], request["phase"]["from"]) != (self.deal["change_id"], self.deal["phase"]):
+                return Reply(409, {"error": "version_conflict"})
+            self.deal.update(phase=request["phase"]["to"], change_id=self.deal["change_id"] + 1)
+            answer = {"deal_id": DEAL_A, "change_id": self.deal["change_id"],
+                      "phase_changed_at": request["phase"].get("on", "2026-10-26") + "T05:00:00Z"}
+        else:
+            answer = self.create(path, request)
+        self.requests[key], self.stored[key] = request, answer
+        return Reply(201, answer)
+
+    def create(self, path, request):
+        if path == "/jobs/next-steps" and request.get("replaces") == "current":
+            self.deal["next_step"] = {"id": f"step-{len(self.stored)}", "due_on": request.get("due_on")}
+        return {
             "/jobs/activities": {"activity_id": ACTIVITY if request.get("kind") == "call" else f"note-{len(self.stored)}",
                                  "existing": False},
             "/jobs/next-steps": {"next_step_id": f"step-{len(self.stored)}", "change_id": 1},
             "/jobs/proposals": {"proposal_id": f"proposal-{len(self.stored)}", "status": "pending"},
-        }[path])
-        return Reply(201, answer if first else {**answer, "replayed": True})
+        }[path]
 
 
 class EngineCalls(unittest.TestCase):
@@ -78,7 +100,7 @@ class EngineCalls(unittest.TestCase):
         self.tmp.cleanup()
 
     def publish(self, engine):
-        return engine_calls.Run(engine, self.session, lambda _line: None).publish()
+        return engine_calls.Run(engine, self.session, lambda _line: None, recorder="joe").publish()
 
     def saved(self):
         return post_call.read_json(self.session / post_call.REPORT_FILE)
@@ -109,9 +131,12 @@ class EngineCalls(unittest.TestCase):
                          {"kind": "next_step", "deal_id": DEAL_A, "what": "Call the landlord",
                           "due_on": "2026-10-30", "activity_id": ACTIVITY})
         self.assertEqual(step, {"idempotency_key": step["idempotency_key"], "deal_id": DEAL_A,
-                                "what": "Send the lease draft", "due_on": "2026-11-02"})
-        self.assertEqual({k: phase[k] for k in ("kind", "deal_id", "evidence")},
-                         {"kind": "phase_move", "deal_id": DEAL_A, "evidence": "we will send the lease draft Monday"})
+                                "what": "Send the lease draft", "due_on": "2026-11-02", "owner": "joe",
+                                "replaces": "current"})
+        self.assertEqual({k: phase[k] for k in ("kind", "deal_id", "evidence", "to")},
+                         {"kind": "phase_move", "deal_id": DEAL_A, "evidence": "we will send the lease draft Monday",
+                          "to": "negotiation"})
+        self.assertNotIn("on", phase)
         self.assertNotIn("due_on", held)
         saved = self.saved()
         self.assertTrue(saved["deal_updates"][0]["next_step"]["applied_automatically"])
@@ -121,6 +146,89 @@ class EngineCalls(unittest.TestCase):
             "post_call_items": [{"kind": "assigned_action"}, {"kind": "email_draft"}],
             "bindings": [{"remote": "post_call", "index": 0}, {"remote": "legacy"}, {"remote": "post_call", "index": 1}]})
         self.assertEqual((drafts, bindings), ([{"kind": "email_draft"}], [{"remote": "post_call", "index": 1}]))
+
+    def test_named_tasks_keep_both_owners_and_undated_replacement_clears_date(self):
+        data = report()
+        data["dell_tasks"] = [{**data["joe_tasks"][0], "title": "Check the draft"}]
+        data["deal_updates"][0]["next_step"]["next_date"] = None
+        post_call.write_private(self.session / post_call.REPORT_FILE, data)
+        engine = FakeEngine()
+        self.assertTrue(self.publish(engine))
+        tasks = [body for _, path, body in engine.calls if path == "/jobs/proposals" and body.get("due_on")]
+        self.assertEqual([(t["what"], t.get("owner")) for t in tasks],
+                         [("Call the landlord", "joe"), ("Check the draft", "dell")])
+        step = next(body for _, path, body in engine.calls if path == "/jobs/next-steps")
+        self.assertNotIn("due_on", step)
+        saved_step = self.saved()["deal_updates"][0]["next_step"]["engine"]
+        self.assertEqual(engine.deal["next_step"], {"id": saved_step["next_step_id"], "due_on": None})
+
+    def phase_report(self, apply, on="2026-10-23"):
+        data = report()
+        data["deal_updates"][0].update(next_step=None, phase_move={"value": "negotiation", "apply": apply,
+                                                                  "started_on": on},
+                                       evidence="Move this deal into negotiation")
+        post_call.write_private(self.session / post_call.REPORT_FILE, data)
+
+    def test_later_partner_phase_survives_an_automatic_call_instruction(self):
+        self.phase_report("automatic", on="2026-10-26")
+        engine = FakeEngine()
+        engine.deal.update(phase="legal", change_id=8)
+        self.assertTrue(self.publish(engine))
+        self.assertEqual((engine.deal["phase"], engine.deal["change_id"]), ("legal", 8))
+        self.assertFalse(any(path.endswith("/changes") for _, path, _ in engine.calls))
+        suggestion, = [body for _, path, body in engine.calls
+                       if path == "/jobs/proposals" and body.get("kind") == "phase_move"]
+        self.assertEqual((suggestion["to"], suggestion["on"], suggestion["activity_id"]),
+                         ("negotiation", "2026-10-26", ACTIVITY))
+        phase = self.saved()["deal_updates"][0]["phase_move"]
+        self.assertEqual((phase["apply"], phase["engine"]["outcome"]), ("review", "stored"))
+        self.assertIn("moved after the call", phase["review_reason"])
+
+    def test_ineligible_automatic_phase_suggestion_stays_visible_and_is_final(self):
+        self.phase_report("automatic")
+        engine = FakeEngine()
+        engine.deal.update(phase="legal", change_id=8)
+
+        def refuse_backdated_move(method, path, body):
+            if path == "/jobs/proposals" and json.loads(body).get("kind") == "phase_move":
+                engine.refuse[path] = [Reply(422, {"error": "phase_not_eligible"})]
+            return engine(method, path, body)
+
+        self.assertTrue(self.publish(refuse_backdated_move))
+        self.assertEqual(engine.deal["phase"], "legal")
+        phase = self.saved()["deal_updates"][0]["phase_move"]
+        self.assertEqual((phase["apply"], phase["engine"]["outcome"]), ("review", "phase_not_eligible"))
+        calls = len(engine.calls)
+        self.assertTrue(self.publish(engine))
+        self.assertEqual(len(engine.calls), calls)
+
+    def test_session_can_be_processed_and_edited_during_an_engine_request(self):
+        engine = FakeEngine()
+        post_call.write_private(self.session / post_call.STATUS_FILE, {"state": "ready_review"})
+
+        def slow_door(method, path, body):
+            if not engine.calls:
+                with patch.object(post_call, "require_review_coverage"):
+                    self.assertEqual(post_call.process_session(self.session, run_checks=False)["state"],
+                                     "ready_review")
+                self.assertFalse(self.publish(engine))
+                with post_call.update_report(self.session) as data:
+                    data["review_questions"].append({"question": "Check the start date"})
+            return engine(method, path, body)
+
+        self.assertTrue(self.publish(slow_door))
+        saved = self.saved()
+        self.assertEqual(saved["review_questions"], [{"question": "Check the start date"}])
+        self.assertEqual(saved["engine_call"]["activity_id"], ACTIVITY)
+
+    def test_review_phase_sends_the_stated_target_and_date_without_moving_the_deal(self):
+        self.phase_report("review")
+        engine = FakeEngine()
+        self.assertTrue(self.publish(engine))
+        self.assertTrue(all(method == "POST" and not path.startswith("/jobs/deals/") for method, path, _ in engine.calls))
+        suggestion = next(body for _, _, body in engine.calls if body.get("kind") == "phase_move")
+        self.assertEqual((suggestion["to"], suggestion["on"], suggestion["activity_id"]),
+                         ("negotiation", "2026-10-23", ACTIVITY))
 
     def test_each_deal_update_is_a_note_about_its_deal_and_a_lost_note_is_retried(self):
         engine = FakeEngine({"/jobs/activities": [Reply(201, {"activity_id": ACTIVITY, "existing": False}),
@@ -159,9 +267,23 @@ class EngineCalls(unittest.TestCase):
         self.assertNotIn("engine_call", self.saved())
         self.assertEqual(len(post_call._report_candidates(self.saved())), 7)
 
-    def test_a_refused_automatic_step_becomes_a_suggestion_with_the_reason(self):
+    def test_a_refused_automatic_step_retries_only_its_suggestion(self):
         engine = FakeEngine({"/jobs/next-steps": [Reply(404, {"error": "not_found"})]})
+
+        def lose_suggestion_answer(method, path, body):
+            reply = engine(method, path, body)
+            request = json.loads(body)
+            if path == "/jobs/proposals" and request.get("what") == "Send the lease draft":
+                return Reply(0, {})
+            return reply
+
+        self.assertFalse(self.publish(lose_suggestion_answer))
         self.assertTrue(self.publish(engine))
+        self.assertEqual(sum(path == "/jobs/next-steps" for _, path, _ in engine.calls), 1)
+        proposals = [body for _, path, body in engine.calls
+                     if path == "/jobs/proposals" and body.get("what") == "Send the lease draft"]
+        self.assertEqual(len(proposals), 2)
+        self.assertEqual(proposals[0], proposals[1])
         step = self.saved()["deal_updates"][0]["next_step"]
         self.assertEqual((step["apply"], step["engine"]["outcome"], step["engine"]["refused"]),
                          ("review", "stored", "not_found"))

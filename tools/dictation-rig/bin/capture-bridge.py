@@ -537,7 +537,7 @@ def publish_engine(connect: engine_calls.Connect, session_dir: Path) -> bool:
     except OSError as exc:
         log_line(f"UNAVAILABLE publish engine credentials session={session_dir.name}: {type(exc).__name__}")
         return False
-    return engine_calls.Run(door, session_dir, log_line).publish()
+    return engine_calls.Run(door, session_dir, log_line, recorder=partner).publish()
 
 
 def apply_automatic(session_dir: Path) -> bool:

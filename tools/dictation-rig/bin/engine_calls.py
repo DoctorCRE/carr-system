@@ -1,16 +1,12 @@
-"""Call capture's side of the engine's doors 19 (the call), 21 (its suggestions) and 18 (next steps).
+"""Send a call's activities, suggestions, and automatic deal changes to the engine.
 
 The doors are fixed in the engine repository's docs/new-database.md, "Doors the old
 system calls". The bridge calls them only when the capture config sets engine_calls;
 otherwise nothing here runs and the call's suggestions go to the capture Worker as before.
 
-The call is one activity about every deal the report names, with the report's summary,
-decisions and open questions. Each deal update's sentence is a note about its deal. Each task and each stated next step or phase move becomes a
-suggestion on that call. A next step the report marked automatic, held to the bridge's
-confidence bar, is saved as a next step instead; one the engine refuses becomes a
-suggestion with the reason kept for Call Mode. Phase moves are always suggestions: a job
-cannot read a deal's phase, which door 16 needs as `from`, and the suggestion door reads it
-itself. Email drafts have no door and stay with the capture Worker.
+Door 19 stores the call and its per-deal notes. Phase moves and tasks for review use
+door 21. Automatic next steps use door 18, with final refusals kept as suggestions
+for review. Email drafts stay with the capture Worker.
 
 Keys derive from the session and the item, so a crashed run's retry converges. A 5xx or a
 lost connection is retried next run with the same key, and a refusal of the caller itself
@@ -20,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import fcntl
 import json
 from pathlib import Path
 import re
@@ -31,7 +28,7 @@ from lib import engine_mail
 
 JOB = "call_capture"
 PROPOSALS = "/jobs/proposals"
-TASK_LISTS = ("joe_tasks", "dell_tasks")
+TASK_OWNERS = {"joe_tasks": "joe", "dell_tasks": "dell"}
 PARTNER = re.compile(r"[a-z][a-z0-9_]{0,63}")
 
 Connect = Callable[[str], engine_mail.Door]
@@ -45,6 +42,7 @@ class Move:
     body: Dict[str, Any]
     fallback: Optional[Dict[str, Any]] = None
     answer: str = "proposal_id"
+    refused: Optional[str] = None
 
 
 def connector(config: Dict[str, Any]) -> Optional[Connect]:
@@ -91,7 +89,7 @@ def summary(report: Dict[str, Any]) -> str:
 
 def call(session_dir: Path, report: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """The call's door 19 request, or None when it names no deal."""
-    deals = dict.fromkeys(item["deal_id"] for name in (*TASK_LISTS, "deal_updates", "draft_proposals")
+    deals = dict.fromkeys(item["deal_id"] for name in (*TASK_OWNERS, "deal_updates", "draft_proposals")
                           for item in report.get(name, []) if item.get("deal_id"))
     if not deals:
         return None
@@ -101,22 +99,21 @@ def call(session_dir: Path, report: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return {**request, "summary": text} if text else request
 
 
-def moves(session_dir: Path, report: Dict[str, Any]) -> Iterator[Move]:
+def moves(session_dir: Path, report: Dict[str, Any], recorder: str) -> Iterator[Move]:
     """Each note and suggestion the Worker does not already hold, with its door and request."""
     session = session_dir.name
 
-    def proposal(name: str, kind: str, deal_id: str, evidence: str, what: Optional[str] = None,
-                 due_on: Optional[str] = None) -> Dict[str, Any]:
-        body = {"idempotency_key": key(session, name, "proposal"), "kind": kind, "deal_id": deal_id,
-                "evidence": evidence}
-        return {**body, **({"what": what} if what else {}), **({"due_on": due_on} if due_on else {})}
+    def proposal(name: str, kind: str, deal_id: str, evidence: str, **fields: Optional[str]) -> Dict[str, Any]:
+        return {"idempotency_key": key(session, name, "proposal"), "kind": kind, "deal_id": deal_id,
+                "evidence": evidence, **{field: value for field, value in fields.items() if value is not None}}
 
-    for list_name in TASK_LISTS:
+    for list_name, owner in TASK_OWNERS.items():
         for index, task in enumerate(report.get(list_name, [])):
             name = f"{list_name}:{index}"
             if not task.get("candidate_id"):
                 yield Move(task, name, PROPOSALS, proposal(
-                    name, "next_step", task["deal_id"], task["evidence"], task["title"], task.get("due_on")))
+                    name, "next_step", task["deal_id"], task["evidence"], what=task["title"],
+                    due_on=task.get("due_on"), owner=owner))
     for index, update in enumerate(report.get("deal_updates", [])):
         if not update.get("candidate_id"):
             name = f"deal_updates:{index}"
@@ -128,18 +125,22 @@ def moves(session_dir: Path, report: Dict[str, Any]) -> Iterator[Move]:
         step, phase = update.get("next_step"), update.get("phase_move")
         if isinstance(step, dict) and not step.get("candidate_id"):
             name = f"deal_updates:{index}:next_step"
-            suggestion = proposal(name, "next_step", update["deal_id"], update["evidence"], step["text"],
-                                  step.get("next_date"))
+            suggestion = proposal(name, "next_step", update["deal_id"], update["evidence"], what=step["text"],
+                                  due_on=step.get("next_date"))
             if step.get("apply") == "automatic":
                 saved = {"idempotency_key": key(session, name, "next_step"), "deal_id": update["deal_id"],
-                         "what": step["text"], **({"due_on": step["next_date"]} if step.get("next_date") else {})}
-                yield Move(step, name, "/jobs/next-steps", saved, suggestion)
+                         "what": step["text"], "owner": recorder, "replaces": "current",
+                         **({"due_on": step["next_date"]} if step.get("next_date") else {})}
+                yield Move(step, name, "/jobs/next-steps", saved, suggestion, answer="next_step_id")
             else:
                 yield Move(step, name, PROPOSALS, suggestion)
         if isinstance(phase, dict) and not phase.get("candidate_id"):
             name = f"deal_updates:{index}:phase_move"
-            yield Move(phase, name, PROPOSALS,
-                       proposal(name, "phase_move", update["deal_id"], update["evidence"]))
+            target = {"to": phase["value"], **({"on": phase["started_on"]} if phase.get("started_on") else {})}
+            suggestion = proposal(name, "phase_move", update["deal_id"], update["evidence"], **target)
+            # Door 16's latest change ID cannot establish the phase at the time of the call.
+            refused = "missing_phase_chronology" if phase.get("apply") == "automatic" else None
+            yield Move(phase, name, PROPOSALS, suggestion, refused=refused)
 
 
 def worker_drafts(shaped: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -153,12 +154,13 @@ def worker_drafts(shaped: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Di
 class Run:
     """One pass over a session's engine requests; outcomes are written back to the report."""
 
-    def __init__(self, door: engine_mail.Door, session_dir: Path, log: Callable[[str], None]):
+    def __init__(self, door: engine_mail.Door, session_dir: Path, log: Callable[[str], None], *, recorder: str):
         self.door, self.session_dir, self.log = door, session_dir, log
+        self.recorder = recorder
         self.outcomes: Dict[str, Dict[str, Any]] = {}
         self.blocked = False
 
-    def post(self, path: str, body: Dict[str, Any]) -> Optional[engine_mail.Reply]:
+    def request(self, path: str, body: Dict[str, Any]) -> Optional[engine_mail.Reply]:
         """The final answer, or None when it must be retried next run."""
         reply = self.door("POST", path, json.dumps(body).encode())
         judged = engine_mail.verdict(reply)
@@ -171,20 +173,27 @@ class Run:
 
     def publish(self) -> bool:
         """True once the call and every suggestion it moves have a final answer."""
+        lock_path = self.session_dir / ".engine-publish.lock"
+        lock_path.touch(mode=0o600, exist_ok=True)
+        with lock_path.open("a+") as lock:
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return False
+            return self._publish()
+
+    def _publish(self) -> bool:
         report = post_call.read_json(self.session_dir / post_call.REPORT_FILE) or {}
         stored = report.get("engine_call") or {}
         if "outcome" not in stored:
             request = call(self.session_dir, report)
-            reply = self.post("/jobs/activities", request) if request else None
+            reply = self.request("/jobs/activities", request) if request else None
             if request and reply is None:
                 return False
             stored = settled(reply, "activity_id") if reply else {"outcome": "about_nothing"}
         activity_id = stored.get("activity_id")
-        for move in moves(self.session_dir, report):
+        for move in moves(self.session_dir, report, self.recorder):
             if "engine" in move.item or self.blocked:
-                continue
-            if activity_id is None and move.path == PROPOSALS:
-                self.outcomes[move.key] = {"outcome": "call_not_stored"}
                 continue
             self.outcomes[move.key] = self.send(move, activity_id)
         self.outcomes = {name: outcome for name, outcome in self.outcomes.items() if outcome}
@@ -193,35 +202,53 @@ class Run:
         return not self.blocked
 
     def send(self, move: Move, activity_id: Optional[str]) -> Dict[str, Any]:
+        path, body, answer = move.path, move.body, move.answer
+        reason = move.refused
         if move.fallback is not None:
-            reply = (self.post(move.path, move.body) if confident(move.body["what"])
-                     else engine_mail.Reply(422, {"error": "below_confidence_bar"}))
-            if reply is None:
-                return {}
-            if engine_mail.verdict(reply) == "done":
-                return {"outcome": "applied", "next_step_id": reply.body.get("next_step_id")}
-            refused = {"refused": reply.error}
+            reason = (move.item.get("engine_pending") or {}).get("refused")
+            if reason is None:
+                if confident(body["what"]):
+                    reply = self.request(path, body)
+                    if reply is None:
+                        return {}
+                    if engine_mail.verdict(reply) == "done":
+                        return {**settled(reply, answer), "outcome": "applied"}
+                    reason = reply.error
+                else:
+                    reason = "below_confidence_bar"
+                self.checkpoint_refusal(move, reason)
+            path, body, answer = PROPOSALS, move.fallback, "proposal_id"
+        refused = {"refused": reason} if reason is not None else {}
+        if path == PROPOSALS:
             if activity_id is None:
                 return {"outcome": "call_not_stored", **refused}
-            reply = self.post(PROPOSALS, {**move.fallback, "activity_id": activity_id})
-            return {**settled(reply, "proposal_id"), **refused} if reply else {}
-        body = {**move.body, "activity_id": activity_id} if move.path == PROPOSALS else move.body
-        reply = self.post(move.path, body)
-        return settled(reply, move.answer) if reply else {}
+            body = {**body, "activity_id": activity_id}
+        reply = self.request(path, body)
+        return {**settled(reply, answer), **refused} if reply else {}
+
+    def checkpoint_refusal(self, move: Move, reason: str) -> None:
+        with post_call.update_report(self.session_dir) as report:
+            current = next(current for current in moves(self.session_dir, report, self.recorder)
+                           if current.key == move.key)
+            current.item.setdefault("engine_pending", {})["refused"] = reason
 
     def record(self, stored: Dict[str, Any]) -> None:
         with post_call.update_report(self.session_dir) as report:
             report["engine_call"] = stored
-            for move in moves(self.session_dir, report):
+            for move in moves(self.session_dir, report, self.recorder):
                 outcome = self.outcomes.get(move.key)
                 if not outcome:
                     continue
+                move.item.pop("engine_pending", None)
                 move.item["engine"] = outcome
                 if outcome["outcome"] == "applied":
                     move.item["applied_automatically"] = True
                 elif "refused" in outcome:
+                    reason = outcome["refused"]
                     move.item.update(apply="review", review_reason=(
-                        f"Could not apply automatically ({outcome['refused']}); review it here."))
+                        "Check whether the deal moved after the call before applying this phase change."
+                        if reason == "missing_phase_chronology"
+                        else f"Could not apply automatically ({reason}); review it here."))
             changes = [update[field] for update in report.get("deal_updates", [])
                        for field in post_call.AUTOMATIC_FIELDS if isinstance(update.get(field), dict)]
             report["automatic"] = {"finished_at": post_call.now(),
