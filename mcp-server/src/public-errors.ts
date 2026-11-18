@@ -391,10 +391,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["unattended_runner_authority_not_admitted", "This operation is unavailable to unattended sessions."],
   ["actor_not_provisioned", "The authenticated actor is not provisioned."],
   ["engine_assistant_configuration", "The assistant's engine connection is missing its settings."],
-  [
-    "engine_assistant_party_unmapped",
-    "Use an exact lead, client, or vendor reference that identifies one record.",
-  ],
+  ["engine_assistant_party_unmapped", "Use an exact lead, client, or vendor reference that identifies one record."],
   [
     "engine_assistant_refused",
     "DoctorCRE Engine refused the assistant save. Quote the correlation_id when reporting it.",

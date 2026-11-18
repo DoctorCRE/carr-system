@@ -425,7 +425,10 @@ test("switch off saves and completes a role step through the legacy handler", as
 
 test("missing or ambiguous role refs never fall through to name search", async (t) => {
   const upstream = engine(t, () => assert.fail("unresolved ref reached the engine"));
-  for (const [ref, matches] of [["T-SAMPLE-901", 0], [roleRefs.lead, 2]] as const) {
+  for (const [ref, matches] of [
+    ["T-SAMPLE-901", 0],
+    [roleRefs.lead, 2],
+  ] as const) {
     const c = legacy({ subject: "lead", matches, writes: true });
     await assert.rejects(
       executeRegisteredTool(c, agent, "complete-action", { idempotency_key: key, ref }, upstream.env),
@@ -440,11 +443,31 @@ test("a role step with an unknown owner leaves both stores untouched", async (t)
   const upstream = engine(t, () => assert.fail("unknown owner reached the engine"));
   const c = legacy({ subject: "client", writes: true });
   const queries: string[] = [];
-  const db = { query: (sql: string) => { queries.push(sql); return c.query(sql); } };
-  await assert.rejects(executeRegisteredTool(db, agent, "set-next-action", {
-    idempotency_key: key, ref: roleRefs.client, description: "Send sample measurements", owner: "someone-else",
-  }, upstream.env), (error: unknown) => error instanceof ToolError && error.payload.error === "owner_not_permitted");
-  assert.ok(queries.every(sql => sql.includes("v_ref_index")), "only the role lookup may run");
+  const db = {
+    query: (sql: string) => {
+      queries.push(sql);
+      return c.query(sql);
+    },
+  };
+  await assert.rejects(
+    executeRegisteredTool(
+      db,
+      agent,
+      "set-next-action",
+      {
+        idempotency_key: key,
+        ref: roleRefs.client,
+        description: "Send sample measurements",
+        owner: "someone-else",
+      },
+      upstream.env,
+    ),
+    (error: unknown) => error instanceof ToolError && error.payload.error === "owner_not_permitted",
+  );
+  assert.ok(
+    queries.every((sql) => sql.includes("v_ref_index")),
+    "only the role lookup may run",
+  );
   assert.deepEqual(c.changes, []);
   assert.equal(upstream.calls.length, 0);
 });
@@ -463,21 +486,38 @@ test("an old role missing from the Engine copy is a final refusal", async (t) =>
 test("log-outreach refuses with the Engine on and points to the routed verbs", async (t) => {
   const upstream = engine(t, () => assert.fail("outreach reached the engine"));
   const c = legacy({ subject: "client", writes: true });
-  await assert.rejects(executeRegisteredTool(c, agent, "log-outreach", {
-    idempotency_key: key, ref: roleRefs.client, channel: "call", outcome: "connected", summary: "Sample outreach",
-  }, upstream.env), (error: unknown) => {
-    const response = publicError(error);
-    assert.equal(response.error, "engine_assistant_outreach_unavailable");
-    assert.match(response.hint, /complete-action.*log-activity/);
-    return true;
-  });
+  await assert.rejects(
+    executeRegisteredTool(
+      c,
+      agent,
+      "log-outreach",
+      {
+        idempotency_key: key,
+        ref: roleRefs.client,
+        channel: "call",
+        outcome: "connected",
+        summary: "Sample outreach",
+      },
+      upstream.env,
+    ),
+    (error: unknown) => {
+      const response = publicError(error);
+      assert.equal(response.error, "engine_assistant_outreach_unavailable");
+      assert.match(response.hint, /complete-action.*log-activity/);
+      return true;
+    },
+  );
   assert.deepEqual(c.changes, []);
   assert.equal(upstream.calls.length, 0);
 });
 
 test("the Worker files a client outcome on the party returned by the Engine", async (t) => {
   const upstream = engine(t, (_, path) =>
-    Response.json(path === "/jobs/activities" ? { activity_id: savedId } : { next_step_id: savedId, status: "done", party_id: copiedParty }),
+    Response.json(
+      path === "/jobs/activities"
+        ? { activity_id: savedId }
+        : { next_step_id: savedId, status: "done", party_id: copiedParty },
+    ),
   );
   const actor: unknown = worker(t, legacy({ subject: "client" }).query);
   const env = {
@@ -512,31 +552,63 @@ test("the Worker files a client outcome on the party returned by the Engine", as
 test("confirming an email step rechecks the proposal and saves only to the Engine", async (t) => {
   const upstream = engine(t, () => Response.json({ next_step_id: savedId, party_id: copiedParty }));
   const joe = { id: agent.id, slug: "joe", human: true };
-  const args = { activity_id: savedId, evidence_quote: "Send the sample by Friday",
-    text: "Send the sample", next_date: "2026-11-20", owner: "dell" };
+  const args = {
+    activity_id: savedId,
+    evidence_quote: "Send the sample by Friday",
+    text: "Send the sample",
+    next_date: "2026-11-20",
+    owner: "dell",
+  };
   const c = {
     async query(sql: string) {
-      if (sql.includes("select email_context"))
-        return { rows: [] };
+      if (sql.includes("select email_context")) return { rows: [] };
       assert.match(sql, /^select \* from v_email_non_deal_step/);
-      return { rows: [{ subject_type: "client", subject_id: deal, activity_id: savedId,
-        detail: args.evidence_quote, occurred_at: "2026-11-18T14:00:00Z", actions: [] }] };
+      return {
+        rows: [
+          {
+            subject_type: "client",
+            subject_id: deal,
+            activity_id: savedId,
+            detail: args.evidence_quote,
+            occurred_at: "2026-11-18T14:00:00Z",
+            actions: [],
+          },
+        ],
+      };
     },
   };
   const preview = record(await executeRegisteredTool(c, joe, "preview-email-next-step", args));
   const confirmation = { ...args, idempotency_key: key, proposal_digest: preview.proposal_digest };
-  await assert.rejects(executeRegisteredTool(c, joe, "confirm-email-next-step",
-    { ...confirmation, text: "Send the wrong sample" }, upstream.env),
-    { payload: { error: "email_next_step_proposal_stale" } });
+  await assert.rejects(
+    executeRegisteredTool(
+      c,
+      joe,
+      "confirm-email-next-step",
+      { ...confirmation, text: "Send the wrong sample" },
+      upstream.env,
+    ),
+    { payload: { error: "email_next_step_proposal_stale" } },
+  );
   assert.equal(upstream.calls.length, 0);
   const result = record(await executeRegisteredTool(c, joe, "confirm-email-next-step", confirmation, upstream.env));
   assert.equal(result.status, "confirmed");
   assert.equal(result.next_action_id, savedId);
-  assert.deepEqual(upstream.calls.map(({ path, body }) => [path, body]), [
-    ["/jobs/next-steps", { idempotency_key: derivedIdempotencyKey("email-next-action", key),
-      old_role: { kind: "client", id: deal }, what: args.text, due_on: args.next_date,
-      owner: args.owner, replaces: "current" }],
-  ]);
+  assert.deepEqual(
+    upstream.calls.map(({ path, body }) => [path, body]),
+    [
+      [
+        "/jobs/next-steps",
+        {
+          idempotency_key: derivedIdempotencyKey("email-next-action", key),
+          old_role: { kind: "client", id: deal },
+          what: args.text,
+          due_on: args.next_date,
+          owner: args.owner,
+          replaces: "current",
+        },
+      ],
+    ],
+  );
 });
 
 test("the Worker files a deal note and Home review without running legacy after-commit work", async (t) => {
