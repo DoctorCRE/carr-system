@@ -393,12 +393,17 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["engine_assistant_configuration", "The assistant's engine connection is missing its settings."],
   [
     "engine_assistant_party_unmapped",
-    "This reference has no verified DoctorCRE Engine party mapping. Check that the record was copied.",
+    "Use an exact lead, client, or vendor reference that identifies one record.",
   ],
   [
     "engine_assistant_refused",
     "DoctorCRE Engine refused the assistant save. Quote the correlation_id when reporting it.",
   ],
+  [
+    "engine_assistant_outreach_unavailable",
+    "Use complete-action for a finished step. Include an outcome for a party note, or use log-activity for a deal.",
+  ],
+  ["engine_assistant_step_guard_unsupported", "Use the confirmed email proposal flow or set an ordinary next step."],
   ["engine_assistant_unavailable", "DoctorCRE Engine did not confirm the save. Retry with the same idempotency_key."],
   ["authority_connection_unavailable", "Partner authority is unavailable for this operation."],
   ["caller_authority_field_forbidden", "Remove caller-supplied authority fields."],

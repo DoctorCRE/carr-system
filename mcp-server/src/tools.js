@@ -26,7 +26,7 @@ import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dea
 import { canonicalJson } from "./artifact-trust.js";
 import { safeInteger, integerFields } from "./safe-integer.ts";
 import { invoiceTrackerTools } from "./invoice-tracker.ts";
-import { copiedAssistantPartyId, saveAssistantChange } from "./engine-assistant.ts";
+import { assistantOldRole, saveAssistantChange } from "./engine-assistant.ts";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.ts";
 import { readDealChecklist } from "./deal-checklist.ts";
@@ -266,10 +266,10 @@ function dealNoteInput(args) {
   return { text: args.text.trim(), plan: hasPlan ? { what: args.next_step.trim(), due_on: args.next_date } : undefined };
 }
 
-const ASSISTANT_ROLE_REF_TYPES = { l: 'lead', c: 'client', v: 'vendor' };
+const ASSISTANT_ROLE_REF_TYPES = { l: 'lead', c: 'client', v: 'vendor', t: 'vendor' };
 
 async function resolveAssistantStepSubject(client, ref) {
-  const prefix = /^([lcv])-/i.exec(ref)?.[1].toLowerCase();
+  const prefix = /^([lcvt])-/i.exec(ref)?.[1].toLowerCase();
   if (!prefix) return resolveSubject(client, ref);
   const type = ASSISTANT_ROLE_REF_TYPES[prefix];
   const result = await client.query(
@@ -278,30 +278,53 @@ async function resolveAssistantStepSubject(client, ref) {
   return { type, id: result.rows[0].subject_id };
 }
 
+async function saveAssistantEmailStep(client, actor, args, env) {
+  if (actor.human !== true || actor.slug !== 'joe') throw new ToolError({ error: 'joe_confirmation_required' });
+  if (!UUID_KEY.test(args.idempotency_key)) throw new ToolError({ error: 'invalid_idempotency_key', field: 'idempotency_key' });
+  await guardEmailAction(client, args, ToolError);
+  const current = await TOOLS['preview-email-next-step'].handler(client, actor, args);
+  if (current.proposal_digest !== args.proposal_digest) throw new ToolError({ error: 'email_next_step_proposal_stale' });
+  const old_role = assistantOldRole(current.subject_type, current.subject_id);
+  if (!old_role) throw new ToolError({ error: 'next_action_subject_unsupported' });
+  const { id, replayed } = await saveAssistantChange(env, actor.slug, {
+    path: '/jobs/next-steps', id: 'next_step_id', body: {
+      idempotency_key: derivedIdempotencyKey('email-next-action', args.idempotency_key),
+      old_role, what: current.text, due_on: current.next_date, owner: current.owner, replaces: 'current',
+    },
+  });
+  return { ...current, status: 'confirmed', requires_confirmation: false,
+    next_action_id: id, email_proposal_id: null, ...(replayed && { replayed }) };
+}
+
 async function saveAssistantVerb(client, actor, verb, args, env) {
+  if (verb === 'log-outreach') throw new ToolError({ error: 'engine_assistant_outreach_unavailable' });
+  if (verb === 'confirm-email-next-step' && !args.deal) return saveAssistantEmailStep(client, actor, args, env);
   const partner = partnerAuthoritySlugForActor(actor);
-  if (!partner) return;
   const activity = verb === 'log-activity' && isEngineActivity(args);
-  const step = verb === 'set-next-action' && !Object.hasOwn(args, 'expected_action') && !args.work_request;
+  const step = verb === 'set-next-action';
   const completion = verb === 'complete-action';
   const dealNote = verb === 'add-deal-note';
   const stepWrite = step || completion;
-  if (!activity && !stepWrite && !dealNote) return;
+  if (!stepWrite && (!partner || (!activity && !dealNote))) return;
 
+  const guardedStep = step && (Object.hasOwn(args, 'expected_action') || Boolean(args.work_request));
   const subject = stepWrite
     ? await resolveAssistantStepSubject(client, args.ref)
     : await resolveSubject(client, dealNote ? args.deal : args.ref);
   if (dealNote && subject.type !== 'deal') throw new ToolError({ error: "not_a_deal", resolved: subject });
-  const copiedRole = stepWrite && Object.values(ASSISTANT_ROLE_REF_TYPES).includes(subject.type);
-  if (subject.type !== 'deal' && !copiedRole && !(completion && subject.type === 'party')) return;
+  const oldRole = stepWrite ? assistantOldRole(subject.type, subject.id) : null;
+  if (oldRole && !partner) throw new ToolError({ error: 'human_approval_required' });
+  if (oldRole && guardedStep) throw new ToolError({ error: 'engine_assistant_step_guard_unsupported' });
+  if (!partner || guardedStep) return;
+  if (subject.type !== 'deal' && !oldRole && !(completion && subject.type === 'party')) return;
 
   const { idempotency_key } = args;
   if (!UUID_KEY.test(idempotency_key)) throw new ToolError({ error: 'invalid_idempotency_key', field: 'idempotency_key' });
 
-  const target = subject.type === 'deal' ? { deal_id: subject.id }
-    : { party_id: copiedRole ? await copiedAssistantPartyId(env, subject.id) : subject.id };
   if (completion) {
-    const { id, replayed } = await saveAssistantChange(env, partner, {
+    const target = oldRole ? { old_role: oldRole }
+      : subject.type === 'deal' ? { deal_id: subject.id } : { party_id: subject.id };
+    const { id, replayed, party_id } = await saveAssistantChange(env, partner, {
       path: '/jobs/next-steps/complete', id: 'next_step_id', body: { idempotency_key, ...target },
     });
     const outcome = args.outcome?.trim();
@@ -309,7 +332,8 @@ async function saveAssistantVerb(client, actor, verb, args, env) {
       await saveAssistantChange(env, partner, {
         path: '/jobs/activities', id: 'activity_id', body: {
           idempotency_key: derivedIdempotencyKey('complete-action-outcome', idempotency_key),
-          kind: 'note', about: [target], summary: outcome,
+          kind: 'note', summary: outcome,
+          about: [subject.type === 'deal' ? { deal_id: subject.id } : { party_id: party_id ?? subject.id }],
         },
       });
     }
@@ -342,7 +366,7 @@ async function saveAssistantVerb(client, actor, verb, args, env) {
   const owner = args.owner === undefined || args.owner === null || args.owner === ''
     ? partner : String(args.owner).trim().toLowerCase();
   if (!isKnownPartner(owner)) {
-    if (copiedRole) throw new ToolError({ error: 'owner_not_permitted' });
+    if (oldRole) throw new ToolError({ error: 'owner_not_permitted' });
     return;
   }
 
@@ -350,7 +374,7 @@ async function saveAssistantVerb(client, actor, verb, args, env) {
   const { id, replayed } = await saveAssistantChange(env, partner, {
     path: '/jobs/next-steps', id: 'next_step_id', body: {
       idempotency_key, what: args.description,
-      ...(target.deal_id ? { deal_id: target.deal_id, replaces: 'current' } : { party_id: target.party_id }),
+      replaces: 'current', ...(oldRole ? { old_role: oldRole } : { deal_id: subject.id }),
       ...(args.due_on && { due_on: args.due_on }),
       ...(owner !== partner && { owner }),
     },

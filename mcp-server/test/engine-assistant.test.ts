@@ -31,11 +31,13 @@ const activity = {
 
 class LegacyReached extends Error {}
 
-function legacy({ writes = false, subject = "deal", found = true } = {}) {
+function legacy({ writes = false, subject = "deal", found = true, matches = 1 } = {}) {
   const changes: string[] = [];
   return {
     changes,
     async query(sql: string) {
+      if (sql.includes("lower(ref)=lower($2)"))
+        return { rows: Array.from({ length: found ? matches : 0 }, () => ({ subject_id: deal })) };
       if (sql.includes("v_ref_index")) return { rows: found ? [{ subject_type: subject, subject_id: deal }] : [] };
       if (writes && sql.includes("select w.ref from ops.future_work_link")) return { rows: [{ ref: "WR-901" }] };
       if (writes && sql.startsWith("select ")) return { rows: [] };
@@ -363,8 +365,8 @@ for (const type of ["deal", "party"]) {
 const copiedParty = "01000000-0000-4000-8000-000000000019";
 const roleRefs = { lead: "L-901", client: "C-901", vendor: "V-SAMPLE-901" };
 
-for (const [subject, ref] of Object.entries(roleRefs)) {
-  test(`saves and completes the current step for ${ref} using its copied party`, async (t) => {
+for (const [subject, ref] of [...Object.entries(roleRefs), ["vendor", "T-SAMPLE-901"]]) {
+  test(`saves and completes the current step for ${ref} using its old role ID`, async (t) => {
     const receipts = new Map<string, unknown>();
     const upstream = engine(t, (body, path) => {
       if (!receipts.has(path)) {
@@ -372,14 +374,12 @@ for (const [subject, ref] of Object.entries(roleRefs)) {
         return Response.json({ error: "database_unavailable" }, { status: 503 });
       }
       assert.deepEqual(body, receipts.get(path));
-      return Response.json({ next_step_id: savedId, replayed: true });
+      return Response.json({ next_step_id: savedId, party_id: copiedParty, replayed: true });
     });
-    const env = {
-      ...upstream.env,
-      ENGINE_ASSISTANT_PARTY_MAP: { get: async (id: string) => (id === deal ? copiedParty : null) },
-    };
+    const { env } = upstream;
     const c = legacy({ subject });
     const args = { idempotency_key: key, ref };
+    const old_role = { kind: subject, id: deal };
     const step = { ...args, description: "Send sample measurements", due_on: "2026-10-20" };
     const done = { ...args, idempotency_key: "01000000-0000-4000-8000-000000000006" };
 
@@ -395,9 +395,9 @@ for (const [subject, ref] of Object.entries(roleRefs)) {
       [
         [
           "/jobs/next-steps",
-          { idempotency_key: key, party_id: copiedParty, what: step.description, due_on: step.due_on },
+          { idempotency_key: key, old_role, what: step.description, due_on: step.due_on, replaces: "current" },
         ],
-        ["/jobs/next-steps/complete", { idempotency_key: done.idempotency_key, party_id: copiedParty }],
+        ["/jobs/next-steps/complete", { idempotency_key: done.idempotency_key, old_role }],
       ],
     );
     assert.equal(upstream.calls.length, 5);
@@ -423,50 +423,66 @@ test("switch off saves and completes a role step through the legacy handler", as
   assert.equal(upstream.calls.length, 0);
 });
 
-test("unknown and uncopied role refs are refused before either store is written", async (t) => {
-  const upstream = engine(t, () => assert.fail("unmapped ref reached the engine"));
-  const env = { ...upstream.env, ENGINE_ASSISTANT_PARTY_MAP: { get: async () => null } };
-  const args = { idempotency_key: key, ref: roleRefs.lead };
-  await assert.rejects(executeRegisteredTool(legacy({ found: false }), agent, "complete-action", args, env), {
-    payload: { error: "engine_assistant_party_unmapped" },
-  });
-  await assert.rejects(
-    executeRegisteredTool(
-      legacy({ subject: "lead" }),
-      agent,
-      "set-next-action",
-      { ...args, description: "Follow up" },
-      env,
-    ),
-    { payload: { error: "engine_assistant_party_unmapped" } },
-  );
+test("missing or ambiguous role refs never fall through to name search", async (t) => {
+  const upstream = engine(t, () => assert.fail("unresolved ref reached the engine"));
+  for (const [ref, matches] of [["T-SAMPLE-901", 0], [roleRefs.lead, 2]] as const) {
+    const c = legacy({ subject: "lead", matches, writes: true });
+    await assert.rejects(
+      executeRegisteredTool(c, agent, "complete-action", { idempotency_key: key, ref }, upstream.env),
+      { payload: { error: "engine_assistant_party_unmapped" } },
+    );
+    assert.deepEqual(c.changes, []);
+  }
   assert.equal(upstream.calls.length, 0);
 });
 
-test("a party step conflict is final and leaves the existing step open", async (t) => {
-  const upstream = engine(t, () =>
-    Response.json({ error: "open_step_exists", next_step_id: savedId }, { status: 409 }),
-  );
-  const env = { ...upstream.env, ENGINE_ASSISTANT_PARTY_MAP: { get: async () => copiedParty } };
-  const args = { idempotency_key: key, ref: roleRefs.vendor, description: "Send sample measurements" };
-  await assert.rejects(executeRegisteredTool(legacy({ subject: "vendor" }), agent, "set-next-action", args, env), {
-    payload: { error: "engine_assistant_refused", engine_status: 409, engine_error: "open_step_exists" },
-  });
-  assert.deepEqual(
-    upstream.calls.map(({ path }) => path),
-    ["/jobs/next-steps"],
-  );
+test("a role step with an unknown owner leaves both stores untouched", async (t) => {
+  const upstream = engine(t, () => assert.fail("unknown owner reached the engine"));
+  const c = legacy({ subject: "client", writes: true });
+  const queries: string[] = [];
+  const db = { query: (sql: string) => { queries.push(sql); return c.query(sql); } };
+  await assert.rejects(executeRegisteredTool(db, agent, "set-next-action", {
+    idempotency_key: key, ref: roleRefs.client, description: "Send sample measurements", owner: "someone-else",
+  }, upstream.env), (error: unknown) => error instanceof ToolError && error.payload.error === "owner_not_permitted");
+  assert.ok(queries.every(sql => sql.includes("v_ref_index")), "only the role lookup may run");
+  assert.deepEqual(c.changes, []);
+  assert.equal(upstream.calls.length, 0);
 });
 
-test("the Worker reads the copy map and files a client's outcome on the mapped party", async (t) => {
+test("an old role missing from the Engine copy is a final refusal", async (t) => {
+  const upstream = engine(t, () => Response.json({ error: "old_role_not_found" }, { status: 404 }));
+  const c = legacy({ subject: "vendor", writes: true });
+  const args = { idempotency_key: key, ref: roleRefs.vendor, description: "Send sample measurements" };
+  await assert.rejects(executeRegisteredTool(c, agent, "set-next-action", args, upstream.env), {
+    payload: { error: "engine_assistant_refused", engine_status: 404, engine_error: "old_role_not_found" },
+  });
+  assert.equal(upstream.calls.length, 1);
+  assert.deepEqual(c.changes, []);
+});
+
+test("log-outreach refuses with the Engine on and points to the routed verbs", async (t) => {
+  const upstream = engine(t, () => assert.fail("outreach reached the engine"));
+  const c = legacy({ subject: "client", writes: true });
+  await assert.rejects(executeRegisteredTool(c, agent, "log-outreach", {
+    idempotency_key: key, ref: roleRefs.client, channel: "call", outcome: "connected", summary: "Sample outreach",
+  }, upstream.env), (error: unknown) => {
+    const response = publicError(error);
+    assert.equal(response.error, "engine_assistant_outreach_unavailable");
+    assert.match(response.hint, /complete-action.*log-activity/);
+    return true;
+  });
+  assert.deepEqual(c.changes, []);
+  assert.equal(upstream.calls.length, 0);
+});
+
+test("the Worker files a client outcome on the party returned by the Engine", async (t) => {
   const upstream = engine(t, (_, path) =>
-    Response.json(path === "/jobs/activities" ? { activity_id: savedId } : { next_step_id: savedId, status: "done" }),
+    Response.json(path === "/jobs/activities" ? { activity_id: savedId } : { next_step_id: savedId, status: "done", party_id: copiedParty }),
   );
   const actor: unknown = worker(t, legacy({ subject: "client" }).query);
   const env = {
     ...upstream.env,
     DATABASE_URL_WRITER: "postgres://fixture@synthetic.invalid/fixture",
-    ENGINE_ASSISTANT_PARTY_MAP: { get: async (id: string) => (id === deal ? copiedParty : null) },
   };
   const outcome = "The sample was sent.";
   const reply = record(
@@ -479,7 +495,7 @@ test("the Worker reads the copy map and files a client's outcome on the mapped p
   assert.deepEqual(
     upstream.calls.map(({ path, body }) => [path, body]),
     [
-      ["/jobs/next-steps/complete", { idempotency_key: key, party_id: copiedParty }],
+      ["/jobs/next-steps/complete", { idempotency_key: key, old_role: { kind: "client", id: deal } }],
       [
         "/jobs/activities",
         {
@@ -491,6 +507,36 @@ test("the Worker reads the copy map and files a client's outcome on the mapped p
       ],
     ],
   );
+});
+
+test("confirming an email step rechecks the proposal and saves only to the Engine", async (t) => {
+  const upstream = engine(t, () => Response.json({ next_step_id: savedId, party_id: copiedParty }));
+  const joe = { id: agent.id, slug: "joe", human: true };
+  const args = { activity_id: savedId, evidence_quote: "Send the sample by Friday",
+    text: "Send the sample", next_date: "2026-11-20", owner: "dell" };
+  const c = {
+    async query(sql: string) {
+      if (sql.includes("select email_context"))
+        return { rows: [] };
+      assert.match(sql, /^select \* from v_email_non_deal_step/);
+      return { rows: [{ subject_type: "client", subject_id: deal, activity_id: savedId,
+        detail: args.evidence_quote, occurred_at: "2026-11-18T14:00:00Z", actions: [] }] };
+    },
+  };
+  const preview = record(await executeRegisteredTool(c, joe, "preview-email-next-step", args));
+  const confirmation = { ...args, idempotency_key: key, proposal_digest: preview.proposal_digest };
+  await assert.rejects(executeRegisteredTool(c, joe, "confirm-email-next-step",
+    { ...confirmation, text: "Send the wrong sample" }, upstream.env),
+    { payload: { error: "email_next_step_proposal_stale" } });
+  assert.equal(upstream.calls.length, 0);
+  const result = record(await executeRegisteredTool(c, joe, "confirm-email-next-step", confirmation, upstream.env));
+  assert.equal(result.status, "confirmed");
+  assert.equal(result.next_action_id, savedId);
+  assert.deepEqual(upstream.calls.map(({ path, body }) => [path, body]), [
+    ["/jobs/next-steps", { idempotency_key: derivedIdempotencyKey("email-next-action", key),
+      old_role: { kind: "client", id: deal }, what: args.text, due_on: args.next_date,
+      owner: args.owner, replaces: "current" }],
+  ]);
 });
 
 test("the Worker files a deal note and Home review without running legacy after-commit work", async (t) => {

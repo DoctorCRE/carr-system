@@ -5,12 +5,16 @@ type EngineEnv = {
   ENGINE_URL?: string;
   ENGINE_ACCESS_CLIENT_ID?: string;
   ENGINE_ACCESS_CLIENT_SECRET?: string;
-  ENGINE_ASSISTANT_PARTY_MAP?: { get(key: string): Promise<string | null> };
 };
 
-type DealSubject = { deal_id: string; party_id?: never };
-type PartySubject = { party_id: string; deal_id?: never };
-type StepSubject = DealSubject | PartySubject;
+export function assistantOldRole(kind: unknown, id: string) {
+  if (kind === "lead" || kind === "client" || kind === "vendor") return { kind, id };
+  return null;
+}
+
+type OldRoleSubject = { old_role: NonNullable<ReturnType<typeof assistantOldRole>> };
+type DealSubject = { deal_id: string };
+type PartySubject = { party_id: string };
 
 type Save =
   | {
@@ -21,7 +25,7 @@ type Save =
         kind: string;
         happened_at?: string;
         summary: string;
-        about: StepSubject[];
+        about: (DealSubject | PartySubject)[];
       };
     }
   | {
@@ -32,12 +36,13 @@ type Save =
         what: string;
         owner?: string;
         due_on?: string;
-      } & ((DealSubject & { replaces: "current" }) | (PartySubject & { replaces?: never }));
+        replaces: "current";
+      } & (DealSubject | OldRoleSubject);
     }
   | {
       path: "/jobs/next-steps/complete";
       id: "next_step_id";
-      body: { idempotency_key: string } & StepSubject;
+      body: { idempotency_key: string } & (DealSubject | PartySubject | OldRoleSubject);
     }
   | {
       path: "/jobs/activities/deal-note";
@@ -53,16 +58,6 @@ type Save =
 const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const isUuid = (value: unknown): value is string => typeof value === "string" && uuid.test(value);
 export const engineErrorSlug = /^[a-z][a-z0-9_]{0,63}$/;
-
-export async function copiedAssistantPartyId(env: EngineEnv, oldRoleId: string) {
-  const map = env.ENGINE_ASSISTANT_PARTY_MAP;
-  if (!map) throw new ToolError({ error: "engine_assistant_configuration" });
-  const partyId = await map.get(oldRoleId).catch(() => {
-    throw new ToolError({ error: "engine_assistant_unavailable" });
-  });
-  if (!isUuid(partyId)) throw new ToolError({ error: "engine_assistant_party_unmapped" });
-  return partyId;
-}
 
 function dealNoteReceipt(result: Record<string, unknown>, hasPlan: boolean) {
   const { next_step_id, next_step_required, proposal_id } = result;
@@ -133,6 +128,10 @@ export async function saveAssistantChange(env: EngineEnv, partner: string, save:
       const note = dealNoteReceipt(result, save.body.plan !== undefined);
       if (!note) continue;
       return { ...receipt, ...note };
+    }
+    if ("old_role" in save.body) {
+      if (!isUuid(result.party_id)) continue;
+      return { ...receipt, party_id: result.party_id };
     }
     return receipt;
   }

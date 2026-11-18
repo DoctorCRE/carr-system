@@ -4,9 +4,9 @@ The doors are fixed in the engine repository's docs/new-database.md, "Doors the 
 system calls". The bridge calls them only when the capture config sets engine_calls;
 otherwise nothing here runs and the call's suggestions go to the capture Worker as before.
 
-Door 19 stores the call and its per-deal notes. Phase moves and tasks for review use
-door 21. Automatic next steps use door 18, with final refusals kept as suggestions
-for review. Email drafts stay with the capture Worker.
+Door 19 stores the call and its per-deal notes. Automatic phase moves use door 16
+and automatic next steps use door 18. Door 21 keeps the changes that need review.
+Email drafts stay with the capture Worker.
 
 Keys derive from the session and the item, so a crashed run's retry converges. A 5xx or a
 lost connection is retried next run with the same key, and a refusal of the caller itself
@@ -42,7 +42,6 @@ class Move:
     body: Dict[str, Any]
     fallback: Optional[Dict[str, Any]] = None
     answer: str = "proposal_id"
-    refused: Optional[str] = None
 
 
 def connector(config: Dict[str, Any]) -> Optional[Connect]:
@@ -138,9 +137,12 @@ def moves(session_dir: Path, report: Dict[str, Any], recorder: str) -> Iterator[
             name = f"deal_updates:{index}:phase_move"
             target = {"to": phase["value"], **({"on": phase["started_on"]} if phase.get("started_on") else {})}
             suggestion = proposal(name, "phase_move", update["deal_id"], update["evidence"], **target)
-            # Door 16's latest change ID cannot establish the phase at the time of the call.
-            refused = "missing_phase_chronology" if phase.get("apply") == "automatic" else None
-            yield Move(phase, name, PROPOSALS, suggestion, refused=refused)
+            if phase.get("apply") == "automatic":
+                saved = {"idempotency_key": key(session, name, "phase"), "phase": target}
+                yield Move(phase, name, f"/jobs/deals/{update['deal_id']}/changes", saved, suggestion,
+                           answer="deal_id")
+            else:
+                yield Move(phase, name, PROPOSALS, suggestion)
 
 
 def worker_drafts(shaped: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -160,9 +162,9 @@ class Run:
         self.outcomes: Dict[str, Dict[str, Any]] = {}
         self.blocked = False
 
-    def request(self, path: str, body: Dict[str, Any]) -> Optional[engine_mail.Reply]:
+    def request(self, path: str, body: Optional[Dict[str, Any]] = None) -> Optional[engine_mail.Reply]:
         """The final answer, or None when it must be retried next run."""
-        reply = self.door("POST", path, json.dumps(body).encode())
+        reply = self.door("GET", path, None) if body is None else self.door("POST", path, json.dumps(body).encode())
         judged = engine_mail.verdict(reply)
         if judged in ("retry", "caller"):
             self.log(f"ENGINE {judged} session={self.session_dir.name} path={path} "
@@ -203,20 +205,22 @@ class Run:
 
     def send(self, move: Move, activity_id: Optional[str]) -> Dict[str, Any]:
         path, body, answer = move.path, move.body, move.answer
-        reason = move.refused
+        reason = None
         if move.fallback is not None:
             reason = (move.item.get("engine_pending") or {}).get("refused")
             if reason is None:
-                if confident(body["what"]):
+                if move.fallback["kind"] == "phase_move":
+                    reply = self.apply_phase(move, move.fallback["deal_id"])
+                elif confident(body["what"]):
                     reply = self.request(path, body)
-                    if reply is None:
-                        return {}
-                    if engine_mail.verdict(reply) == "done":
-                        return {**settled(reply, answer), "outcome": "applied"}
-                    reason = reply.error
                 else:
-                    reason = "below_confidence_bar"
-                self.checkpoint_refusal(move, reason)
+                    reply = engine_mail.Reply(422, {"error": "below_confidence_bar"})
+                if reply is None:
+                    return {}
+                if engine_mail.verdict(reply) == "done":
+                    return {**settled(reply, answer), "outcome": "applied"}
+                reason = reply.error
+                self.checkpoint(move, refused=reason)
             path, body, answer = PROPOSALS, move.fallback, "proposal_id"
         refused = {"refused": reason} if reason is not None else {}
         if path == PROPOSALS:
@@ -226,11 +230,48 @@ class Run:
         reply = self.request(path, body)
         return {**settled(reply, answer), **refused} if reply else {}
 
-    def checkpoint_refusal(self, move: Move, reason: str) -> None:
+    def apply_phase(self, move: Move, deal_id: str) -> Optional[engine_mail.Reply]:
+        pending = (move.item.get("engine_pending") or {}).get("request")
+        if pending is not None:
+            return self.request(move.path, pending)
+
+        read = self.request(f"/jobs/deals/{deal_id}")
+        if read is None or engine_mail.verdict(read) != "done":
+            return read
+        deal = read.body
+        current, target = deal.get("phase"), move.body["phase"]
+        is_requested_deal = deal.get("deal_id") == deal_id
+        if is_requested_deal and current == target["to"]:
+            return engine_mail.Reply(200, {"deal_id": deal_id})
+
+        saved, seen = deal.get("phase_saved_at"), deal.get("change_id")
+        phase_saved = timestamp(saved)
+        has_phase_fields = {"phase", "phase_saved_at"} <= deal.keys()
+        has_change_id = type(seen) is int and seen >= 0
+        has_valid_phase = (saved is None if current is None else
+                           isinstance(current, str) and bool(current) and phase_saved is not None)
+        if not (is_requested_deal and has_phase_fields and has_change_id and has_valid_phase):
+            return engine_mail.Reply(422, {"error": "missing_phase_chronology"})
+
+        started = (post_call.read_json(self.session_dir / "meta.json") or {}).get("started")
+        call_start = timestamp(started)
+        if call_start is None:
+            return engine_mail.Reply(422, {"error": "missing_phase_chronology"})
+        if phase_saved is not None and phase_saved >= call_start:
+            return engine_mail.Reply(409, {"error": "newer_change_exists"})
+        if current in {"closed", "invoiced", "dead"}:
+            return engine_mail.Reply(422, {"error": "phase_not_eligible"})
+
+        request = {**move.body, "seen_change_id": seen, "phase": {"from": current, **target}}
+        # A lost save response must replay the same body, even if the deal has moved.
+        self.checkpoint(move, request=request)
+        return self.request(move.path, request)
+
+    def checkpoint(self, move: Move, **pending: Any) -> None:
         with post_call.update_report(self.session_dir) as report:
             current = next(current for current in moves(self.session_dir, report, self.recorder)
                            if current.key == move.key)
-            current.item.setdefault("engine_pending", {})["refused"] = reason
+            current.item["engine_pending"] = pending
 
     def record(self, stored: Dict[str, Any]) -> None:
         with post_call.update_report(self.session_dir) as report:
@@ -247,7 +288,7 @@ class Run:
                     reason = outcome["refused"]
                     move.item.update(apply="review", review_reason=(
                         "Check whether the deal moved after the call before applying this phase change."
-                        if reason == "missing_phase_chronology"
+                        if reason in {"missing_phase_chronology", "newer_change_exists"}
                         else f"Could not apply automatically ({reason}); review it here."))
             changes = [update[field] for update in report.get("deal_updates", [])
                        for field in post_call.AUTOMATIC_FIELDS if isinstance(update.get(field), dict)]
@@ -259,6 +300,16 @@ class Run:
 def confident(what: str) -> bool:
     """The record layer's bar the bridge's own does not hold: two words a person can act on."""
     return sum(1 for word in what.split() if re.search(r"[a-z0-9]", word, re.IGNORECASE)) >= 2
+
+
+def timestamp(value: Any) -> Optional[datetime]:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
 
 
 def settled(reply: engine_mail.Reply, id_field: str) -> Dict[str, Any]:
