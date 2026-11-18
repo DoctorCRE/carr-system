@@ -171,6 +171,24 @@ class EngineCalls(unittest.TestCase):
                                        evidence="Move this deal into negotiation")
         post_call.write_private(self.session / post_call.REPORT_FILE, data)
 
+    def test_partner_move_to_the_stated_phase_is_already_applied(self):
+        self.phase_report("automatic", on="2026-10-26")
+        engine = FakeEngine({"/jobs/proposals": [Reply(201, {"proposal_id": "task", "status": "pending"}),
+                                                  Reply(422, {"error": "phase_not_eligible"})]})
+        engine.deal.update(phase="negotiation", change_id=8, phase_saved_at="2026-10-26T14:00:00Z")
+
+        self.assertTrue(self.publish(engine))
+
+        saved = self.saved()
+        phase = saved["deal_updates"][0]["phase_move"]
+        self.assertEqual((phase["apply"], phase["engine"]),
+                         ("automatic", {"outcome": "applied", "deal_id": DEAL_A}))
+        self.assertTrue(phase["applied_automatically"])
+        self.assertEqual(saved["automatic"]["applied"], 1)
+        self.assertEqual([call for call in engine.calls if call[1].startswith("/jobs/deals/")],
+                         [("GET", f"/jobs/deals/{DEAL_A}", None)])
+        self.assertFalse(any(body and body.get("kind") == "phase_move" for _, _, body in engine.calls))
+
     def test_later_partner_phase_survives_an_automatic_call_instruction(self):
         self.phase_report("automatic", on="2026-10-26")
         engine = FakeEngine()

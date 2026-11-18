@@ -239,22 +239,29 @@ class Run:
         if read is None or engine_mail.verdict(read) != "done":
             return read
         deal = read.body
-        current, saved, seen = deal.get("phase"), deal.get("phase_saved_at"), deal.get("change_id")
+        current, target = deal.get("phase"), move.body["phase"]
+        is_requested_deal = deal.get("deal_id") == deal_id
+        if is_requested_deal and current == target["to"]:
+            return engine_mail.Reply(200, {"deal_id": deal_id})
+
+        saved, seen = deal.get("phase_saved_at"), deal.get("change_id")
+        phase_saved = timestamp(saved)
+        has_phase_fields = {"phase", "phase_saved_at"} <= deal.keys()
+        has_change_id = type(seen) is int and seen >= 0
+        has_valid_phase = (saved is None if current is None else
+                           isinstance(current, str) and bool(current) and phase_saved is not None)
+        if not (is_requested_deal and has_phase_fields and has_change_id and has_valid_phase):
+            return engine_mail.Reply(422, {"error": "missing_phase_chronology"})
+
         started = (post_call.read_json(self.session_dir / "meta.json") or {}).get("started")
-        call_start, phase_saved = timestamp(started), timestamp(saved)
-        if (deal.get("deal_id") != deal_id or not {"phase", "phase_saved_at"} <= deal.keys()
-                or type(seen) is not int or seen < 0 or call_start is None
-                or (current is None and saved is not None)
-                or (current is not None and (not isinstance(current, str) or not current or phase_saved is None))):
+        call_start = timestamp(started)
+        if call_start is None:
             return engine_mail.Reply(422, {"error": "missing_phase_chronology"})
         if phase_saved is not None and phase_saved >= call_start:
             return engine_mail.Reply(409, {"error": "newer_change_exists"})
         if current in {"closed", "invoiced", "dead"}:
             return engine_mail.Reply(422, {"error": "phase_not_eligible"})
 
-        target = move.body["phase"]
-        if current == target["to"]:
-            return engine_mail.Reply(200, {"deal_id": deal_id})
         request = {**move.body, "seen_change_id": seen, "phase": {"from": current, **target}}
         # A lost save response must replay the same body, even if the deal has moved.
         self.checkpoint(move, request=request)
