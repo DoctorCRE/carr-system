@@ -30,7 +30,7 @@ import os
 from pathlib import Path
 import re
 import stat
-from typing import Callable
+from typing import Callable, Optional
 import urllib.error
 from urllib.parse import quote
 import urllib.request
@@ -59,7 +59,7 @@ class Reply:
         return error if isinstance(error, str) and SLUG.fullmatch(error) else 'unreadable'
 
 
-Door = Callable[[str, str, bytes | None], Reply]
+Door = Callable[[str, str, Optional[bytes]], Reply]
 
 
 def verdict(reply: Reply) -> str:

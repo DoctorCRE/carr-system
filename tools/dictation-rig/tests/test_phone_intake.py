@@ -614,6 +614,30 @@ class PhoneIntakeTests(unittest.TestCase):
         status = phone_intake.post_call.read_json(bad / phone_intake.post_call.STATUS_FILE)
         self.assertEqual(status['extraction_attempts'], 3)
         self.assertEqual(status['state'], 'needs_attention')
+
+    def test_engine_switch_sends_the_summary_with_the_call_not_to_the_phone_session(self):
+        phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
+        session = self.root / f"phone-{self.metadata['session_id']}"
+        bridge = phone_intake.bridge_module()
+        urls = []
+
+        def http(_method, url, _body, _headers):
+            urls.append(url)
+            return 200, {'session_token': 'fixture', 'ok': True}
+
+        phone_intake.post_call.write_private(session / phone_intake.post_call.REPORT_FILE, {'report': {}})
+        with patch.object(phone_intake, 'bridge_module', return_value=bridge), \
+             patch.object(bridge, 'http_request', side_effect=http), \
+             patch.object(bridge, 'load_config_raw', return_value={'engine_calls': True,
+                                                                   'engine_credentials': '/private/engine.env'}), \
+             patch.object(bridge, 'publish_cmd', return_value=0), \
+             patch.object(bridge, 'poll_cmd') as poll, \
+             patch.object(phone_intake, 'extract', return_value={'state': 'ready_review'}):
+            result = phone_intake.process_pending(self.root, {'base_url': 'https://api.example.test'}, 'fixture')
+        self.assertEqual(result, {'ready': 1, 'pending': 0})
+        self.assertFalse([url for url in urls if url.endswith('/report')])
+        poll.assert_called_once()
+
     def test_exhausted_extraction_posts_attention_in_the_same_sweep(self):
         import post_call
         phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))

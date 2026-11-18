@@ -1246,9 +1246,11 @@ def _deal_check_unavailable(result: dict[str, Any], session_dir: Path, exc: Exce
 
 
 def _report_candidates(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """The items the capture Worker holds or will hold; an item the engine answered is not one."""
     items = [item for key in ("joe_tasks", "dell_tasks", "deal_updates", "draft_proposals") for item in report.get(key, [])]
-    return items + [update[field] for update in report.get("deal_updates", [])
-                    for field in ("next_step", "phase_move") if update.get(field) is not None]
+    items += [update[field] for update in report.get("deal_updates", [])
+              for field in ("next_step", "phase_move") if update.get(field) is not None]
+    return [item for item in items if "engine" not in item]
 
 
 def apply_candidate_statuses(session_dir: Path, statuses: dict[str, str]) -> dict[str, Any]:
