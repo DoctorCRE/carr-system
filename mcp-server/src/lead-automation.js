@@ -185,9 +185,11 @@ export function leadAutomationTools({ withEnvelope, writeEvent, ToolError, invoi
         schedule,timezone,actor.id]);
       draftsPrepared += prepared.rowCount;
     }
-    const invoice_closes = await invoices.apply(c, actor, args);
+    const invoice_closes = args.engine_invoice_closes === true ? [] : await invoices.apply(c, actor, args);
     return { ok: true, contract: LEAD_AUTOMATION_CONTRACT, moves, invoice_closes, drafts_prepared: draftsPrepared, sent: false };
   }
+  const invoiceMode = { engine_invoice_closes: { type: "boolean" } };
+  const previewInvoices = (c, args) => args?.engine_invoice_closes === true ? [] : invoices.preview(c);
   return {
     "record-lead-contact": {
       write: true, description: "Record derived contact evidence from a local mail or calendar reader. Match the counterparty address against the lead's party; a domain-only match remains weak. No source body or credentials accepted. Never sends.",
@@ -229,19 +231,19 @@ export function leadAutomationTools({ withEnvelope, writeEvent, ToolError, invoi
     },
     "lead-stage-preview": {
       write: false, description: "Dry run: list evidence-backed lead moves and weak proposals without changing business records or preparing drafts.",
-      inputSchema: schema({}), handler: async c => {
+      inputSchema: schema(invoiceMode), handler: async (c, actor, args) => {
         const s = await snapshot(c);
-        return { contract: LEAD_AUTOMATION_CONTRACT, dry_run: true, moves: planLeadMoves(s.leads,s.activities,s.drafts,s.now), invoice_closes: await invoices.preview(c) };
+        return { contract: LEAD_AUTOMATION_CONTRACT, dry_run: true, moves: planLeadMoves(s.leads,s.activities,s.drafts,s.now), invoice_closes: await previewInvoices(c,args) };
       },
     },
     "advance-leads": {
       write: true, description: "Run the lead stage job over captured local mail and calendar activities. Strong evidence advances one step with provenance; weak evidence becomes a proposal. Prepare approval-only first-contact drafts for 6 am local tomorrow. Never sends. dry_run performs the same planning without business writes.",
-      inputSchema: { ...schema({ idempotency_key: { type: "string" }, dry_run: { type: "boolean" }, time_zone: { type: "string" } }), required: ["idempotency_key"] },
+      inputSchema: { ...schema({ idempotency_key: { type: "string" }, dry_run: { type: "boolean" }, time_zone: { type: "string" }, ...invoiceMode }), required: ["idempotency_key"] },
       handler: async (c, actor, args) => {
         nextMorning(new Date(),args.time_zone || "America/Chicago"); // Validate before writing.
         if (args.dry_run) {
           const s = await snapshot(c);
-          return { contract: LEAD_AUTOMATION_CONTRACT, dry_run: true, moves: planLeadMoves(s.leads,s.activities,s.drafts,s.now), invoice_closes: await invoices.preview(c), sent: false };
+          return { contract: LEAD_AUTOMATION_CONTRACT, dry_run: true, moves: planLeadMoves(s.leads,s.activities,s.drafts,s.now), invoice_closes: await previewInvoices(c,args), sent: false };
         }
         return withEnvelope(c,actor,"advance-leads",args,() => apply(c,actor,args));
       },
