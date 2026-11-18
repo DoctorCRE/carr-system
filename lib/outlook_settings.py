@@ -98,7 +98,21 @@ _PATHS = frozenset({'repo', 'profile', 'vendor', 'copy_helper', 'folder_guide', 
 
 def load_settings(home: Path | None = None) -> OutlookSettings:
     path = (home or Path.home()) / '.config/carr/outlook.json'
+    return _validate_settings(path, _read_settings(path))
 
+
+def load_cadence_settings() -> OutlookSettings | None:
+    path = Path.home() / '.config/carr/outlook.json'
+    try:
+        values = _read_settings(path)
+    except (SettingsError, OSError):
+        return None
+    if values.get('engine_cadence') is not True:
+        return None
+    return _validate_settings(path, values)
+
+
+def _read_settings(path: Path) -> dict:
     def fail(field: str, reason: str):
         raise SettingsError(f'{path}: field {field}: {reason}')
 
@@ -125,6 +139,13 @@ def load_settings(home: Path | None = None) -> OutlookSettings:
             fail('json', 'invalid JSON')
     if not isinstance(values, dict):
         fail('json', 'must be an object')
+    return values
+
+
+def _validate_settings(path: Path, values: dict) -> OutlookSettings:
+    def fail(field: str, reason: str):
+        raise SettingsError(f'{path}: field {field}: {reason}')
+
     expected = {field.name for field in fields(OutlookSettings)} - {'source'}
     if 'model' in values and (not isinstance(values['model'], str)
                               or not re.fullmatch(r'[a-z0-9][a-z0-9.-]{0,63}', values['model'])):

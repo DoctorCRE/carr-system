@@ -16,6 +16,7 @@ from uuid import UUID
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.engine_mail import Reply
+from ops.outlook_test_support import write_settings
 
 with patch.dict(sys.modules, {"psycopg": types.ModuleType("psycopg")}):
     from pipelines import cadence_engine as cadence
@@ -39,9 +40,10 @@ class CadenceTests(unittest.TestCase):
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
-        self.home = Path(folder.name)
+        self.home = Path(folder.name).resolve()
         self.report = self.home / "cadence.md"
         self.config = self.home / ".config/carr/outlook.json"
+        self.enabled = False
         self.rules = []
         self.spawns = []
         self.sql = []
@@ -61,7 +63,7 @@ class CadenceTests(unittest.TestCase):
             rows = []
         elif "from event" in statement:
             rows = [(key,) for key in self.spawns]
-        elif not self.config.exists():
+        elif not self.enabled:
             rows = next((rows for fragment, rows in self.legacy_rows.items() if fragment in statement), [])
         else:
             self.fail(f"Unexpected old database access: {statement}")
@@ -104,20 +106,19 @@ class CadenceTests(unittest.TestCase):
               patch.dict(os.environ, {"CARR_DB_JOBS_URL": "synthetic-db"}, clear=True),
               patch.object(sys, "argv", argv),
               patch.object(cadence.psycopg, "connect", return_value=contextlib.nullcontext(transaction), create=True),
-              patch.object(cadence.outlook_settings, "load_settings", return_value=types.SimpleNamespace(
-                  engine_cadence=True, engine_credentials=self.home / "access.env")),
               patch("lib.engine_mail.connect", return_value=self.door) as connect,
               contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr)):
             result = cadence.main()
-        if self.config.exists():
+        if self.enabled:
             connect.assert_called_once_with(self.home / "access.env", job="cadence")
         else:
             connect.assert_not_called()
         return result, stdout.getvalue() + stderr.getvalue()
 
     def switch_on(self):
-        self.config.parent.mkdir(parents=True)
-        self.config.touch()
+        self.enabled = True
+        write_settings(self.home, self.home / "repo", engine_cadence=True,
+                       engine_credentials=str(self.home / "access.env"))
 
     @property
     def posts(self):
@@ -180,9 +181,54 @@ class CadenceTests(unittest.TestCase):
         result, output = self.run_cadence()
         self.assertEqual(result, 0)
         self.assertEqual(self.posts[0], self.posts[1])
-        self.assertIn("spawned 0", output)
+        self.assertIn("spawned 1", output)
+        self.assertIn("DoctorCRE Engine apply", self.report.read_text())
         self.assertEqual(self.run_cadence("2026-01-16")[0], 0)
         self.assertEqual(len(self.receipts), 1)
+        self.assertIn("already spawned for this cadence rule and date", self.report.read_text())
+
+    def test_recovered_save_blocks_a_second_step_for_same_party_and_owner(self):
+        self.switch_on()
+        self.rules = [rule("n-1", "nurture", "client", "on_complete", 10),
+                      rule("l-1", "lease_event", "lead", "on_date", 30)]
+        self.items = {("clients", None): [subject("a")],
+                      ("leads", None): [subject("a", lease="2026-02-01")],
+                      ("next_steps", "done"): [done("1", "a", owner="owner-a")]}
+        self.failures = [(Reply(503, {"error": "database_unavailable"}), True)]
+        result, output = self.run_cadence()
+        self.assertEqual(result, 0)
+        self.assertEqual(len(self.receipts), 1)
+        self.assertEqual(len(self.posts), 2)
+        self.assertEqual(self.posts[0], self.posts[1])
+        self.assertIn("spawned 1", output)
+
+    def test_first_attempt_replay_allows_newer_completion(self):
+        self.switch_on()
+        self.rules = [rule("n-1", "nurture", "client", "on_complete", 10)]
+        self.items = {("clients", None): [subject("a")],
+                      ("next_steps", "done"): [done("1", "a")]}
+        self.assertEqual(self.run_cadence()[0], 0)
+        self.items[("next_steps", "done")].append(done("2", "a", at="2026-01-11T12:00:00Z"))
+        result, output = self.run_cadence()
+        self.assertEqual(result, 0)
+        self.assertEqual(len(self.receipts), 2)
+        self.assertIn("spawned 1", output)
+
+    def test_off_ignores_broken_outlook_settings(self):
+        self.legacy_rows = {"from actor": [("automation",)]}
+        self.config.parent.mkdir(parents=True)
+        for content in ("{", '{"engine_cadence": false}'):
+            with self.subTest(content=content):
+                self.config.write_text(content)
+                self.config.chmod(0o600)
+                self.assertEqual(self.run_cadence()[0], 0)
+
+    def test_explicit_on_still_validates_outlook_settings(self):
+        self.switch_on()
+        self.config.write_text('{"engine_cadence": true}')
+        with patch.object(Path, "home", return_value=self.home):
+            with self.assertRaises(ValueError):
+                cadence.configured_door()
 
     def test_final_refusals_never_fall_back_to_old_writes(self):
         self.switch_on()
