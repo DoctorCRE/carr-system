@@ -1,3 +1,4 @@
+// Send assistant saves to DoctorCRE Engine from the Worker.
 import { ToolError } from "./tool-error.ts";
 
 type EngineEnv = {
