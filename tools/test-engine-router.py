@@ -24,7 +24,7 @@ ASK = 'Can you send the floor plan by Friday?'
 BROKER = 'broker@brokerage.example'
 SENDER = {'address': 'tenant@clinic.example', 'name': 'Synthetic Tenant', 'party_id': CLIENT, 'internal': False,
           'client_party_ids': [], 'role': 'client'}
-TO_BROKER = {'address': BROKER, 'name': 'Synthetic Broker', 'kind': 'to', 'party_id': None, 'internal': True,
+TO_BROKER: dict = {'address': BROKER, 'name': 'Synthetic Broker', 'kind': 'to', 'party_id': None, 'internal': True,
              'client_party_ids': [], 'role': None}
 OPEN: dict = {'deal_id': DEAL, 'name': 'Synthetic clinic lease', 'phase': 'site_selection', 'kind': 'lease',
         'client_party_id': CLIENT, 'client_name': 'Synthetic Clinic', 'property': 'Synthetic building', 'city': None,
