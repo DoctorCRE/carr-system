@@ -26,6 +26,7 @@ import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dea
 import { canonicalJson } from "./artifact-trust.js";
 import { safeInteger, integerFields } from "./safe-integer.ts";
 import { invoiceTrackerTools } from "./invoice-tracker.ts";
+import { saveAssistantChange } from "./engine-assistant.ts";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.ts";
 import { readDealChecklist } from "./deal-checklist.ts";
@@ -108,7 +109,7 @@ import { tourMapPromotionTools } from "./tour-map-promotion.js";
 import { tourArtifactTools } from "./tour-artifacts.js";
 import { DEAL_ROOM_FIELDS, assertDealRoomField, stripDealPlaceholders } from "./dealroom.ts";
 import { authenticatedIdentity, authorizationClassForActor, organizationTenantForActor,
-         permittedActionOwnerSlugs, personalScopeForActor } from "./identity.js";
+         permittedActionOwnerSlugs, personalScopeForActor, isKnownPartner } from "./identity.js";
 import { automaticApplyHold } from "./call-auto-apply.ts";
 import { canExercisePartnerAuthority, partnerAuthoritySlugForActor } from "./partner-authority.js";
 import { isPersonalRecordOwner } from "./personal-record-ownership.ts";
@@ -235,6 +236,67 @@ export function auditIdentity(actor) {
 }
 
 const UUID_KEY = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+
+function assertActivityTime(occurred_at) {
+  if (occurred_at && Date.parse(occurred_at) > Date.now() + 5 * 60 * 1000)
+    throw new ToolError({ error: "occurred_at_in_future", occurred_at,
+      why: "occurred_at records when a touch HAPPENED. A future date makes the subject " +
+           "permanently un-stale — every staleness measure counts from last_touch, so a " +
+           "row dated ahead of today can never surface as gone quiet.",
+      hint: "If this already happened, use its real date. If it is SCHEDULED, it is not a " +
+            "touch yet: set-next-action carries the ball you owe, and add-critical-date " +
+            "carries a dated obligation on a deal." });
+}
+
+const ENGINE_ACTIVITY_FIELDS = new Set(['idempotency_key', 'ref', 'kind', 'summary', 'detail', 'owed', 'occurred_at']);
+
+async function saveAssistantVerb(client, actor, verb, args, env) {
+  const partner = partnerAuthoritySlugForActor(actor);
+  if (!partner) return;
+  // Door 19 hashes happened_at, so a replay needs the timestamp the caller supplied.
+  const activity = verb === 'log-activity' && ['call', 'meeting', 'note'].includes(args.kind) &&
+    typeof args.occurred_at === 'string' && /T.*(?:Z|[+-]\d\d:\d\d)$/.test(args.occurred_at) &&
+    isCalendarDate(args.occurred_at.slice(0, 10)) && Number.isFinite(Date.parse(args.occurred_at)) &&
+    Object.keys(args).every(field => ENGINE_ACTIVITY_FIELDS.has(field));
+  const step = verb === 'set-next-action' && !Object.hasOwn(args, 'expected_action') && !args.work_request;
+  if (!activity && !step) return;
+
+  const subject = await resolveSubject(client, args.ref);
+  if (subject.type !== 'deal') return;
+
+  const { idempotency_key } = args;
+  if (!UUID_KEY.test(idempotency_key)) throw new ToolError({ error: 'invalid_idempotency_key', field: 'idempotency_key' });
+
+  if (activity) {
+    assertActivityTime(args.occurred_at);
+    const owed = args.owed?.trim() ? `Information still missing\n${args.owed}` : null;
+    const { id, replayed } = await saveAssistantChange(env, partner, {
+      path: '/jobs/activities', id: 'activity_id', body: {
+        idempotency_key, kind: args.kind, happened_at: args.occurred_at,
+        summary: [args.summary, args.detail, owed].filter(text => text?.trim()).join('\n\n'),
+        about: [{ deal_id: subject.id }],
+      },
+    });
+    return { ok: true, activity_id: id, subject, ...(replayed && { replayed }) };
+  }
+
+  const owner = args.owner === undefined || args.owner === null || args.owner === ''
+    ? partner : String(args.owner).trim().toLowerCase();
+  const permitted = permittedActionOwnerSlugs(actor);
+  if (!permitted.includes(owner))
+    throw new ToolError({ error: 'owner_not_permitted', owner, permitted });
+  if (!isKnownPartner(owner)) return;
+
+  assertDealRoomField('next_date', args.due_on || null, ToolError);
+  const { id, replayed } = await saveAssistantChange(env, partner, {
+    path: '/jobs/next-steps', id: 'next_step_id', body: {
+      idempotency_key, deal_id: subject.id, what: args.description, replaces: 'current',
+      ...(args.due_on && { due_on: args.due_on }),
+      ...(owner !== partner && { owner }),
+    },
+  });
+  return { ok: true, next_action_id: id, subject, owner, ...(replayed && { replayed }) };
+}
 
 async function withEnvelope(client, actor, verb, args, fn) {
   const key = args.idempotency_key;
@@ -4214,21 +4276,7 @@ export const TOOLS = {
       //
       // The window is for CLOCK SKEW between a caller and the server, not for
       // scheduling: minutes, deliberately not hours.
-      const SKEW_MS = 5 * 60 * 1000;
-      if (args.occurred_at) {
-        const when = Date.parse(args.occurred_at);
-        // An unparseable date is a different problem; this guard judges future
-        // ones and does not invent a verdict on malformed input.
-        if (!Number.isNaN(when) && when > Date.now() + SKEW_MS)
-          throw new ToolError({ error: "occurred_at_in_future",
-            occurred_at: args.occurred_at,
-            why: "occurred_at records when a touch HAPPENED. A future date makes the subject " +
-                 "permanently un-stale — every staleness measure counts from last_touch, so a " +
-                 "row dated ahead of today can never surface as gone quiet.",
-            hint: "If this already happened, use its real date. If it is SCHEDULED, it is not a " +
-                  "touch yet: set-next-action carries the ball you owe, and add-critical-date " +
-                  "carries a dated obligation on a deal." });
-      }
+      assertActivityTime(args.occurred_at);
       if (args.email_source !== undefined && (args.kind !== 'email_in' ||
           args.email_source.mailbox_owner !== partnerAuthoritySlugForActor(actor)))
         throw new ToolError({ error: 'email_source_owner_mismatch' });
@@ -8858,7 +8906,7 @@ function isUnattendedActor(actor) {
   return actor?.unattended === true || actor?.via === "unattended-token";
 }
 
-export async function executeRegisteredTool(client, actor, name, args = {}) {
+export async function executeRegisteredTool(client, actor, name, args = {}, engineEnv = undefined) {
   if (actor?.via === "session-checkpoint-token" && !SESSION_CHECKPOINT_VERBS.includes(name))
     throw new ToolError({ error: "not_in_profile", verb: name, profile: "session-checkpoint-v1" });
   const tool = TOOLS[name];
@@ -8964,6 +9012,10 @@ export async function executeRegisteredTool(client, actor, name, args = {}) {
   // generic handling.
   try {
     if (!tool.write && name.includes('email')) await guardEmailAction(client,args,ToolError,false);
+    if (engineEnv?.ENGINE_ASSISTANT === 'true') {
+      const saved = await saveAssistantVerb(client, actor, name, args, engineEnv);
+      if (saved) return saved;
+    }
     const result = await tool.handler(client, actor, args);
     return await linkFutureWork(client, actor, name, args, result, writeEvent);
   } catch (e) {

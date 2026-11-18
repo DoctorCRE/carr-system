@@ -388,6 +388,12 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["human_only_verb_requires_verified_partner", "This operation requires verified partner authority."],
   ["unattended_runner_authority_not_admitted", "This operation is unavailable to unattended sessions."],
   ["actor_not_provisioned", "The authenticated actor is not provisioned."],
+  ["engine_assistant_configuration", "The assistant's engine connection is missing its settings."],
+  [
+    "engine_assistant_refused",
+    "DoctorCRE Engine refused the assistant save. Quote the correlation_id when reporting it.",
+  ],
+  ["engine_assistant_unavailable", "DoctorCRE Engine did not confirm the save. Retry with the same idempotency_key."],
   ["authority_connection_unavailable", "Partner authority is unavailable for this operation."],
   ["caller_authority_field_forbidden", "Remove caller-supplied authority fields."],
   ["unregistered_operation_fields", "Remove fields outside the documented input."],
