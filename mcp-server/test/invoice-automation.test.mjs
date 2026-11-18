@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {planInvoiceCloses,invoiceAutomation} from '../src/invoice-automation.js';
-import {planLeadMoves} from '../src/lead-automation.js';
+import {leadAutomationTools,planLeadMoves} from '../src/lead-automation.js';
 const now='2026-10-04T12:00:00Z', mailbox='invoices@example.test';
 const invoice={id:'invoice-example',status:'captured',deal_name:'Synthetic Lease',client_name:'Synthetic Practice',
   occurred_at:'2026-10-03T18:00:00-05:00',email_date:'2026-10-03',from_address:mailbox,evidence_ref:'local-mail:synthetic-invoice'};
@@ -67,4 +67,28 @@ test('ordered invoice planning simulates closes without mutating caller snapshot
   assert.equal(batch[1].needs_confirmation,'Deal has a different invoice date');
   assert.equal(batch[1].from_phase,'closed');
   assert.equal(deal.phase,'legal');assert.equal(deal.version,4);
+});
+
+test('engine invoice mode leaves legacy invoices unread and unapplied while preparing lead drafts', async () => {
+  const legacyInvoice = () => assert.fail('legacy invoice path was called');
+  const tools = leadAutomationTools({
+    withEnvelope: async (c, actor, verb, args, run) => run(),
+    invoices: { preview: legacyInvoice, apply: legacyInvoice },
+  });
+  const c = { query: async (sql) => {
+    if (sql === 'select now() as now') return { rows: [{ now }] };
+    if (sql.startsWith('insert into lead_contact_draft')) return { rowCount: 1 };
+    if (sql.includes('select l.id,l.party_id,l.owner_id,p.name')) {
+      return { rows: [{ id: 'lead-example', party_id: 'party-example', owner_id: 'owner-example' }] };
+    }
+    assert.match(sql, /^select/);
+    return { rows: [] };
+  }};
+  const args = { engine_invoice_closes: true };
+  const actor = { id: 'job-example' };
+  const preview = await tools['lead-stage-preview'].handler(c, actor, args);
+  const run = await tools['advance-leads'].handler(c, actor, args);
+  assert.deepEqual(preview.invoice_closes, []);
+  assert.deepEqual(run.invoice_closes, []);
+  assert.equal(run.drafts_prepared, 1);
 });
