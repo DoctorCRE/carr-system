@@ -26,7 +26,7 @@ import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dea
 import { canonicalJson } from "./artifact-trust.js";
 import { safeInteger, integerFields } from "./safe-integer.ts";
 import { invoiceTrackerTools } from "./invoice-tracker.ts";
-import { assistantOldRole, saveAssistantChange } from "./engine-assistant.ts";
+import { assistantOldRole, captureAssistantInvoice, saveAssistantChange } from "./engine-assistant.ts";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.ts";
 import { readDealChecklist } from "./deal-checklist.ts";
@@ -111,7 +111,7 @@ import { DEAL_ROOM_FIELDS, assertDealRoomField, stripDealPlaceholders } from "./
 import { authenticatedIdentity, authorizationClassForActor, organizationTenantForActor,
          permittedActionOwnerSlugs, personalScopeForActor, isKnownPartner } from "./identity.js";
 import { automaticApplyHold } from "./call-auto-apply.ts";
-import { canExercisePartnerAuthority, partnerAuthoritySlugForActor } from "./partner-authority.js";
+import { canExercisePartnerAuthority, mailboxOwnerForActor, partnerAuthoritySlugForActor } from "./partner-authority.js";
 import { isPersonalRecordOwner } from "./personal-record-ownership.ts";
 import { assertRegisteredOperation, mutationManifestIdentity, MutationRegistryRefusal } from "./mutation-registry.ts";
 import { readRuleEnforcementCoverage } from "./lifecycle-assurance.v5.js";
@@ -9079,6 +9079,13 @@ export async function executeRegisteredTool(client, actor, name, args = {}, engi
   try {
     if (!tool.write && name.includes('email')) await guardEmailAction(client,args,ToolError,false);
     if (engineEnv?.ENGINE_ASSISTANT === 'true') {
+      if (name === 'record-deal-invoice') {
+        const mailbox = mailboxOwnerForActor(actor);
+        if (!mailbox) throw new ToolError({ error: 'invoice_mailbox_identity_required' });
+        return await captureAssistantInvoice(engineEnv, mailbox, args);
+      }
+      if (name === 'undo-invoice-close') throw new ToolError({ error: 'invoice_undo_requires_engine_session' });
+      if (name === 'advance-leads') args = { ...args, engine_invoice_closes: true };
       const saved = await saveAssistantVerb(client, actor, name, args, engineEnv);
       if (saved) return saved;
     }

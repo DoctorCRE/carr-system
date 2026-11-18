@@ -829,3 +829,153 @@ test("the caller sees the engine's refusal code", async (t) => {
   assert.equal(projected.engine_error, "open_step_exists");
   assert.equal(Object.hasOwn(await refusal("Not A Slug"), "engine_error"), false);
 });
+
+const invoice = {
+  idempotency_key: key,
+  native_ref: "local-mail:synthetic-invoice",
+  from_address: "invoice@example.test",
+  deal_name: "Synthetic Lease",
+  occurred_at: "2026-10-03T23:30:00-05:00",
+  property_address: "  ",
+};
+const mailboxPartner = { id: agent.id, slug: "dell", human: true };
+const localMailbox = { ...agent, slug: "dell-local", via: "local-token" };
+
+test("invoice capture off writes the legacy invoice with its local date", async (t) => {
+  const upstream = engine(t, () => assert.fail("off made an engine request"), "false");
+  const c = legacy({ writes: true });
+  const db = {
+    async query(sql: string, params?: unknown[]) {
+      if (sql === "select now() as now") return { rows: [{ now: new Date(NOW) }] };
+      if (sql.startsWith("insert into deal_invoice_email")) assert.equal(params?.[6], "2026-10-03");
+      return c.query(sql);
+    },
+  };
+  const reply = await executeRegisteredTool(db, mailboxPartner, "record-deal-invoice", { ...invoice }, upstream.env);
+  assert.deepEqual(reply, { ok: true, invoice_id: savedId, evidence_ref: invoice.native_ref });
+  assert.ok(c.changes.some((sql) => sql.startsWith("insert into deal_invoice_email")));
+  assert.equal(upstream.calls.length, 0);
+});
+
+test("invoice capture retries with a key derived from the caller's save", async (t) => {
+  let attempts = 0;
+  const upstream = engine(t, () => {
+    const attempt = attempts++;
+    return attempt === 0
+      ? Response.json({ error: "database_unavailable" }, { status: 503 })
+      : Response.json({
+          invoice_id: savedId,
+          evidence_ref: invoice.native_ref,
+          ...(attempt === 1 && { replayed: true }),
+        });
+  });
+  for (const [actor, idempotency_key, receipt] of [
+    [mailboxPartner, key, { replayed: true }],
+    [localMailbox, savedId, {}],
+  ] as const) {
+    const reply = await executeRegisteredTool(
+      legacy(),
+      actor,
+      "record-deal-invoice",
+      {
+        ...invoice,
+        idempotency_key,
+      },
+      upstream.env,
+    );
+    assert.deepEqual(reply, { ok: true, invoice_id: savedId, evidence_ref: invoice.native_ref, ...receipt });
+  }
+  assert.equal(upstream.calls.length, 3);
+  for (const [index, request] of upstream.calls.entries()) {
+    assert.equal(request.method, "POST");
+    assert.equal(request.path, "/jobs/invoice-emails");
+    assert.equal(request.headers.get("Engine-Job"), "mail_capture");
+    assert.equal(request.headers.get("Engine-For-User"), mailboxPartner.slug);
+    assert.deepEqual(request.body, {
+      idempotency_key: derivedIdempotencyKey("record-deal-invoice", index < 2 ? key : savedId),
+      evidence_ref: invoice.native_ref,
+      sender: invoice.from_address,
+      deal_name: invoice.deal_name,
+      occurred_at: invoice.occurred_at,
+      client_name: null,
+      property_address: null,
+    });
+  }
+});
+
+test("invoice capture does not accept a receipt for different evidence", async (t) => {
+  const upstream = engine(t, () => Response.json({ invoice_id: savedId, evidence_ref: "local-mail:other-sample" }));
+  await assert.rejects(
+    executeRegisteredTool(legacy(), mailboxPartner, "record-deal-invoice", { ...invoice }, upstream.env),
+    {
+      payload: { error: "engine_assistant_refused", engine_status: 200 },
+    },
+  );
+  assert.equal(upstream.calls.length, 1);
+});
+
+test("invoice capture preserves the engine's key_reuse refusal", async (t) => {
+  const upstream = engine(t, () => Response.json({ error: "key_reuse" }, { status: 409 }));
+  await assert.rejects(
+    executeRegisteredTool(legacy(), mailboxPartner, "record-deal-invoice", { ...invoice }, upstream.env),
+    { payload: { error: "key_reuse", engine_status: 409, engine_error: "key_reuse" } },
+  );
+  assert.equal(upstream.calls.length, 1);
+});
+
+test("invoice capture refuses callers without a mailbox and never falls back on an engine refusal", async (t) => {
+  const upstream = engine(t, () => Response.json({ error: "database_refused_the_statement" }, { status: 422 }));
+  await assert.rejects(executeRegisteredTool(legacy(), agent, "record-deal-invoice", { ...invoice }, upstream.env), {
+    payload: { error: "invoice_mailbox_identity_required" },
+  });
+  assert.equal(upstream.calls.length, 0);
+  await assert.rejects(
+    executeRegisteredTool(legacy(), mailboxPartner, "record-deal-invoice", { ...invoice }, upstream.env),
+    {
+      payload: {
+        error: "engine_assistant_refused",
+        engine_status: 422,
+        engine_error: "database_refused_the_statement",
+      },
+    },
+  );
+  assert.equal(upstream.calls.length, 1);
+});
+
+test("switched-on Worker never applies or undoes old invoices directly", async (t) => {
+  const upstream = engine(t, () => assert.fail("legacy close requested an engine save"));
+  const db = {
+    async query(sql: string) {
+      assert.doesNotMatch(sql, /deal_invoice_email/);
+      if (sql === "select now() as now") return { rows: [{ now: new Date(NOW) }] };
+      return { rows: [] };
+    },
+  };
+  const result = record(
+    await executeRegisteredTool(
+      db,
+      mailboxPartner,
+      "advance-leads",
+      {
+        idempotency_key: key,
+        engine_invoice_closes: false,
+      },
+      upstream.env,
+    ),
+  );
+  assert.deepEqual(result.invoice_closes, []);
+  await assert.rejects(
+    executeRegisteredTool(
+      db,
+      mailboxPartner,
+      "undo-invoice-close",
+      {
+        idempotency_key: key,
+        invoice_id: savedId,
+        base_version: 2,
+      },
+      upstream.env,
+    ),
+    { payload: { error: "invoice_undo_requires_engine_session" } },
+  );
+});

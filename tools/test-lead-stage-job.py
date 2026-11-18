@@ -181,7 +181,7 @@ class EngineInvoiceCloseTests(unittest.TestCase):
             "moves": moves, "engine_invoice_closes": {"refused": {"invoice_email_needs_user": 1}},
         })
 
-    def test_captures_for_mailbox_then_lists_and_applies_for_deal_partner(self):
+    def test_changed_capture_resend_still_lists_and_applies_for_deal_partner(self):
         i = self.invoice
         evidence = {"native_ref": "local-mail:synthetic-invoice", "from_address": "invoice@example.test",
                     "deal_name": "Synthetic Lease", "occurred_at": "2026-10-03T23:30:00-05:00",
@@ -189,9 +189,25 @@ class EngineInvoiceCloseTests(unittest.TestCase):
         with patch.object(job.engine_mail, "connect") as connect:
             capture_door, list_door, apply_door = Mock(), Mock(), Mock()
             connect.side_effect = [capture_door, list_door, apply_door]
-            capture_door.side_effect = [job.engine_mail.Reply(503, {}), job.engine_mail.Reply(200, {
-                "invoice_id": i.invoice_id, "evidence_ref": evidence["native_ref"], "replayed": True,
-            })]
+            first_capture = {
+                "idempotency_key": str(job.uuid.uuid5(job.uuid.NAMESPACE_URL, evidence["native_ref"])),
+                "evidence_ref": evidence["native_ref"], "sender": evidence["from_address"],
+                "deal_name": evidence["deal_name"], "occurred_at": evidence["occurred_at"],
+                "client_name": None, "property_address": None,
+            }
+
+            def resend(method, path, payload):
+                request = json.loads(payload)
+                self.assertEqual(request["evidence_ref"], first_capture["evidence_ref"])
+                if capture_door.call_count == 1:
+                    return job.engine_mail.Reply(503, {})
+                if request["idempotency_key"] == first_capture["idempotency_key"] and request != first_capture:
+                    return job.engine_mail.Reply(409, {"error": "key_reuse"})
+                return job.engine_mail.Reply(200, {
+                    "invoice_id": i.invoice_id, "evidence_ref": first_capture["evidence_ref"],
+                })
+
+            capture_door.side_effect = resend
             list_door.side_effect = [job.engine_mail.Reply(503, {}), job.engine_mail.Reply(200, {"invoices": [
                 {"invoice_id": "10000000-0000-4000-8000-000000000004", "target": None},
                 {"invoice_id": i.invoice_id, "target": {

@@ -1,6 +1,7 @@
 // Local readers submit derived invoice facts. No provider, raw message or send path.
 import { canExercisePartnerAuthority } from "./partner-authority.js";
 import { derivedIdempotencyKey } from "./derived-key.ts";
+import { isInvoiceEvidence } from "./invoice-evidence.ts";
 const normal = value => typeof value === "string" ? value.trim().replace(/\s+/g, " ").toLowerCase() : "";
 const candidateDeals = (invoice,deals) => deals.filter(d=>normal(d.name)===normal(invoice.deal_name));
 const dateText = value => value instanceof Date ? value.toISOString().slice(0, 10) : value;
@@ -116,12 +117,9 @@ export function invoiceAutomation({withEnvelope,writeEvent,ToolError,updateDeal,
         required:["idempotency_key","native_ref","from_address","deal_name","occurred_at"]},
       handler:(c,actor,args)=>withEnvelope(c,actor,"record-deal-invoice",args,async()=>{
         const now=(await c.query("select now() as now")).rows[0].now;
-        if(!/^local-mail:\S/.test(args.native_ref||"") || !normal(args.deal_name) ||
-          !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(args.from_address||"") ||
-          !/^\d{4}-\d{2}-\d{2}T/.test(args.occurred_at||"") || !Number.isFinite(Date.parse(args.occurred_at)) || Date.parse(args.occurred_at)>Date.parse(now)) fail("invalid_invoice_evidence");
+        if(!isInvoiceEvidence(args, Date.parse(now))) fail("invalid_invoice_evidence");
         // Preserve the email's local calendar date, including its offset.
         const emailDate=args.occurred_at.slice(0,10);
-        if(new Date(`${emailDate}T00:00:00Z`).toISOString().slice(0,10)!==emailDate) fail("invalid_invoice_evidence");
         const row=(await c.query(`insert into deal_invoice_email(evidence_ref,from_address,deal_name,client_name,property_address,occurred_at,email_date,created_by)
           values($1,$2,$3,$4,$5,$6,$7,$8) on conflict(evidence_ref) do nothing returning id`,
           [args.native_ref,normal(args.from_address),args.deal_name.trim(),args.client_name?.trim()||null,args.property_address?.trim()||null,args.occurred_at,emailDate,actor.id])).rows[0];

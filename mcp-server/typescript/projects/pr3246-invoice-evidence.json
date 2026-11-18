@@ -1,0 +1,3 @@
+{
+  "worker": ["src/derived-key.ts", "src/invoice-evidence.ts"]
+}

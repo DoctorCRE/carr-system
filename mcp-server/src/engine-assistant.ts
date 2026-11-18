@@ -1,5 +1,8 @@
 // Send assistant saves to DoctorCRE Engine from the Worker.
+import { derivedIdempotencyKey } from "./derived-key.ts";
+import { isInvoiceEvidence } from "./invoice-evidence.ts";
 import { ToolError } from "./tool-error.ts";
+import type { VerbInputs } from "./verb-contract.ts";
 
 type EngineEnv = {
   ENGINE_URL?: string;
@@ -16,7 +19,7 @@ type OldRoleSubject = { old_role: NonNullable<ReturnType<typeof assistantOldRole
 type DealSubject = { deal_id: string };
 type PartySubject = { party_id: string };
 
-type Save =
+type AgentSave =
   | {
       path: "/jobs/activities";
       id: "activity_id";
@@ -55,9 +58,54 @@ type Save =
       };
     };
 
+type Save =
+  | (AgentSave & { job?: "agent" })
+  | {
+      job: "mail_capture";
+      path: "/jobs/invoice-emails";
+      id: "invoice_id";
+      body: {
+        idempotency_key: string;
+        evidence_ref: string;
+        sender: string;
+        deal_name: string;
+        occurred_at: string;
+        client_name: string | null;
+        property_address: string | null;
+      };
+    };
+
 const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const isUuid = (value: unknown): value is string => typeof value === "string" && uuid.test(value);
 export const engineErrorSlug = /^[a-z][a-z0-9_]{0,63}$/;
+
+export async function captureAssistantInvoice(
+  env: EngineEnv,
+  partner: string,
+  args: VerbInputs["record-deal-invoice"],
+) {
+  const { native_ref, from_address, deal_name, occurred_at } = args;
+  if (!isUuid(args.idempotency_key))
+    throw new ToolError({ error: "invalid_idempotency_key", field: "idempotency_key" });
+  if (!isInvoiceEvidence(args, Date.now()) || !/(?:Z|[+-]\d\d:\d\d)$/.test(occurred_at))
+    throw new ToolError({ error: "invalid_engine_invoice_evidence" });
+
+  const { id, replayed } = await saveAssistantChange(env, partner, {
+    job: "mail_capture",
+    path: "/jobs/invoice-emails",
+    id: "invoice_id",
+    body: {
+      idempotency_key: derivedIdempotencyKey("record-deal-invoice", args.idempotency_key),
+      evidence_ref: native_ref,
+      sender: from_address.toLowerCase(),
+      deal_name: deal_name.trim(),
+      occurred_at,
+      client_name: args.client_name?.trim() || null,
+      property_address: args.property_address?.trim() || null,
+    },
+  });
+  return { ok: true, invoice_id: id, evidence_ref: native_ref, ...(replayed && { replayed }) };
+}
 
 function dealNoteReceipt(result: Record<string, unknown>, hasPlan: boolean) {
   const { next_step_id, next_step_required, proposal_id } = result;
@@ -89,7 +137,7 @@ export async function saveAssistantChange(env: EngineEnv, partner: string, save:
     "Content-Type": "application/json",
     "CF-Access-Client-Id": clientId,
     "CF-Access-Client-Secret": secret,
-    "Engine-Job": "agent",
+    "Engine-Job": save.job ?? "agent",
     "Engine-For-User": partner,
   };
   const target = new URL(save.path, url);
@@ -121,6 +169,11 @@ export async function saveAssistantChange(env: EngineEnv, partner: string, save:
     }
     // A truncated success may follow a commit. The same key recovers its receipt.
     if (!result) continue;
+    if (save.job === "mail_capture") {
+      if (typeof result.evidence_ref !== "string") continue;
+      if (result.evidence_ref !== save.body.evidence_ref)
+        throw new ToolError({ error: "engine_assistant_refused", engine_status: response.status });
+    }
     const id = result[save.id];
     if (!isUuid(id)) continue;
     const receipt = { id, ...(result.replayed === true ? { replayed: true } : {}) };
