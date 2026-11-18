@@ -75,6 +75,21 @@ def list_engine_invoice_closes(credentials: Path) -> list[InvoiceClose]:
 class EngineInvoiceCloses(NamedTuple):
     credentials: Path
     receipts: Path
+    mailbox_partner: str
+
+    def capture(self, args: dict) -> None:
+        request = {"idempotency_key": args["idempotency_key"], "evidence_ref": args["native_ref"],
+                   "sender": args["from_address"], "deal_name": args["deal_name"], "occurred_at": args["occurred_at"]}
+        for field in ("client_name", "property_address"):
+            if field in args:
+                value = args[field]
+                request[field] = (value.strip() or None) if isinstance(value, str) else value
+        door = engine_mail.connect(self.credentials, self.mailbox_partner, job="mail_capture")
+        reply = call_engine(door, "POST", "/jobs/invoice-emails", json.dumps(request).encode())
+        if reply.status != 200:
+            raise RuntimeError(f"Engine invoice capture failed (HTTP {reply.status})")
+        if reply.body.get("evidence_ref") != request["evidence_ref"] or not is_uuid(reply.body.get("invoice_id")):
+            raise RuntimeError("Invalid engine invoice capture receipt")
 
     def run(self, *, dry_run: bool) -> dict[str, int]:
         invoices = list_engine_invoice_closes(self.credentials)
@@ -137,14 +152,15 @@ def run_job(call, *, dry_run=False, evidence=None, time_zone="America/Chicago",
                 raise ValueError("derived evidence has unsupported fields")
             if not required <= set(item):
                 raise ValueError("derived evidence is incomplete")
-            if invoice and engine_invoices is not None:
-                raise ValueError("Engine invoice capture belongs to the mail job")
             verb = "record-deal-invoice" if invoice else "record-lead-contact"
             identity = [verb, item["native_ref"]] if invoice else [item["lead"], item["native_ref"], item["kind"]]
             key = str(uuid.uuid5(uuid.NAMESPACE_URL, ("deal-invoice:" if invoice else "lead-contact:") + hashlib.sha256(json.dumps(identity).encode()).hexdigest()))
             captures.append((verb, {**item, "idempotency_key": key}))
         for verb, args in captures:
-            call(verb, args)
+            if verb == "record-deal-invoice" and engine_invoices is not None:
+                engine_invoices.capture(args)
+            else:
+                call(verb, args)
         result = call("advance-leads", {"idempotency_key": str(uuid.uuid4()), "time_zone": time_zone, **invoice_mode})
     if engine_invoices is not None:
         return {**result, "engine_invoice_closes": engine_invoices.run(dry_run=dry_run)}
@@ -174,7 +190,8 @@ def main():
     if settings is not None:
         assert settings.engine_credentials is not None
         scope = hashlib.sha256(str(settings.engine_credentials).encode()).hexdigest()
-        engine_invoices = EngineInvoiceCloses(settings.engine_credentials, settings.source.parent / "lead-stage-refusals" / scope)
+        engine_invoices = EngineInvoiceCloses(settings.engine_credentials,
+                                             settings.source.parent / "lead-stage-refusals" / scope, settings.owner)
     result = run_job(require_record_reply, dry_run=args.dry_run, evidence=evidence, time_zone=args.time_zone,
                      engine_invoices=engine_invoices)
     if engine_invoices is None:

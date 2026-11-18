@@ -93,7 +93,7 @@ class EngineInvoiceCloseTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
         self.credentials = self.root / "engine.env"
-        self.job = job.EngineInvoiceCloses(self.credentials, self.root / "receipts")
+        self.job = job.EngineInvoiceCloses(self.credentials, self.root / "receipts", "fixture-mailbox")
         self.invoice = job.InvoiceClose("10000000-0000-4000-8000-000000000001",
                                         "10000000-0000-4000-8000-000000000002",
                                         "10000000-0000-4000-8000-000000000003", "fixture-partner")
@@ -145,11 +145,17 @@ class EngineInvoiceCloseTests(unittest.TestCase):
                 self.assertEqual(result["engine_invoice_closes"], {"refused": 1})
         connect.return_value.assert_called_once()
 
-    def test_lists_as_lead_stage_and_applies_only_the_engine_selected_target(self):
+    def test_captures_for_mailbox_then_lists_and_applies_for_deal_partner(self):
         i = self.invoice
+        evidence = {"native_ref": "local-mail:synthetic-invoice", "from_address": "invoice@example.test",
+                    "deal_name": "Synthetic Lease", "occurred_at": "2026-10-03T23:30:00-05:00",
+                    "client_name": "Synthetic Practice", "property_address": "  "}
         with patch.object(job.engine_mail, "connect") as connect:
-            list_door, apply_door = connect.return_value, Mock()
-            connect.side_effect = [list_door, apply_door]
+            capture_door, list_door, apply_door = Mock(), Mock(), Mock()
+            connect.side_effect = [capture_door, list_door, apply_door]
+            capture_door.side_effect = [job.engine_mail.Reply(503, {}), job.engine_mail.Reply(200, {
+                "invoice_id": i.invoice_id, "evidence_ref": evidence["native_ref"], "replayed": True,
+            })]
             list_door.side_effect = [job.engine_mail.Reply(503, {}), job.engine_mail.Reply(200, {"invoices": [
                 {"invoice_id": "10000000-0000-4000-8000-000000000004", "target": None},
                 {"invoice_id": i.invoice_id, "target": {
@@ -160,12 +166,21 @@ class EngineInvoiceCloseTests(unittest.TestCase):
                 "invoice_id": i.invoice_id, "deal_id": i.deal_id, "payment_id": i.payment_id,
                 "status": "attached", "application_id": "10000000-0000-4000-8000-000000000005",
             })
-            result = job.run_job(self.call, engine_invoices=self.job)
+            result = job.run_job(self.call, evidence=[evidence], engine_invoices=self.job)
         self.assertEqual(result["engine_invoice_closes"], {"attached": 1})
         self.assertEqual(connect.call_args_list, [
+            call(self.credentials, "fixture-mailbox", job="mail_capture"),
             call(self.credentials, job="lead_stage"),
             call(self.credentials, i.for_user, job="lead_stage"),
         ])
+        method, path, payload = capture_door.call_args.args
+        body = json.loads(payload)
+        key = body.pop("idempotency_key")
+        self.assertEqual(job.uuid.UUID(key).version, 5)
+        self.assertEqual(capture_door.call_args_list, [call("POST", "/jobs/invoice-emails", payload)] * 2)
+        self.assertEqual(body, {"evidence_ref": evidence["native_ref"], "sender": evidence["from_address"],
+                                "deal_name": evidence["deal_name"], "occurred_at": evidence["occurred_at"],
+                                "client_name": evidence["client_name"], "property_address": None})
         self.assertEqual(list_door.call_args_list, [call("GET", "/jobs/invoice-emails", None)] * 2)
         apply_door.assert_called_once()
         self.assertEqual(apply_door.call_args.args[:2], ("POST", f"/jobs/invoice-emails/{i.invoice_id}/apply"))
