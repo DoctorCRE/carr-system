@@ -6284,12 +6284,13 @@ class FieldCensusTest(unittest.TestCase):
 
 
 class FakeEngine:
-    """Doors 19 and 20 as the engine's docs/new-database.md fixes them, one store for every mailbox."""
+    """One Engine store for every mailbox, using the intake door contracts."""
 
     def __init__(self):
         self.calls, self.keys, self.activities, self.files, self.documents = [], {}, {}, set(), {}
         self.refuse = []  # (path, status, error), each answered once, in order
         self.filed, self.notes = [], []
+        self.agendas, self.leads = {}, {}
 
     def door(self, user):
         def call(method, path, body):
@@ -6302,6 +6303,16 @@ class FakeEngine:
                 page = [m for m in self.filed if m['activity_id'] > after][:2]
                 more = len([m for m in self.filed if m['activity_id'] > after]) > len(page)
                 return engine_mail.Reply(200, {'emails': page, 'next_cursor': page[-1]['activity_id'] if more else None})
+            if path == '/jobs/calendar/agenda':
+                assert method == 'PUT'
+                snapshot = json.loads(body)
+                assert 'idempotency_key' not in snapshot
+                observed = snapshot['observed_at']
+                prior = self.agendas.get(user)
+                if prior and prior['observed_at'] > observed:
+                    return engine_mail.Reply(409, {'error': 'agenda_superseded', 'observed_at': prior['observed_at']})
+                self.agendas[user] = snapshot
+                return engine_mail.Reply(200, {'observed_at': observed})
             if method == 'PUT':
                 sha = path.rsplit('/', 1)[1]
                 assert hashlib.sha256(body).hexdigest() == sha
@@ -6314,7 +6325,14 @@ class FakeEngine:
                 if self.keys[key][0] != args:
                     return engine_mail.Reply(409, {'error': 'key_reuse'})
                 return engine_mail.Reply(self.keys[key][1].status, {**self.keys[key][1].body, 'replayed': True})
-            reply = self.attach(request) if path == '/jobs/attachments' else self.store(request)
+            if path == '/jobs/proposals/email-lead':
+                candidate = (user, request['address'])
+                existing = candidate in self.leads
+                self.leads.setdefault(candidate, request)
+                reply = engine_mail.Reply(200 if existing else 201, {
+                    'proposal_id': 'p-1', 'status': 'pending', **({'existing': True} if existing else {})})
+            else:
+                reply = self.attach(request) if path == '/jobs/attachments' else self.store(request)
             if reply.status < 300:
                 self.keys[key] = (args, reply)
             return reply
@@ -6346,7 +6364,7 @@ class FakeEngine:
 
 
 class EngineMailTest(unittest.TestCase):
-    """Intake with engine_mail on: doors 19 and 20 instead of the record layer's mail writes."""
+    """Intake writes against a fake Engine."""
     setUpClass = IntakeTest.setUpClass
     copy_snapshot = IntakeTest.copy_snapshot
     run_intake = IntakeTest.run_intake
@@ -6369,9 +6387,11 @@ class EngineMailTest(unittest.TestCase):
         self.assertEqual(outcome.state, 'succeeded')
         self.assertEqual(len(self.fake.writes('log-activity')), 1)
         self.assertEqual(self.engine.calls, [])
+        self.assertIsNotNone(self.fake.agenda)
         self.assertNotIn('engine_mail', json.loads((self.out() / intake.STATE).read_text()))
 
     def test_switch_on_sends_each_email_once_and_writes_no_old_activity(self):
+        self.fake.intent_reply = read('new_matter', 'Needs a suite')
         rows = [mail(CLIENT.email, -timedelta(hours=1), message_id='<M1@Example.test>', name='Pat Example',
                      recipients=f'{OWNER}, x@example.test'),
                 mail(OWNER, -timedelta(minutes=30), subject='Re: Suite question', recipients=CLIENT.email,
@@ -6389,13 +6409,107 @@ class EngineMailTest(unittest.TestCase):
         self.assertEqual(self.old_mail_writes(), [])
         self.assertNotIn('email-router-queue', [verb for verb, _ in self.fake.calls], 'links come from the engine')
         self.assertEqual(outcome.counts['engine_emails_stored'], 3)
-        [(_, lead)] = self.fake.writes('propose-email-lead')
+        [lead] = self.engine.posts('/jobs/proposals/email-lead')
         self.assertEqual(lead['address'], 'stranger@example.test', 'unknown senders still go to the lead queue')
+        self.assertEqual(self.fake.writes('propose-email-lead'), [])
         self.fake.now += timedelta(minutes=30)
         self.run_intake(rows)
         self.assertEqual(len(self.engine.posts('/jobs/activities')), 3, 'a stored email is not sent again')
         self.assertEqual(len(self.fake.intent_calls), 1, 'each unknown sender is read once')
         self.assertEqual({user for user, *_ in self.engine.calls}, {'joe'})
+
+    def test_agenda_routes_on_switch_change_even_with_an_unchanged_store(self):
+        self.fake.ports = self.plain_ports
+        events = [event('site-visit', timedelta(hours=1))]
+        self.run_intake(events=events)
+        legacy = self.fake.agenda
+        self.fake.board_calls.clear()
+        self.fake.ports = lambda: replace(self.plain_ports(), engine=self.engine.door('joe'))
+        outcome = self.run_intake(events=events, touch=False)
+        self.assertEqual(outcome.counts['calendar_agenda_published'], 1)
+        self.assertEqual(self.engine.agendas, {'joe': legacy})
+        self.assertEqual(self.fake.board_calls, [])
+        self.assertEqual(self.run_intake(events=events, touch=False).reason, 'store_unchanged')
+        self.fake.ports = self.plain_ports
+        self.assertEqual(self.run_intake(events=events, touch=False).counts['calendar_agenda_published'], 1)
+        self.assertEqual(self.fake.agenda_version, 2)
+
+    def test_agenda_retries_transient_failure_and_drops_superseded_snapshot(self):
+        self.engine.refuse.append(('/jobs/calendar/agenda', 503, 'database_unavailable'))
+        events = [event('site-visit', timedelta(hours=1))]
+        failed = self.run_intake(events=events)
+        self.assertEqual((failed.state, failed.counts['calendar_agenda_failed']), ('succeeded', 1))
+        self.assertEqual(self.run_intake(events=events, touch=False).counts['calendar_agenda_published'], 1)
+        newer = {**self.engine.agendas['joe'], 'observed_at': (NOW + timedelta(minutes=1)).isoformat()}
+        self.engine.agendas['joe'] = newer
+        dropped = self.run_intake(events=events)
+        self.assertEqual(dropped.counts['calendar_agenda_failed'], 0)
+        self.assertEqual(self.engine.agendas['joe'], newer)
+        self.assertEqual(self.run_intake(events=events, touch=False).reason, 'store_unchanged')
+
+    def test_oversize_agenda_refusal_does_not_retry_an_unchanged_store(self):
+        self.engine.refuse.append(('/jobs/calendar/agenda', 422, 'agenda_too_large'))
+        outcome = self.run_intake()
+        self.assertEqual((outcome.state, outcome.counts['calendar_agenda_failed']), ('succeeded', 1))
+        self.assertEqual(outcome.counts['engine_agenda_agenda_too_large'], 1)
+        self.assertEqual(self.run_intake(touch=False).reason, 'store_unchanged')
+        self.assertEqual(self.fake.board_calls, [])
+
+    def test_lead_replays_identical_payload_after_engine_commits_and_response_is_lost(self):
+        self.fake.intent_reply = read('new_matter', 'Needs a suite.', quote='Can we meet Thursday?')
+        row = mail('stranger@example.test', -timedelta(hours=1), name='Pat Example', message_id='<r1@example.test>')
+        door = self.engine.door('joe')
+
+        def lose_first_lead_reply(method, path, body):
+            reply = door(method, path, body)
+            if path == '/jobs/proposals/email-lead' and not reply.body.get('replayed'):
+                return engine_mail.Reply(0, {})
+            return reply
+
+        self.fake.ports = lambda: replace(self.plain_ports(), engine=lose_first_lead_reply)
+        self.assertEqual(self.run_intake([row]).reason, 'writes_failed')
+        self.fake.now += timedelta(minutes=30)
+        retry = self.run_intake([row], touch=False)
+        self.assertEqual((retry.state, retry.counts['lead_proposed']), ('succeeded', 1))
+        first, second = self.engine.posts('/jobs/proposals/email-lead')
+        self.assertEqual(first, second)
+        self.assertEqual(first, {'idempotency_key': first['idempotency_key'], 'address': 'stranger@example.test',
+                                 'display_name': 'Pat Example', 'summary': 'Needs a suite.',
+                                 'first_seen_at': (NOW - timedelta(hours=1)).isoformat(),
+                                 'message_ref': ident(row), 'applies_to': 'new_matter', 'confidence': 0.9,
+                                 'evidence_quote': 'Can we meet Thursday?'})
+        self.assertEqual(uuid.UUID(first['idempotency_key']).version, 5)
+        self.assertEqual(len(self.fake.intent_calls), 1)
+        self.assertEqual(len(self.engine.leads), 1)
+
+    def test_only_new_matter_goes_to_door_21_and_a_final_refusal_settles(self):
+        rows = [mail(f'sender{i}@example.test', -timedelta(minutes=40 - i), message_id=f'<m{i}@example.test>')
+                for i in range(4)]
+        readings = iter([read('existing_deal', 'Existing matter', deal='D-1'),
+                         read('existing_party', 'Known person', party='C-901'), read('not_business'),
+                         read('new_matter', 'Needs a suite')])
+        self.fake.read_unresolved = lambda *_: next(readings)
+        self.engine.refuse.append(('/jobs/proposals/email-lead', 422, 'database_refused_the_statement'))
+        outcome = self.run_intake(rows)
+        self.assertEqual((outcome.state, outcome.counts['lead_refused']), ('succeeded', 1))
+        self.run_intake(rows)
+        [request] = self.engine.posts('/jobs/proposals/email-lead')
+        self.assertEqual(request['address'], 'sender3@example.test')
+        self.assertEqual(self.fake.writes('propose-email-lead'), [])
+
+    def test_pending_legacy_lead_moves_to_engine_when_switched_on(self):
+        self.fake.ports = self.plain_ports
+        self.fake.intent_reply = read('new_matter', 'Needs a suite')
+        self.fake.fail_verbs.add('propose-email-lead')
+        row = mail('stranger@example.test', -timedelta(hours=1), message_id='<r1@example.test>')
+        self.assertEqual(self.run_intake([row]).reason, 'writes_failed')
+        self.fake.fail_verbs.clear()
+        self.fake.ports = lambda: replace(self.plain_ports(), engine=self.engine.door('joe'))
+        self.fake.now += timedelta(minutes=30)
+        self.assertEqual(self.run_intake([row], touch=False).state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('propose-email-lead')), 1)
+        self.assertEqual(len(self.engine.posts('/jobs/proposals/email-lead')), 1)
+        self.assertEqual(len(self.fake.intent_calls), 1)
 
     def test_door_19_keeps_only_nonblank_outlook_conversation_ids(self):
         conversation_ids = ('Outlook-AbC123', None, '', ' \t ')
@@ -6611,7 +6725,8 @@ class EngineMailTest(unittest.TestCase):
                           'name': 'Lease.pdf', 'sha256': hashlib.sha256(self.pdf).hexdigest()})
         self.assertEqual(self.uploads, {})
         self.assertEqual(self.old_mail_writes(), [])
-        self.assertEqual([c[1] for c in self.engine.calls], ['POST', 'PUT', 'POST', 'GET'], 'the email goes first')
+        self.assertEqual([c[1] for c in self.engine.calls if c[2] != '/jobs/calendar/agenda'],
+                         ['POST', 'PUT', 'POST', 'GET'], 'the email goes first')
 
     def test_attachment_refused_until_the_email_is_stored_waits_for_the_next_run(self):
         self.engine.refuse.append(('/jobs/attachments', 409, 'email_not_stored'))
@@ -6631,7 +6746,7 @@ class EngineMailTest(unittest.TestCase):
         self.assertEqual(self.attachment_run().reason, 'attachments_pending')
         self.fake.now += timedelta(minutes=30)
         self.assertEqual(self.attachment_run().state, 'succeeded')
-        self.assertEqual(len([c for c in self.engine.calls if c[1] == 'PUT']), 2)
+        self.assertEqual(len([c for c in self.engine.calls if c[2].startswith('/jobs/files/')]), 2)
         self.assertEqual(len(self.engine.documents), 1)
 
     def test_settings_switch_needs_engine_credentials(self):
@@ -6682,11 +6797,17 @@ class EngineMailTest(unittest.TestCase):
                 return b'{"activity_id": "a-1", "existing": false}'
 
         with patch('urllib.request.urlopen', side_effect=lambda request, timeout: seen.append(request) or Answer()):
-            reply = engine_mail.connect(path, 'joe')('POST', '/jobs/activities', b'{}')
+            door = engine_mail.connect(path, 'joe')
+            reply = door('POST', '/jobs/activities', b'{}')
+            engine_mail.connect(path, 'dell')('PUT', '/jobs/calendar/agenda', b'{}')
+            door('PUT', '/jobs/files/example', b'file')
         self.assertEqual(reply, engine_mail.Reply(201, {'activity_id': 'a-1', 'existing': False}))
         self.assertEqual(seen[0].full_url, 'https://engine.example.test/jobs/activities')
         self.assertEqual([seen[0].get_header(k) for k in ('Cf-access-client-id', 'Engine-job', 'Engine-for-user')],
                          ['id-1', 'mail_capture', 'joe'])
+        self.assertEqual(seen[1].get_header('Engine-for-user'), 'dell')
+        self.assertEqual([req.get_header('Content-type') for req in seen],
+                         ['application/json', 'application/json', 'application/octet-stream'])
 
 
 if __name__ == '__main__':

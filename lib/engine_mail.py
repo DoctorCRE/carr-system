@@ -1,4 +1,4 @@
-"""Mail intake's side of the engine's doors 19 (email in) and 20 (attachments).
+"""Mail intake's Engine client for emails, attachments, lead suggestions and agendas.
 
 The doors are fixed in the engine repository's docs/new-database.md, "Doors the old
 system calls". Intake calls them only when outlook.json sets engine_mail; otherwise
@@ -89,7 +89,7 @@ def connect(credentials: Path, user: str | None = None, *, job: str = JOB) -> Do
         headers['Engine-For-User'] = user
 
     def call(method: str, path: str, body: bytes | None) -> Reply:
-        kind = 'application/octet-stream' if method == 'PUT' else 'application/json'
+        kind = 'application/octet-stream' if method == 'PUT' and path.startswith('/jobs/files/') else 'application/json'
         request = urllib.request.Request(url.rstrip('/') + path, data=body, method=method,
                                          headers={**headers, 'Content-Type': kind})
         try:
@@ -242,6 +242,32 @@ class Mailbox:
 
     def post(self, path: str, request: dict) -> Reply:
         return self.door('POST', path, json.dumps(request).encode())
+
+    def publish_agenda(self, snapshot: dict) -> str:
+        reply = self.door('PUT', '/jobs/calendar/agenda', json.dumps(snapshot).encode())
+        result = verdict(reply)
+        if result == 'done':
+            return 'published'
+        if reply.status == 409 and reply.error == 'agenda_superseded':
+            self.count('engine_agenda_superseded')
+            return 'superseded'
+        self.count('engine_agenda_' + reply.error)
+        return 'retry' if result == 'retry' else 'refused'
+
+    def propose_lead(self, request: dict) -> str | None:
+        reply = self.post('/jobs/proposals/email-lead', request)
+        result = verdict(reply)
+        if result == 'retry':
+            self.count('writes_failed')
+            return None
+        if result != 'done':
+            self.count('engine_leads_' + reply.error)
+            return 'refused'
+        if reply.body.get('status') == 'known_party':
+            return 'known_party'
+        if reply.body.get('existing') is True or reply.body.get('status') == 'already_queued':
+            return 'already_queued'
+        return 'proposed'
 
     def answered(self, reply: Reply) -> bool:
         """Whether the engine answered for good; a retry or a caller refusal is counted as the run's failure."""
