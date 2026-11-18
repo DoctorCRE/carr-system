@@ -14,9 +14,9 @@ type Save =
       body: {
         idempotency_key: string;
         kind: string;
-        happened_at: string;
+        happened_at?: string;
         summary: string;
-        about: { deal_id: string }[];
+        about: ({ deal_id: string } | { party_id: string })[];
       };
     }
   | {
@@ -30,10 +30,35 @@ type Save =
         due_on?: string;
         replaces: "current";
       };
+    }
+  | {
+      path: "/jobs/next-steps/complete";
+      id: "next_step_id";
+      body: { idempotency_key: string } & ({ deal_id: string } | { party_id: string });
+    }
+  | {
+      path: "/jobs/activities/deal-note";
+      id: "activity_id";
+      body: {
+        idempotency_key: string;
+        deal_id: string;
+        text: string;
+        plan?: { what: string; due_on: string };
+      };
     };
 
 const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+const isUuid = (value: unknown): value is string => typeof value === "string" && uuid.test(value);
 export const engineErrorSlug = /^[a-z][a-z0-9_]{0,63}$/;
+
+function dealNoteReceipt(result: Record<string, unknown>, hasPlan: boolean) {
+  const { next_step_id, next_step_required, proposal_id } = result;
+  if (hasPlan)
+    return isUuid(next_step_id) && next_step_required === false ? { next_step_id, next_step_required } : null;
+  return typeof next_step_required === "boolean" && (proposal_id === null || isUuid(proposal_id))
+    ? { proposal_id, next_step_required }
+    : null;
+}
 
 export async function saveAssistantChange(env: EngineEnv, partner: string, save: Save) {
   const url = URL.parse(env.ENGINE_URL ?? "");
@@ -86,10 +111,17 @@ export async function saveAssistantChange(env: EngineEnv, partner: string, save:
         ...(typeof code === "string" && engineErrorSlug.test(code) ? { engine_error: code } : {}),
       });
     }
-    const id = result?.[save.id];
-    if (typeof id === "string" && uuid.test(id))
-      return { id, ...(result?.replayed === true ? { replayed: true } : {}) };
     // A truncated success may follow a commit. The same key recovers its receipt.
+    if (!result) continue;
+    const id = result[save.id];
+    if (!isUuid(id)) continue;
+    const receipt = { id, ...(result.replayed === true ? { replayed: true } : {}) };
+    if (save.path === "/jobs/activities/deal-note") {
+      const note = dealNoteReceipt(result, save.body.plan !== undefined);
+      if (!note) continue;
+      return { ...receipt, ...note };
+    }
+    return receipt;
   }
   throw new ToolError({ error: "engine_assistant_unavailable" });
 }
