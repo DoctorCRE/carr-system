@@ -105,24 +105,20 @@ def load_settings(home: Path | None = None) -> OutlookSettings:
 
 
 def load_cadence_settings() -> OutlookSettings | None:
+    return _load_engine_switch('engine_cadence')
+
+
+def load_lead_stage_settings() -> OutlookSettings | None:
+    return _load_engine_switch('engine_lead_stage')
+
+
+def _load_engine_switch(name: str) -> OutlookSettings | None:
     path = Path.home() / '.config/carr/outlook.json'
     try:
         values = _read_settings(path)
     except (SettingsError, OSError):
         return None
-    if values.get('engine_cadence') is not True:
-        return None
-    return _validate_settings(path, values)
-
-
-def load_lead_stage_settings() -> OutlookSettings | None:
-    path = Path.home() / '.config/carr/outlook.json'
-    try:
-        path.lstat()
-    except FileNotFoundError:
-        return None
-    values = _read_settings(path)
-    if 'engine_lead_stage' not in values or values['engine_lead_stage'] is False:
+    if values.get(name) is not True:
         return None
     return _validate_settings(path, values)
 

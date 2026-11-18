@@ -34,7 +34,7 @@ class InvoiceClose(NamedTuple):
 def call_engine(door: engine_mail.Door, method: str, path: str, body: bytes | None = None) -> engine_mail.Reply:
     for _ in range(3):
         reply = door(method, path, body)
-        if 0 < reply.status < 500:
+        if engine_mail.verdict(reply) != "retry":
             break
     return reply
 
@@ -91,48 +91,64 @@ class EngineInvoiceCloses(NamedTuple):
         if reply.body.get("evidence_ref") != request["evidence_ref"] or not is_uuid(reply.body.get("invoice_id")):
             raise RuntimeError("Invalid engine invoice capture receipt")
 
-    def run(self, *, dry_run: bool) -> dict[str, int]:
+    def run(self, *, dry_run: bool) -> dict[str, int | dict[str, int]]:
         invoices = list_engine_invoice_closes(self.credentials)
         if dry_run:
             return {"candidates": len(invoices)}
         if not invoices:
             return {}
         self.receipts.mkdir(mode=0o700, parents=True, exist_ok=True)
-        counts: Counter[str] = Counter()
+        outcomes: Counter[str] = Counter()
+        refusals: Counter[str] = Counter()
         doors: dict[str, engine_mail.Door] = {}
         with local_jobs.locked(self.receipts / "run.lock"):
             for invoice in invoices:
                 # A terminal refusal can leave an invoice captured in the engine.
                 refused = self.receipts / invoice.invoice_id
                 if refused.exists():
-                    counts["refused"] += 1
+                    refusals[refused.read_text().strip() or "unreadable"] += 1
                     continue
                 if invoice.for_user not in doors:
                     doors[invoice.for_user] = engine_mail.connect(self.credentials, invoice.for_user, job="lead_stage")
                 key = str(uuid.uuid5(uuid.NAMESPACE_URL, json.dumps(["apply-invoice-email", *invoice])))
-                outcome = apply_engine_invoice(doors[invoice.for_user], invoice, key)
-                if outcome == "refused":
-                    refused.touch(mode=0o600)
-                counts[outcome] += 1
-        return dict(counts)
+                outcome, reason = apply_engine_invoice(doors[invoice.for_user], invoice, key)
+                if reason is None:
+                    outcomes[outcome] += 1
+                else:
+                    temporary = refused.with_suffix(".tmp")
+                    temporary.touch(mode=0o600)
+                    temporary.write_text(reason + "\n")
+                    temporary.replace(refused)
+                    refusals[reason] += 1
+        counts: dict[str, int | dict[str, int]] = dict(outcomes)
+        if refusals:
+            counts["refused"] = dict(refusals)
+        return counts
 
 
-def apply_engine_invoice(door: engine_mail.Door, invoice: InvoiceClose, key: str) -> str:
+def apply_engine_invoice(door: engine_mail.Door, invoice: InvoiceClose, key: str) -> tuple[str, str | None]:
     path = f"/jobs/invoice-emails/{invoice.invoice_id}/apply"
     target = {"deal_id": invoice.deal_id, "payment_id": invoice.payment_id}
     body = json.dumps({**target, "idempotency_key": key}).encode()
     reply = call_engine(door, "POST", path, body)
-    if 400 <= reply.status < 500:
-        return "refused"
+    judged = engine_mail.verdict(reply)
+    if judged == "caller":
+        raise RuntimeError(f"Engine invoice apply refused the caller (HTTP {reply.status}, {reply.error})")
+    if judged == "settled" and 400 <= reply.status < 500:
+        reason = reply.error
+        rule = reply.body.get("rule")
+        if reason == "database_refused_the_statement" and isinstance(rule, str) and engine_mail.SLUG.fullmatch(rule):
+            reason = f"{reason}:{rule}"
+        return "refused", reason
     answer = reply.body
     expected_ids = {**target, "invoice_id": invoice.invoice_id}
     if reply.status == 200 and all(answer.get(k) == v for k, v in expected_ids.items()):
         status = answer.get("status")
         if status == "applied" and "application_id" in answer and answer["application_id"] is None:
-            return status
+            return status, None
         if status == "attached" and is_uuid(answer.get("application_id")):
-            return status
-    return "unavailable"
+            return status, None
+    return "unavailable", None
 
 
 def run_job(call, *, dry_run=False, evidence=None, time_zone="America/Chicago",
@@ -194,14 +210,9 @@ def main():
                                              settings.source.parent / "lead-stage-refusals" / scope, settings.owner)
     result = run_job(require_record_reply, dry_run=args.dry_run, evidence=evidence, time_zone=args.time_zone,
                      engine_invoices=engine_invoices)
-    if engine_invoices is None:
-        print(json.dumps(result))
-    else:
-        counts = result["engine_invoice_closes"]
-        print(json.dumps({"lead_moves": len(result["moves"]), "drafts_prepared": result.get("drafts_prepared", 0),
-                          "engine_invoice_closes": counts}))
-        if counts.get("unavailable"):
-            raise SystemExit(1)
+    print(json.dumps(result))
+    if engine_invoices is not None and result["engine_invoice_closes"].get("unavailable"):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

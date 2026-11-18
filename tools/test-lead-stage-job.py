@@ -135,15 +135,51 @@ class EngineInvoiceCloseTests(unittest.TestCase):
         self.assertNotEqual(self.calls[0][1]["idempotency_key"], self.calls[1][1]["idempotency_key"])
 
     def test_refusal_is_final_on_later_runs(self):
-        reply = job.engine_mail.Reply(422, {"rule": "invoice_email_needs_user"})
+        reply = job.engine_mail.Reply(422, {"error": "database_refused_the_statement",
+                                            "rule": "invoice_email_needs_user"})
+        reason = "database_refused_the_statement:invoice_email_needs_user"
         changed = self.invoice._replace(payment_id="10000000-0000-4000-8000-000000000004")
         with patch.object(job, "list_engine_invoice_closes", side_effect=[[self.invoice], [changed]]), \
                 patch.object(job.engine_mail, "connect") as connect:
             connect.return_value.return_value = reply
             for _ in range(2):
                 result = job.run_job(self.call, engine_invoices=self.job)
-                self.assertEqual(result["engine_invoice_closes"], {"refused": 1})
+                self.assertEqual(result["engine_invoice_closes"], {"refused": {reason: 1}})
+                self.assertEqual((self.job.receipts / self.invoice.invoice_id).read_text().strip(), reason)
         connect.return_value.assert_called_once()
+
+    def test_caller_refusals_fail_cli_without_settling_an_invoice(self):
+        settings = Mock(engine_credentials=self.credentials, source=self.root / "outlook.json", owner="fixture-mailbox")
+        receipts = self.root / "lead-stage-refusals"
+        for status, error in ((401, "unauthorized"), (403, "unknown_job"), (403, "unreadable"),
+                              (422, "actor_not_provisioned")):
+            with self.subTest(status=status, error=error), \
+                    patch.object(job.outlook_settings, "load_lead_stage_settings", return_value=settings), \
+                    patch.object(job, "list_engine_invoice_closes", return_value=[self.invoice]), \
+                    patch.object(job.engine_mail, "connect") as connect, \
+                    patch.object(job, "require_record_reply", side_effect=self.call), \
+                    patch("builtins.print"), patch.object(job.sys, "argv", ["lead-stage-job"]):
+                connect.return_value.return_value = job.engine_mail.Reply(status, {"error": error})
+                for _ in range(2):
+                    with self.assertRaisesRegex(RuntimeError, error):
+                        job.main()
+                    self.assertEqual(list(receipts.rglob(self.invoice.invoice_id)), [])
+                self.assertEqual(connect.return_value.call_count, 2)
+
+    def test_cli_prints_moves_and_refusal_reasons_in_engine_mode(self):
+        settings = Mock(engine_credentials=self.credentials, source=self.root / "outlook.json", owner="fixture-mailbox")
+        moves = [{"lead": "L-EXAMPLE", "to_stage": "qualified"}]
+        with patch.object(job.outlook_settings, "load_lead_stage_settings", return_value=settings), \
+                patch.object(job, "list_engine_invoice_closes", return_value=[self.invoice]), \
+                patch.object(job.engine_mail, "connect") as connect, \
+                patch.object(job, "require_record_reply", return_value={"moves": moves}), \
+                patch("builtins.print") as output, patch.object(job.sys, "argv", ["lead-stage-job"]):
+            connect.return_value.return_value = job.engine_mail.Reply(422, {"error": "invoice_email_needs_user"})
+            job.main()
+        output.assert_called_once()
+        self.assertEqual(json.loads(output.call_args.args[0]), {
+            "moves": moves, "engine_invoice_closes": {"refused": {"invoice_email_needs_user": 1}},
+        })
 
     def test_captures_for_mailbox_then_lists_and_applies_for_deal_partner(self):
         i = self.invoice
@@ -220,7 +256,7 @@ class EngineInvoiceCloseTests(unittest.TestCase):
         with patch.object(job.Path, "home", return_value=self.root), \
                 patch.object(job, "require_record_reply", side_effect=self.call), \
                 patch.object(job, "list_engine_invoice_closes") as list_invoices, \
-                patch("builtins.print"), \
+                patch("builtins.print") as output, \
                 patch.object(job.sys, "argv", ["lead-stage-job"]):
             job.main()
             settings = self.root / ".config/carr/outlook.json"
@@ -228,9 +264,13 @@ class EngineInvoiceCloseTests(unittest.TestCase):
             settings.touch(mode=0o600)
             settings.write_text('{"engine_lead_stage": false}')
             job.main()
+            settings.write_text('{')
+            job.main()
         list_invoices.assert_not_called()
-        self.assertEqual([verb for verb, _ in self.calls], ["advance-leads", "advance-leads"])
+        self.assertEqual([verb for verb, _ in self.calls], ["advance-leads"] * 3)
         self.assertTrue(all(set(args) == {"idempotency_key", "time_zone"} for _, args in self.calls))
+        self.assertEqual([json.loads(c.args[0]) for c in output.call_args_list],
+                         [{"moves": [], "invoice_closes": [], "drafts_prepared": 0}] * 3)
 
 
 if __name__ == "__main__":
