@@ -19,8 +19,8 @@ lib/email_router.py routes the same way on either side:
 As the door doc says, a 5xx or a lost connection is retried with the same key, and a
 refusal of the caller itself fails the write the same way. Every other 4xx is final and
 counted as a refusal. The engine has no field for a proposal's confidence, sender role,
-matching evidence or a filing's note, so those are not sent; a next step's owner is left
-to the engine, which gives it to the mailbox's partner.
+matching evidence or a filing's note, so those are not sent. A next step goes without an
+owner, and the engine gives it to the partner who accepts it (ruling 22g).
 """
 from __future__ import annotations
 
@@ -31,7 +31,6 @@ from urllib.parse import quote
 from lib.engine_mail import Door, Reply, verdict
 
 PAGE = 200
-PAGES = 10
 
 
 class Refused(Exception):
@@ -61,8 +60,8 @@ def _answer(reply: Reply, refusal: str) -> dict:
 
 def _person(person: dict) -> dict:
     """An engine person in the record layer's contact shape that lib.email_matching reads."""
-    return {'email': person.get('address'), 'name': person.get('name'), 'party_id': person.get('party_id'),
-            'internal': person.get('internal') is True, 'role': person.get('role'),
+    return {'email': person.get('address'), 'name': person.get('name'), 'kind': person.get('kind'),
+            'party_id': person.get('party_id'), 'internal': person.get('internal') is True, 'role': person.get('role'),
             'unknown': person.get('party_id') is None,
             'related_clients': [{'client_id': client} for client in person.get('client_party_ids') or []]}
 
@@ -82,10 +81,11 @@ def _deal(deal: dict) -> dict:
 
 
 def _email(mail: dict, owner: str) -> dict:
-    """One queued email as the record layer's queue gave it. A filed email names its first open deal,
-    or a closed deal it is about, so the router never files it again."""
-    filed = next(iter(mail.get('deals') or []), None) or next(
-        ({'deal_id': link['deal_id']} for link in mail.get('about') or [] if link.get('deal_id')), {})
+    """One queued email as the record layer's queue gave it. An email on one open deal, or with no open
+    deal on one closed deal, names it; on several it names none and the router leaves it where it is."""
+    linked = mail.get('deals') or [{'deal_id': deal} for deal in dict.fromkeys(
+        link['deal_id'] for link in mail.get('about') or [] if link.get('deal_id'))]
+    filed = linked[0] if len(linked) == 1 else {}
     people = [_person(mail.get('sender') or {}), *(_person(p) for p in mail.get('recipients') or [])]
     contact = next((p for p in people if p['party_id'] and not p['internal']), None)
     party = contact['party_id'] if contact else next(
@@ -97,7 +97,7 @@ def _email(mail: dict, owner: str) -> dict:
             'mailbox_owner': mail.get('mailbox_user') or owner,
             'subject_id': party, 'subject_name': contact['name'] if contact else None,
             'deal': filed.get('deal_id'), 'deal_name': filed.get('name'), 'phase': filed.get('phase'),
-            'deal_type': filed.get('kind'), 'suppressed_deals': mail.get('suppressed_deal_ids') or [],
+            'deal_type': filed.get('kind'), 'several_deals': len(linked) > 1, 'suppressed_deals': mail.get('suppressed_deal_ids') or [],
             'thread_history': [_thread(prior) for prior in mail.get('thread') or []]}
 
 
@@ -112,7 +112,7 @@ def verbs(door: Door, owner: str) -> Callable[[str, dict], dict]:
         handled, after = set(args['exclude']), None
         pending: list[dict] = []
         deals: list[dict] = []
-        for _ in range(PAGES):
+        while True:
             page = _answer(door('GET', f"/jobs/router-queue?days={args['days']}&limit={PAGE}"
                                 + (f'&after={quote(after)}' if after else ''), None), 'email_router_queue')
             deals = page.get('open_deals') or []

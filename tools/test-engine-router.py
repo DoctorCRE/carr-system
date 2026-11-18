@@ -24,6 +24,8 @@ ASK = 'Can you send the floor plan by Friday?'
 BROKER = 'broker@brokerage.example'
 SENDER = {'address': 'tenant@clinic.example', 'name': 'Synthetic Tenant', 'party_id': CLIENT, 'internal': False,
           'client_party_ids': [], 'role': 'client'}
+TO_BROKER = {'address': BROKER, 'name': 'Synthetic Broker', 'kind': 'to', 'party_id': None, 'internal': True,
+             'client_party_ids': [], 'role': None}
 OPEN: dict = {'deal_id': DEAL, 'name': 'Synthetic clinic lease', 'phase': 'site_selection', 'kind': 'lease',
         'client_party_id': CLIENT, 'client_name': 'Synthetic Clinic', 'property': 'Synthetic building', 'city': None,
         'participants': []}
@@ -34,16 +36,28 @@ BOTH = {'proposals': [{'kind': 'phase_move', 'evidence_quote': LOI, 'confidence'
 
 def mail(activity: str, body: str = f'{LOI} {ASK}', **fields) -> dict:
     return {'activity_id': activity, 'message_id': f'{activity}@mail.example', 'happened_at': '2026-11-20T14:00:00+00:00',
-            'outgoing': False, 'subject': 'Clinic space', 'body': body, 'sender': SENDER, 'about': [{'party_id': CLIENT}],
+            'outgoing': False, 'mailbox_user': 'joe', 'subject': 'Clinic space', 'body': body,
+            'conversation_id': f'conversation-{activity}', 'sender': SENDER, 'recipients': [TO_BROKER],
+            'about': [{'party_id': CLIENT}],
             'deals': [{'deal_id': DEAL, 'name': OPEN['name'], 'phase': 'site_selection', 'kind': 'lease'}],
             'suppressed_deal_ids': [], 'thread': [], **fields}
+
+
+def thread_only(seen: list[dict]):
+    """Matching that files by thread alone and records the email it was handed; no model is reached."""
+    def matching(email, deals, history):
+        seen.append(email)
+        prior = email_matching.thread_match(email, deals, history)
+        return (email_matching.MatchDecision('inherit_thread', prior['deal'], thread_activity_id=prior['activity_id'])
+                if prior else email_matching.MatchDecision('contact_only'))
+    return matching
 
 
 class Engine:
     """Fake engine: a paged router queue, and saves that replay a key and converge on the payload."""
 
-    def __init__(self, emails: list[dict], page: int = 200):
-        self.emails, self.page = emails, page
+    def __init__(self, emails: list[dict], page: int = 200, open_deals: list[dict] | None = None):
+        self.emails, self.page, self.open_deals = emails, page, open_deals or [OPEN]
         self.requests: list[tuple[str, str, dict]] = []
         self.keys: dict[str, tuple[str, dict, engine_mail.Reply]] = {}
         self.stored: dict[str, dict] = {}
@@ -62,7 +76,7 @@ class Engine:
             start = ids.index(query['after'][0]) + 1 if 'after' in query else 0
             rows = self.emails[start:start + self.page]
             more = start + self.page < len(self.emails)
-            return engine_mail.Reply(200, {'emails': rows, 'open_deals': [OPEN],
+            return engine_mail.Reply(200, {'emails': rows, 'open_deals': self.open_deals,
                                            'next_cursor': rows[-1]['activity_id'] if more else None})
         key = request.pop('idempotency_key')
         if key in self.keys:
@@ -123,10 +137,10 @@ class SwitchOn(unittest.TestCase):
         self.assertEqual(engine.saved('/jobs/proposals')[0]['party_id'], CLIENT)
         self.assertNotIn('deal_id', engine.saved('/jobs/proposals')[0])
 
-    def test_a_reply_inherits_its_thread_deal_and_then_gets_its_next_step(self):
+    def test_a_reply_with_no_conversation_id_inherits_by_subject_and_then_gets_its_next_step(self):
         prior = {'activity_id': 'e0', 'deal_id': DEAL, 'happened_at': '2026-11-19T14:00:00+00:00',
                  'subject': 'Clinic space', 'sender': SENDER}
-        engine = Engine([mail('e1', ASK, subject='RE: Clinic space', deals=[], thread=[prior])])
+        engine = Engine([mail('e1', ASK, subject='RE: Clinic space', conversation_id=None, deals=[], thread=[prior])])
         _, counts = run(engine, lambda email, today: {'proposals': [STEP]})
         self.assertEqual((counts['inherited'], counts['recorded'], counts['routed']), (1, 1, 1))
         link = engine.saved('/jobs/activities/e1/about')
@@ -182,13 +196,60 @@ class SwitchOn(unittest.TestCase):
         _, counts = run(engine)
         self.assertEqual((counts['write_failed'], counts['refused'], counts['routed']), (1, 0, 0))
 
-    def test_the_queue_pages_past_handled_mail(self):
-        engine = Engine([mail(f'e{n}', 'Nothing to act on here today.') for n in range(5)], page=2)
-        state = {'version': email_router.STATE_VERSION, 'routed': {'e0': NOW.timestamp(), 'e1': NOW.timestamp(),
-                                                                    'e2': NOW.timestamp()}, 'reply_recheck': {}}
+    def test_the_queue_pages_past_handled_mail_until_the_cursor_ends(self):
+        engine = Engine([mail(f'e{n:02}', 'Nothing to act on here today.') for n in range(32)], page=2)
+        handled = {f'e{n:02}': NOW.timestamp() for n in range(30)}
+        state = {'version': email_router.STATE_VERSION, 'routed': dict(handled), 'reply_recheck': {}}
         _, counts = run(engine, lambda *_: {'proposals': []}, state=state)
         self.assertEqual((counts['emails'], counts['more']), (2, 0))
-        self.assertEqual(sorted(state['routed']), ['e0', 'e1', 'e2', 'e3', 'e4'])
+        self.assertEqual(sorted(state['routed']), sorted([*handled, 'e30', 'e31']))
+
+    def test_an_unfiled_email_inherits_by_conversation_id_whatever_its_subject(self):
+        prior = {'activity_id': 'e0', 'deal_id': DEAL, 'happened_at': '2026-11-19T14:00:00+00:00',
+                 'conversation_id': 'conversation-e1', 'subject': 'Clinic space', 'sender': SENDER}
+        engine = Engine([mail('e1', ASK, subject='Floor plan question', deals=[], thread=[prior])])
+        counts = email_router.route(engine_router.verbs(engine, 'joe'), lambda *_: {'proposals': []},
+                                    engine_router.refusal_code, {}, NOW, lambda: NOW, matching=thread_only([]),
+                                    account=BROKER)
+        self.assertEqual(counts['inherited'], 1)
+        self.assertEqual(engine.saved('/jobs/activities/e1/about')[0]['about'], [{'deal_id': DEAL}])
+
+    def test_matching_sees_the_recipients_and_the_mailbox_partner_the_queue_names(self):
+        cc = {'address': 'landlord@property.example', 'name': 'Synthetic Landlord', 'kind': 'cc', 'party_id': None,
+              'internal': False, 'client_party_ids': [], 'role': None}
+        engine = Engine([mail('e1', ASK, deals=[], mailbox_user='dell', recipients=[TO_BROKER, cc])])
+        seen: list[dict] = []
+        email_router.route(engine_router.verbs(engine, 'joe'), lambda *_: {'proposals': []}, engine_router.refusal_code,
+                           {}, NOW, lambda: NOW, matching=thread_only(seen), account=BROKER)
+        self.assertEqual(seen[0]['mailbox_owner'], 'dell')
+        self.assertEqual([(r['email'], r['kind'], r['unknown']) for r in seen[0]['recipients']],
+                         [(BROKER, 'to', True), ('landlord@property.example', 'cc', True)])
+
+    def test_an_email_on_several_deals_gets_no_new_link_and_nothing_on_one_of_them(self):
+        second = {'deal_id': OTHER, 'name': 'Synthetic second lease', 'phase': 'negotiation', 'kind': 'lease'}
+        prior = {'activity_id': 'e0', 'deal_id': OTHER, 'happened_at': '2026-11-19T14:00:00+00:00',
+                 'conversation_id': 'conversation-e1', 'subject': 'Clinic space', 'sender': SENDER}
+        cases = {'open': {'deals': [mail('e1')['deals'][0], second]},
+                 'closed': {'deals': [], 'about': [{'party_id': CLIENT}, {'deal_id': DEAL}, {'deal_id': OTHER}]}}
+        for name, fields in cases.items():
+            with self.subTest(name):
+                engine = Engine([mail('e1', thread=[prior], **fields)], open_deals=[OPEN, {**OPEN, **second}])
+                seen: list[dict] = []
+                counts = email_router.route(engine_router.verbs(engine, 'joe'), lambda *_: BOTH,
+                                            engine_router.refusal_code, {}, NOW, lambda: NOW,
+                                            matching=thread_only(seen), account=BROKER)
+                self.assertEqual((seen, counts['inherited'], counts['routed']), ([], 0, 1))
+                self.assertEqual(engine.saved('/jobs/activities/e1/about'), [])
+                self.assertEqual([(p['kind'], p.get('deal_id'), p.get('party_id')) for p in engine.saved('/jobs/proposals')],
+                                 [('next_step', None, CLIENT)])
+
+    def test_one_closed_deal_still_means_filed(self):
+        engine = Engine([mail('e1', deals=[], about=[{'party_id': CLIENT}, {'deal_id': OTHER}, {'deal_id': OTHER}])])
+        seen: list[dict] = []
+        email_router.route(engine_router.verbs(engine, 'joe'), lambda *_: BOTH, engine_router.refusal_code, {}, NOW,
+                           lambda: NOW, matching=thread_only(seen), account=BROKER)
+        self.assertEqual(seen, [])
+        self.assertEqual({p.get('deal_id') for p in engine.saved('/jobs/proposals')}, {OTHER})
 
     def test_a_failed_queue_read_fails_the_run(self):
         engine = Engine([mail('e1')])
