@@ -212,6 +212,9 @@ class Run:
                 if move.fallback["kind"] == "phase_move":
                     reply = self.apply_phase(move, move.fallback["deal_id"])
                 elif confident(body["what"]):
+                    evidence = move.fallback["evidence"]
+                    if activity_id and evidence.strip():
+                        body = {**body, "call": {"activity_id": activity_id, "evidence_quote": evidence}}
                     reply = self.request(path, body)
                 else:
                     reply = engine_mail.Reply(422, {"error": "below_confidence_bar"})
