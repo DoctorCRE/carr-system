@@ -248,6 +248,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
     "The document was not found. Use doctrine-index to choose a current document id or slug for the document argument.",
   ],
   ["needs_disambiguation", "Choose an exact record reference from the candidates before retrying."],
+  ["subject_not_found", "No record matched the supplied reference or name. Check it and try again."],
   [
     "decline_claims_completion",
     "Use complete-work-request to close built work. Decline only work that will not be built.",
@@ -430,6 +431,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
     "Vendor meetings are temporarily unavailable. Quote the correlation_id when reporting it.",
   ],
   ["not_a_deal", "Choose a deal record, not a client or lead."],
+  ["not_a_client", "Choose an existing client by reference or exact name."],
   [
     "portal_slug_invalid",
     "Use lowercase letters, digits and hyphens for the portal name, starting with a letter or digit, at most 63 characters.",
