@@ -246,6 +246,48 @@ test("a writer database failure is translated and its original stack is logged",
   assert.ok(logs.some(log => log.correlation_id === correlationId && log.diagnostic.cause.stack === original.stack));
 });
 
+for (const [client, leadId, expected] of [
+  ["Synthetic Missing Client", null, "subject_not_found"],
+  ["Synthetic Lead", "d170d000-0000-4000-8000-000000000037", "not_a_client"],
+]) test(`MCP new-deal returns ${expected} and rolls back without writing`, async t => {
+  t.mock.method(console, "error", () => {});
+  const statements = [];
+  t.mock.method(Pool.prototype, "connect", async () => ({
+    async query(sql) {
+      statements.push(sql);
+      if (sql.startsWith("select id from actor")) return { rows: [{ id: correlationId }] };
+      if (sql.includes("session_user::text")) return { rows: [{
+        session_principal: "carr_writer", current_principal: "carr_writer",
+        privilege_bundle: "carr_writer", member_carr_writer: true,
+        member_carr_jobs: false, member_carr_authority: false, backend_pid: 9,
+      }] };
+      if (leadId && sql.includes("subject_type in ('lead','client','vendor')"))
+        return { rows: [{ subject_type: "lead", subject_id: leadId }] };
+      return { rows: [] };
+    },
+    release() {},
+  }));
+  t.mock.method(Pool.prototype, "end", async () => {});
+  const request = new Request("https://synthetic.example/mcp", { method: "POST",
+    body: JSON.stringify({ jsonrpc: "2.0", id: 34, method: "tools/call", params: {
+      name: "new-deal", arguments: { idempotency_key: "d170d000-0000-4000-8000-000000000036",
+        client, name: "Synthetic Deal", deal_type: "other", phase: "pending" },
+    } }),
+  });
+  const body = await (await dispatch(request, { CORRELATION_ID: correlationId }, {}, { slug: "joe", human: true })).json();
+  assert.equal(body.result.isError, true);
+  const payload = JSON.parse(body.result.content[0].text);
+  assert.equal(payload.error, expected);
+  assert.equal(payload.correlation_id, correlationId);
+  assert.deepEqual(Object.keys(payload).sort(), ["correlation_id", "error", "hint"]);
+  assert.ok(payload.hint);
+  assert.ok(!payload.hint.includes(client));
+  if (leadId) assert.ok(!payload.hint.includes(leadId));
+  assert.equal(statements[0], "begin");
+  assert.equal(statements.at(-1), "rollback");
+  assert.ok(statements.slice(1, -1).every(sql => sql.startsWith("select")), statements.join("\n"));
+});
+
 for (const delegated of [false, true]) {
   for (const [variant, rows, expected] of [
     ['deal', [{ display_name: 'Synthetic A', status: 'research', client_ref: 'C-1' },
