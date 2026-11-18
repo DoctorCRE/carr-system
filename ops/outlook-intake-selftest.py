@@ -6397,6 +6397,19 @@ class EngineMailTest(unittest.TestCase):
         self.assertEqual(len(self.fake.intent_calls), 1, 'each unknown sender is read once')
         self.assertEqual({user for user, *_ in self.engine.calls}, {'joe'})
 
+    def test_door_19_keeps_only_nonblank_outlook_conversation_ids(self):
+        conversation_ids = ('Outlook-AbC123', None, '', ' \t ')
+        rows = [dict(mail(CLIENT.email, -timedelta(minutes=30 + i), subject=f'Fixture {i}',
+                          message_id=f'<m{i}@example.test>'),
+                     conversation_id=conversation_id)
+                for i, conversation_id in enumerate(conversation_ids)]
+        outcome = self.run_intake(rows)
+        self.assertEqual(outcome.state, 'succeeded', outcome)
+        emails = {post['email']['message_id']: post['email'] for post in self.engine.posts('/jobs/activities')}
+        self.assertEqual(set(emails), {f'm{i}@example.test' for i in range(len(rows))})
+        self.assertEqual({mid: email['conversation_id'] for mid, email in emails.items() if 'conversation_id' in email},
+                         {'m0@example.test': 'Outlook-AbC123'})
+
     def test_preview_waits_for_full_text_then_sends_once(self):
         preview = mail(CLIENT.email, -timedelta(minutes=10), kind='preview', message_id='<p1@example.test>')
         outcome = self.run_intake([preview])
