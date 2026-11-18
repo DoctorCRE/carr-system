@@ -26,7 +26,7 @@ import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dea
 import { canonicalJson } from "./artifact-trust.js";
 import { safeInteger, integerFields } from "./safe-integer.ts";
 import { invoiceTrackerTools } from "./invoice-tracker.ts";
-import { saveAssistantChange } from "./engine-assistant.ts";
+import { copiedAssistantPartyId, saveAssistantChange } from "./engine-assistant.ts";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.ts";
 import { readDealChecklist } from "./deal-checklist.ts";
@@ -266,6 +266,18 @@ function dealNoteInput(args) {
   return { text: args.text.trim(), plan: hasPlan ? { what: args.next_step.trim(), due_on: args.next_date } : undefined };
 }
 
+const ASSISTANT_ROLE_REF_TYPES = { l: 'lead', c: 'client', v: 'vendor' };
+
+async function resolveAssistantStepSubject(client, ref) {
+  const prefix = /^([lcv])-/i.exec(ref)?.[1].toLowerCase();
+  if (!prefix) return resolveSubject(client, ref);
+  const type = ASSISTANT_ROLE_REF_TYPES[prefix];
+  const result = await client.query(
+    'select subject_id from v_ref_index where subject_type=$1 and lower(ref)=lower($2) limit 2', [type, ref]);
+  if (result.rows.length !== 1) throw new ToolError({ error: 'engine_assistant_party_unmapped' });
+  return { type, id: result.rows[0].subject_id };
+}
+
 async function saveAssistantVerb(client, actor, verb, args, env) {
   const partner = partnerAuthoritySlugForActor(actor);
   if (!partner) return;
@@ -273,17 +285,22 @@ async function saveAssistantVerb(client, actor, verb, args, env) {
   const step = verb === 'set-next-action' && !Object.hasOwn(args, 'expected_action') && !args.work_request;
   const completion = verb === 'complete-action';
   const dealNote = verb === 'add-deal-note';
-  if (!activity && !step && !completion && !dealNote) return;
+  const stepWrite = step || completion;
+  if (!activity && !stepWrite && !dealNote) return;
 
-  const subject = await resolveSubject(client, dealNote ? args.deal : args.ref);
+  const subject = stepWrite
+    ? await resolveAssistantStepSubject(client, args.ref)
+    : await resolveSubject(client, dealNote ? args.deal : args.ref);
   if (dealNote && subject.type !== 'deal') throw new ToolError({ error: "not_a_deal", resolved: subject });
-  if (subject.type !== 'deal' && !(completion && subject.type === 'party')) return;
+  const copiedRole = stepWrite && Object.values(ASSISTANT_ROLE_REF_TYPES).includes(subject.type);
+  if (subject.type !== 'deal' && !copiedRole && !(completion && subject.type === 'party')) return;
 
   const { idempotency_key } = args;
   if (!UUID_KEY.test(idempotency_key)) throw new ToolError({ error: 'invalid_idempotency_key', field: 'idempotency_key' });
 
+  const target = subject.type === 'deal' ? { deal_id: subject.id }
+    : { party_id: copiedRole ? await copiedAssistantPartyId(env, subject.id) : subject.id };
   if (completion) {
-    const target = subject.type === 'deal' ? { deal_id: subject.id } : { party_id: subject.id };
     const { id, replayed } = await saveAssistantChange(env, partner, {
       path: '/jobs/next-steps/complete', id: 'next_step_id', body: { idempotency_key, ...target },
     });
@@ -324,12 +341,16 @@ async function saveAssistantVerb(client, actor, verb, args, env) {
 
   const owner = args.owner === undefined || args.owner === null || args.owner === ''
     ? partner : String(args.owner).trim().toLowerCase();
-  if (!isKnownPartner(owner)) return;
+  if (!isKnownPartner(owner)) {
+    if (copiedRole) throw new ToolError({ error: 'owner_not_permitted' });
+    return;
+  }
 
   assertDealRoomField('next_date', args.due_on || null, ToolError);
   const { id, replayed } = await saveAssistantChange(env, partner, {
     path: '/jobs/next-steps', id: 'next_step_id', body: {
-      idempotency_key, deal_id: subject.id, what: args.description, replaces: 'current',
+      idempotency_key, what: args.description,
+      ...(target.deal_id ? { deal_id: target.deal_id, replaces: 'current' } : { party_id: target.party_id }),
       ...(args.due_on && { due_on: args.due_on }),
       ...(owner !== partner && { owner }),
     },

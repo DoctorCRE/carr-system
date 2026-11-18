@@ -5,7 +5,12 @@ type EngineEnv = {
   ENGINE_URL?: string;
   ENGINE_ACCESS_CLIENT_ID?: string;
   ENGINE_ACCESS_CLIENT_SECRET?: string;
+  ENGINE_ASSISTANT_PARTY_MAP?: { get(key: string): Promise<string | null> };
 };
+
+type DealSubject = { deal_id: string; party_id?: never };
+type PartySubject = { party_id: string; deal_id?: never };
+type StepSubject = DealSubject | PartySubject;
 
 type Save =
   | {
@@ -16,7 +21,7 @@ type Save =
         kind: string;
         happened_at?: string;
         summary: string;
-        about: ({ deal_id: string } | { party_id: string })[];
+        about: StepSubject[];
       };
     }
   | {
@@ -24,17 +29,15 @@ type Save =
       id: "next_step_id";
       body: {
         idempotency_key: string;
-        deal_id: string;
         what: string;
         owner?: string;
         due_on?: string;
-        replaces: "current";
-      };
+      } & ((DealSubject & { replaces: "current" }) | (PartySubject & { replaces?: never }));
     }
   | {
       path: "/jobs/next-steps/complete";
       id: "next_step_id";
-      body: { idempotency_key: string } & ({ deal_id: string } | { party_id: string });
+      body: { idempotency_key: string } & StepSubject;
     }
   | {
       path: "/jobs/activities/deal-note";
@@ -50,6 +53,16 @@ type Save =
 const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const isUuid = (value: unknown): value is string => typeof value === "string" && uuid.test(value);
 export const engineErrorSlug = /^[a-z][a-z0-9_]{0,63}$/;
+
+export async function copiedAssistantPartyId(env: EngineEnv, oldRoleId: string) {
+  const map = env.ENGINE_ASSISTANT_PARTY_MAP;
+  if (!map) throw new ToolError({ error: "engine_assistant_configuration" });
+  const partyId = await map.get(oldRoleId).catch(() => {
+    throw new ToolError({ error: "engine_assistant_unavailable" });
+  });
+  if (!isUuid(partyId)) throw new ToolError({ error: "engine_assistant_party_unmapped" });
+  return partyId;
+}
 
 function dealNoteReceipt(result: Record<string, unknown>, hasPlan: boolean) {
   const { next_step_id, next_step_required, proposal_id } = result;

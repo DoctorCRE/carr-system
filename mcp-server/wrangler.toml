@@ -177,8 +177,10 @@ DEALROOM_PROGRAM6_ACTIONS_ENABLED = "true"
 # Authenticated Command Center cutover: / serves workspace.html while enabled;
 # /deals remains the explicit Deal Room route. Disable to roll back the root.
 WORKSPACE_COMMAND_CENTER_READ_ENABLED = "true"
-# Program 28: "true" routes supported assistant deal saves to DoctorCRE Engine.
+# Program 28: "true" routes supported assistant saves to DoctorCRE Engine.
 # It needs the ENGINE_URL, ENGINE_ACCESS_CLIENT_ID and ENGINE_ACCESS_CLIENT_SECRET secrets.
+# Lead, client and vendor steps also need the private ENGINE_ASSISTANT_PARTY_MAP
+# KV binding populated from the target copy's old_system outside IDs (role UUID to party UUID).
 ENGINE_ASSISTANT = "false"
 # Final half of the reviewed zero-downtime credential cutover. Dedicated Codex
 # and Claude token maps and native profiles passed the isolated live lifecycle

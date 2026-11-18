@@ -392,6 +392,10 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["actor_not_provisioned", "The authenticated actor is not provisioned."],
   ["engine_assistant_configuration", "The assistant's engine connection is missing its settings."],
   [
+    "engine_assistant_party_unmapped",
+    "This reference has no verified DoctorCRE Engine party mapping. Check that the record was copied.",
+  ],
+  [
     "engine_assistant_refused",
     "DoctorCRE Engine refused the assistant save. Quote the correlation_id when reporting it.",
   ],
