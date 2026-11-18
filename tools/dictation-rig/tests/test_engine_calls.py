@@ -56,7 +56,8 @@ class FakeEngine:
             return self.refuse[path].pop(0)
         first = request["idempotency_key"] not in self.stored
         answer = self.stored.setdefault(request["idempotency_key"], {
-            "/jobs/activities": {"activity_id": ACTIVITY, "existing": False},
+            "/jobs/activities": {"activity_id": ACTIVITY if request.get("kind") == "call" else f"note-{len(self.stored)}",
+                                 "existing": False},
             "/jobs/next-steps": {"next_step_id": f"step-{len(self.stored)}", "change_id": 1},
             "/jobs/proposals": {"proposal_id": f"proposal-{len(self.stored)}", "status": "pending"},
         }[path])
@@ -97,13 +98,13 @@ class EngineCalls(unittest.TestCase):
         engine = FakeEngine()
         self.assertTrue(self.publish(engine))
         paths = [path for _, path, _ in engine.calls]
-        self.assertEqual(paths, ["/jobs/activities", "/jobs/proposals", "/jobs/next-steps",
-                                 "/jobs/proposals", "/jobs/proposals"])
+        self.assertEqual(paths, ["/jobs/activities", "/jobs/proposals", "/jobs/activities", "/jobs/next-steps",
+                                 "/jobs/proposals", "/jobs/activities", "/jobs/proposals"])
         call = engine.calls[0][2]
         self.assertEqual((call["kind"], call["happened_at"]), ("call", "2026-10-26T13:30:00+00:00"))
         self.assertEqual(call["about"], [{"deal_id": DEAL_A}, {"deal_id": DEAL_B}])
         self.assertEqual(call["summary"], "Walked the pipeline.\n\n- Send the lease draft\n\n- Parking?")
-        task, step, phase, held = (request for _, _, request in engine.calls[1:])
+        task, _, step, phase, _, held = (request for _, _, request in engine.calls[1:])
         self.assertEqual({k: task[k] for k in ("kind", "deal_id", "what", "due_on", "activity_id")},
                          {"kind": "next_step", "deal_id": DEAL_A, "what": "Call the landlord",
                           "due_on": "2026-10-30", "activity_id": ACTIVITY})
@@ -121,6 +122,24 @@ class EngineCalls(unittest.TestCase):
             "bindings": [{"remote": "post_call", "index": 0}, {"remote": "legacy"}, {"remote": "post_call", "index": 1}]})
         self.assertEqual((drafts, bindings), ([{"kind": "email_draft"}], [{"remote": "post_call", "index": 1}]))
 
+    def test_each_deal_update_is_a_note_about_its_deal_and_a_lost_note_is_retried(self):
+        engine = FakeEngine({"/jobs/activities": [Reply(201, {"activity_id": ACTIVITY, "existing": False}),
+                                                  Reply(503, {"error": "database_unavailable"})]})
+        self.assertFalse(self.publish(engine))
+        self.assertNotIn("engine", self.saved()["deal_updates"][0])
+        self.assertTrue(self.publish(engine))
+        notes = [request for _, path, request in engine.calls if path == "/jobs/activities" and request["kind"] == "note"]
+        self.assertEqual(notes[0]["idempotency_key"], notes[1]["idempotency_key"])
+        self.assertEqual([(n["about"], n["summary"], n["happened_at"]) for n in notes[1:]],
+                         [([{"deal_id": DEAL_A}], "Lease draft is next.", "2026-10-26T13:30:00+00:00"),
+                          ([{"deal_id": DEAL_B}], "Tour soon.", "2026-10-26T13:30:00+00:00")])
+        self.assertEqual([update["engine"] for update in self.saved()["deal_updates"]],
+                         [{"outcome": "stored", "activity_id": engine.stored[n["idempotency_key"]]["activity_id"]}
+                          for n in notes[1:]])
+        calls = len(engine.calls)
+        self.assertTrue(self.publish(engine))
+        self.assertEqual(len(engine.calls), calls)
+
     def test_a_crashed_run_retries_with_the_same_keys_and_converges(self):
         engine = FakeEngine({"/jobs/proposals": [Reply(503, {"error": "database_unavailable"})]})
         self.assertFalse(self.publish(engine))
@@ -130,7 +149,7 @@ class EngineCalls(unittest.TestCase):
         retried = [request["idempotency_key"] for _, _, request in engine.calls[len(first):]]
         self.assertEqual(retried[0], first[1])
         self.assertLessEqual(set(retried), set(engine.stored))
-        self.assertEqual(len(engine.stored), 5)
+        self.assertEqual(len(engine.stored), 7)
         self.assertEqual(post_call._report_candidates(self.saved()), self.saved()["draft_proposals"])
 
     def test_a_refused_caller_holds_the_session_and_records_nothing(self):
@@ -147,8 +166,8 @@ class EngineCalls(unittest.TestCase):
         self.assertEqual((step["apply"], step["engine"]["outcome"], step["engine"]["refused"]),
                          ("review", "stored", "not_found"))
         self.assertIn("not_found", step["review_reason"])
-        fallback = engine.calls[3][2]
-        self.assertEqual((engine.calls[3][1], fallback["kind"], fallback["activity_id"]),
+        fallback = engine.calls[4][2]
+        self.assertEqual((engine.calls[4][1], fallback["kind"], fallback["activity_id"]),
                          ("/jobs/proposals", "next_step", ACTIVITY))
 
     def test_a_one_word_automatic_step_stays_a_suggestion(self):

@@ -5,7 +5,7 @@ system calls". The bridge calls them only when the capture config sets engine_ca
 otherwise nothing here runs and the call's suggestions go to the capture Worker as before.
 
 The call is one activity about every deal the report names, with the report's summary,
-decisions and open questions. Each task and each stated next step or phase move becomes a
+decisions and open questions. Each deal update's sentence is a note about its deal. Each task and each stated next step or phase move becomes a
 suggestion on that call. A next step the report marked automatic, held to the bridge's
 confidence bar, is saved as a next step instead; one the engine refuses becomes a
 suggestion with the reason kept for Call Mode. Phase moves are always suggestions: a job
@@ -30,6 +30,7 @@ import post_call
 from lib import engine_mail
 
 JOB = "call_capture"
+PROPOSALS = "/jobs/proposals"
 TASK_LISTS = ("joe_tasks", "dell_tasks")
 PARTNER = re.compile(r"[a-z][a-z0-9_]{0,63}")
 
@@ -43,6 +44,7 @@ class Move:
     path: str
     body: Dict[str, Any]
     fallback: Optional[Dict[str, Any]] = None
+    answer: str = "proposal_id"
 
 
 def connector(config: Dict[str, Any]) -> Optional[Connect]:
@@ -99,8 +101,10 @@ def call(session_dir: Path, report: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return {**request, "summary": text} if text else request
 
 
-def moves(session: str, report: Dict[str, Any]) -> Iterator[Move]:
-    """Each suggestion the Worker does not already hold, with its door and request."""
+def moves(session_dir: Path, report: Dict[str, Any]) -> Iterator[Move]:
+    """Each note and suggestion the Worker does not already hold, with its door and request."""
+    session = session_dir.name
+
     def proposal(name: str, kind: str, deal_id: str, evidence: str, what: Optional[str] = None,
                  due_on: Optional[str] = None) -> Dict[str, Any]:
         body = {"idempotency_key": key(session, name, "proposal"), "kind": kind, "deal_id": deal_id,
@@ -111,9 +115,16 @@ def moves(session: str, report: Dict[str, Any]) -> Iterator[Move]:
         for index, task in enumerate(report.get(list_name, [])):
             name = f"{list_name}:{index}"
             if not task.get("candidate_id"):
-                yield Move(task, name, "/jobs/proposals", proposal(
+                yield Move(task, name, PROPOSALS, proposal(
                     name, "next_step", task["deal_id"], task["evidence"], task["title"], task.get("due_on")))
     for index, update in enumerate(report.get("deal_updates", [])):
+        if not update.get("candidate_id"):
+            name = f"deal_updates:{index}"
+            note = {"idempotency_key": key(session, name, "note"), "kind": "note",
+                    "happened_at": happened_at(session_dir, report), "about": [{"deal_id": update["deal_id"]}]}
+            text = str(update.get("summary") or "").strip()
+            yield Move(update, name, "/jobs/activities", {**note, "summary": text} if text else note,
+                       answer="activity_id")
         step, phase = update.get("next_step"), update.get("phase_move")
         if isinstance(step, dict) and not step.get("candidate_id"):
             name = f"deal_updates:{index}:next_step"
@@ -124,10 +135,10 @@ def moves(session: str, report: Dict[str, Any]) -> Iterator[Move]:
                          "what": step["text"], **({"due_on": step["next_date"]} if step.get("next_date") else {})}
                 yield Move(step, name, "/jobs/next-steps", saved, suggestion)
             else:
-                yield Move(step, name, "/jobs/proposals", suggestion)
+                yield Move(step, name, PROPOSALS, suggestion)
         if isinstance(phase, dict) and not phase.get("candidate_id"):
             name = f"deal_updates:{index}:phase_move"
-            yield Move(phase, name, "/jobs/proposals",
+            yield Move(phase, name, PROPOSALS,
                        proposal(name, "phase_move", update["deal_id"], update["evidence"]))
 
 
@@ -169,10 +180,10 @@ class Run:
                 return False
             stored = settled(reply, "activity_id") if reply else {"outcome": "about_nothing"}
         activity_id = stored.get("activity_id")
-        for move in moves(self.session_dir.name, report):
+        for move in moves(self.session_dir, report):
             if "engine" in move.item or self.blocked:
                 continue
-            if activity_id is None and move.fallback is None:
+            if activity_id is None and move.path == PROPOSALS:
                 self.outcomes[move.key] = {"outcome": "call_not_stored"}
                 continue
             self.outcomes[move.key] = self.send(move, activity_id)
@@ -192,18 +203,16 @@ class Run:
             refused = {"refused": reply.error}
             if activity_id is None:
                 return {"outcome": "call_not_stored", **refused}
-            reply = self.post("/jobs/proposals", {**move.fallback, "activity_id": activity_id})
+            reply = self.post(PROPOSALS, {**move.fallback, "activity_id": activity_id})
             return {**settled(reply, "proposal_id"), **refused} if reply else {}
-        reply = self.post(move.path, {**move.body, "activity_id": activity_id})
-        return settled(reply, "proposal_id") if reply else {}
+        body = {**move.body, "activity_id": activity_id} if move.path == PROPOSALS else move.body
+        reply = self.post(move.path, body)
+        return settled(reply, move.answer) if reply else {}
 
     def record(self, stored: Dict[str, Any]) -> None:
         with post_call.update_report(self.session_dir) as report:
             report["engine_call"] = stored
-            for update in report.get("deal_updates", []):
-                if not update.get("candidate_id") and "outcome" in stored:
-                    update.setdefault("engine", {"outcome": "in_call", "call": stored["outcome"]})
-            for move in moves(self.session_dir.name, report):
+            for move in moves(self.session_dir, report):
                 outcome = self.outcomes.get(move.key)
                 if not outcome:
                     continue
@@ -231,4 +240,3 @@ def settled(reply: engine_mail.Reply, id_field: str) -> Dict[str, Any]:
     outcome = {"outcome": "existing" if reply.body.get("existing") is True else "stored"}
     value = reply.body.get(id_field)
     return {**outcome, id_field: value} if isinstance(value, str) else outcome
-
