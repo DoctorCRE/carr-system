@@ -1,0 +1,5 @@
+{
+  "node": ["test/engine-assistant.test.ts"],
+  "worker": ["src/engine-assistant.ts"],
+  "entry": ["test/engine-assistant.test.ts"]
+}

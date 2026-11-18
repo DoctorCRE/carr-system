@@ -909,7 +909,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
       throw new ToolError({ error: "trusted_database_principal_unavailable" });
     const result = await executeWithTrustedPrincipal(actorWithId, principalReadback.rows[0],
       needsAuthority ? "carr_authority" : "carr_writer",
-      fullActor => executeRegisteredTool(client, fullActor, name, args || {}));
+      fullActor => executeRegisteredTool(client, fullActor, name, args || {}, env));
     await client.query("commit");
     client.inTransaction = false;
     if (tool.afterCommit) {

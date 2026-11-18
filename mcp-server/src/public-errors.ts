@@ -1,6 +1,7 @@
 // Convert internal errors into closed public error responses.
 
 import { isValidCorrelationId, logLine } from "./correlation.ts";
+import { engineErrorSlug } from "./engine-assistant.ts";
 import { ToolError } from "./tool-error.ts";
 
 /** The public JSON-RPC/HTTP refusal shape. Every optional field is opt-in per code. */
@@ -18,6 +19,7 @@ type PublicError = {
   suggested_card_title?: string;
   suggested_description?: string;
   allowed_values?: string[];
+  engine_error?: string;
 };
 type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSchema; enum?: unknown[] };
 
@@ -388,6 +390,12 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["human_only_verb_requires_verified_partner", "This operation requires verified partner authority."],
   ["unattended_runner_authority_not_admitted", "This operation is unavailable to unattended sessions."],
   ["actor_not_provisioned", "The authenticated actor is not provisioned."],
+  ["engine_assistant_configuration", "The assistant's engine connection is missing its settings."],
+  [
+    "engine_assistant_refused",
+    "DoctorCRE Engine refused the assistant save. Quote the correlation_id when reporting it.",
+  ],
+  ["engine_assistant_unavailable", "DoctorCRE Engine did not confirm the save. Retry with the same idempotency_key."],
   ["authority_connection_unavailable", "Partner authority is unavailable for this operation."],
   ["caller_authority_field_forbidden", "Remove caller-supplied authority fields."],
   ["unregistered_operation_fields", "Remove fields outside the documented input."],
@@ -532,6 +540,12 @@ export function publicError(
     ["base_rent_per_sf", "landlord_ti_per_sf", "term_months", "free_rent_months"].includes(String(payload?.field))
   )
     result.fields = [payload?.field];
+  if (
+    code === "engine_assistant_refused" &&
+    typeof payload?.engine_error === "string" &&
+    engineErrorSlug.test(payload.engine_error)
+  )
+    result.engine_error = payload.engine_error;
   if (
     ["unsupported_decision_about", "decision_about_work_request_not_found"].includes(code) &&
     typeof payload?.ref === "string" &&
