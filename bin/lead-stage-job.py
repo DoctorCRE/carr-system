@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
@@ -37,8 +36,7 @@ def list_engine_invoice_closes(credentials: Path) -> list[InvoiceClose]:
     raise RuntimeError("Engine invoice list is pending")
 
 
-@dataclass(frozen=True)
-class EngineInvoiceCloses:
+class EngineInvoiceCloses(NamedTuple):
     credentials: Path
     receipts: Path
 
