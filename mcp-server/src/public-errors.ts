@@ -391,10 +391,17 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["unattended_runner_authority_not_admitted", "This operation is unavailable to unattended sessions."],
   ["actor_not_provisioned", "The authenticated actor is not provisioned."],
   ["engine_assistant_configuration", "The assistant's engine connection is missing its settings."],
+  ["engine_assistant_email_step_on_home", "The partner accepts this suggestion on Home."],
+  ["engine_assistant_party_unmapped", "Use an exact lead, client, or vendor reference that identifies one record."],
   [
     "engine_assistant_refused",
     "DoctorCRE Engine refused the assistant save. Quote the correlation_id when reporting it.",
   ],
+  [
+    "engine_assistant_outreach_unavailable",
+    "Use complete-action for a finished step. Include an outcome for a party note, or use log-activity for a deal.",
+  ],
+  ["engine_assistant_step_guard_unsupported", "Set an ordinary next step. For an email suggestion, accept it on Home."],
   ["engine_assistant_unavailable", "DoctorCRE Engine did not confirm the save. Retry with the same idempotency_key."],
   [
     "invalid_engine_invoice_evidence",
