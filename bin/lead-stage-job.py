@@ -78,17 +78,12 @@ class EngineInvoiceCloses(NamedTuple):
     mailbox_partner: str
 
     def capture(self, args: dict) -> None:
-        evidence_ref = args["native_ref"]
-        if not isinstance(evidence_ref, str):
-            raise ValueError("Invoice evidence reference must be text")
-        sender, deal_name = args["from_address"], args["deal_name"]
-        request = {"idempotency_key": str(uuid.uuid5(uuid.NAMESPACE_URL, evidence_ref)), "evidence_ref": evidence_ref,
-                   "sender": sender.lower() if isinstance(sender, str) else sender,
-                   "deal_name": deal_name.strip() if isinstance(deal_name, str) else deal_name,
-                   "occurred_at": args["occurred_at"]}
+        request = {"idempotency_key": args["idempotency_key"], "evidence_ref": args["native_ref"],
+                   "sender": args["from_address"], "deal_name": args["deal_name"], "occurred_at": args["occurred_at"]}
         for field in ("client_name", "property_address"):
-            value = args.get(field)
-            request[field] = (value.strip() or None) if isinstance(value, str) else value
+            if field in args:
+                value = args[field]
+                request[field] = (value.strip() or None) if isinstance(value, str) else value
         door = engine_mail.connect(self.credentials, self.mailbox_partner, job="mail_capture")
         reply = call_engine(door, "POST", "/jobs/invoice-emails", json.dumps(request).encode())
         if reply.status != 200:

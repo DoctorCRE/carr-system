@@ -634,7 +634,6 @@ const invoice = {
 };
 const mailboxPartner = { id: agent.id, slug: "dell", human: true };
 const localMailbox = { ...agent, slug: "dell-local", via: "local-token" };
-const captureReplayId = "910c2635-9e61-5901-90f8-65406d41eb2e";
 
 test("invoice capture off writes the legacy invoice with its local date", async (t) => {
   const upstream = engine(t, () => assert.fail("off made an engine request"), "false");
@@ -652,16 +651,17 @@ test("invoice capture off writes the legacy invoice with its local date", async 
   assert.equal(upstream.calls.length, 0);
 });
 
-test("invoice capture retries and replays for the mailbox partner with the same evidence key", async (t) => {
+test("invoice capture retries with a key derived from the caller's save", async (t) => {
   let attempts = 0;
-  const upstream = engine(t, () =>
-    attempts++ === 0
+  const upstream = engine(t, () => {
+    const attempt = attempts++;
+    return attempt === 0
       ? Response.json({ error: "database_unavailable" }, { status: 503 })
-      : Response.json({ invoice_id: savedId, evidence_ref: invoice.native_ref, replayed: true }),
-  );
-  for (const [actor, idempotency_key] of [
-    [mailboxPartner, key],
-    [localMailbox, savedId],
+      : Response.json({ invoice_id: savedId, evidence_ref: invoice.native_ref, ...(attempt === 1 && { replayed: true }) });
+  });
+  for (const [actor, idempotency_key, receipt] of [
+    [mailboxPartner, key, { replayed: true }],
+    [localMailbox, savedId, {}],
   ] as const) {
     const reply = await executeRegisteredTool(
       legacy(),
@@ -673,16 +673,16 @@ test("invoice capture retries and replays for the mailbox partner with the same 
       },
       upstream.env,
     );
-    assert.deepEqual(reply, { ok: true, invoice_id: savedId, evidence_ref: invoice.native_ref, replayed: true });
+    assert.deepEqual(reply, { ok: true, invoice_id: savedId, evidence_ref: invoice.native_ref, ...receipt });
   }
   assert.equal(upstream.calls.length, 3);
-  for (const request of upstream.calls) {
+  for (const [index, request] of upstream.calls.entries()) {
     assert.equal(request.method, "POST");
     assert.equal(request.path, "/jobs/invoice-emails");
     assert.equal(request.headers.get("Engine-Job"), "mail_capture");
     assert.equal(request.headers.get("Engine-For-User"), mailboxPartner.slug);
     assert.deepEqual(request.body, {
-      idempotency_key: captureReplayId,
+      idempotency_key: derivedIdempotencyKey("record-deal-invoice", index < 2 ? key : savedId),
       evidence_ref: invoice.native_ref,
       sender: invoice.from_address,
       deal_name: invoice.deal_name,
@@ -698,11 +698,19 @@ test("invoice capture does not accept a receipt for different evidence", async (
   await assert.rejects(
     executeRegisteredTool(legacy(), mailboxPartner, "record-deal-invoice", { ...invoice }, upstream.env),
     {
-      payload: { error: "engine_assistant_unavailable" },
+      payload: { error: "engine_assistant_refused", engine_status: 200 },
     },
   );
-  assert.equal(upstream.calls.length, 3);
-  assert.ok(upstream.calls.every(({ body }) => record(body).evidence_ref === invoice.native_ref));
+  assert.equal(upstream.calls.length, 1);
+});
+
+test("invoice capture preserves the engine's key_reuse refusal", async (t) => {
+  const upstream = engine(t, () => Response.json({ error: "key_reuse" }, { status: 409 }));
+  await assert.rejects(
+    executeRegisteredTool(legacy(), mailboxPartner, "record-deal-invoice", { ...invoice }, upstream.env),
+    { payload: { error: "key_reuse", engine_status: 409, engine_error: "key_reuse" } },
+  );
+  assert.equal(upstream.calls.length, 1);
 });
 
 test("invoice capture refuses callers without a mailbox and never falls back on an engine refusal", async (t) => {
