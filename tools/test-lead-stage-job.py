@@ -212,7 +212,7 @@ class EngineInvoiceCloseTests(unittest.TestCase):
         method, path, payload = capture_door.call_args.args
         body = json.loads(payload)
         key = body.pop("idempotency_key")
-        self.assertEqual(job.uuid.UUID(key).version, 5)
+        self.assertEqual(key, str(job.uuid.uuid5(job.uuid.NAMESPACE_URL, evidence["native_ref"])))
         self.assertEqual(capture_door.call_args_list, [call("POST", "/jobs/invoice-emails", payload)] * 2)
         self.assertEqual(body, {"evidence_ref": evidence["native_ref"], "sender": evidence["from_address"],
                                 "deal_name": evidence["deal_name"], "occurred_at": evidence["occurred_at"],

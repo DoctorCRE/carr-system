@@ -396,6 +396,15 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
     "DoctorCRE Engine refused the assistant save. Quote the correlation_id when reporting it.",
   ],
   ["engine_assistant_unavailable", "DoctorCRE Engine did not confirm the save. Retry with the same idempotency_key."],
+  [
+    "invalid_engine_invoice_evidence",
+    "Supply a local mail reference, sender, deal name and a past email timestamp with its offset.",
+  ],
+  [
+    "invoice_mailbox_identity_required",
+    "Capture the invoice as the partner who owns the source mailbox or through that partner's local record tool.",
+  ],
+  ["invoice_undo_requires_engine_session", "Undo the invoice close directly in DoctorCRE with your partner session."],
   ["authority_connection_unavailable", "Partner authority is unavailable for this operation."],
   ["caller_authority_field_forbidden", "Remove caller-supplied authority fields."],
   ["unregistered_operation_fields", "Remove fields outside the documented input."],
