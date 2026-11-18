@@ -50,6 +50,10 @@ IDEMPOTENCE (ORDER 14a: "key on (rule_id, completed_action_id)")
   `event` is the ledger this system already keeps, and a spawn IS a recorded
   fact, not bookkeeping beside one.
 
+  With engine_cadence enabled in the private Outlook settings, rules, lookback
+  and pre-cutover receipts are read here, but subjects and steps come from
+  DoctorCRE Engine and saves go through its next-step door.
+
 WHAT IT NEVER DOES
   * Never drops or overwrites a human's ball. `set-next-action` drops YOUR own
     previous open ball on purpose; this engine has no such licence. If the owner
@@ -72,19 +76,28 @@ out/nightly.log (self-trimming).
 EXIT CODES
   0  ran (including "nothing to do" and "no rules seeded", both of which are
      honest, reportable states rather than failures)
+  1  cadence settings, engine reads or engine saves failed
   78 EX_CONFIG — no database URL. The nightly chain treats 78 as NOT CONFIGURED
      and does not fail the night over it.
 """
 
+from __future__ import annotations
+
 import argparse
+import json
 import os
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
+from urllib.parse import urlencode
+from uuid import NAMESPACE_URL, uuid5
 
 import psycopg
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+from lib import engine_mail, outlook_settings
+
 OUT = REPO / "out"
 REPORT = OUT / "cadence-latest.md"
 
@@ -120,21 +133,25 @@ def fmt(template, **kw):
     return out.strip()
 
 
-def load_context(conn):
-    """Everything the run needs about subjects, read once."""
-    ctx = {}
-
-    ctx["automation"] = conn.execute(
-        "select id from actor where slug=%s", (AUTOMATION_SLUG,)).fetchone()
-    if ctx["automation"] is None:
-        raise SystemExit("actor '%s' does not exist — stop and report" % AUTOMATION_SLUG)
-    ctx["automation"] = ctx["automation"][0]
-
-    ctx["lookback_days"] = DEFAULT_LOOKBACK_DAYS
+def lookback_days(conn):
     row = conn.execute(
         "select value from system_config where key='cadence.lookback_days'").fetchone()
-    if row and isinstance(row[0], int):
-        ctx["lookback_days"] = row[0]
+    return row[0] if row and isinstance(row[0], int) else DEFAULT_LOOKBACK_DAYS
+
+
+def legacy_spawn_keys(conn):
+    return {r[0] for r in conn.execute(
+        "select idempotency_key from event where verb=%s and idempotency_key is not null",
+        (SPAWN_VERB,)).fetchall()}
+
+
+def load_context(conn):
+    """Everything the legacy run needs about subjects, read once."""
+    automation = conn.execute(
+        "select id from actor where slug=%s", (AUTOMATION_SLUG,)).fetchone()
+    if automation is None:
+        raise SystemExit("actor '%s' does not exist — stop and report" % AUTOMATION_SLUG)
+    ctx = dict(engine=False, automation=automation[0], lookback_days=lookback_days(conn))
 
     # subject display + owner + the client whose status governs the guard.
     # client: its own status. deal: its client's. lead: its client's, when the
@@ -170,13 +187,93 @@ def load_context(conn):
             "select subject_type, subject_id, owner_id from next_action where status='open'"
         ).fetchall()}
 
-    # every key this engine has ever written — idempotence, read once
-    ctx["spawned"] = {
-        r[0] for r in conn.execute(
-            "select idempotency_key from event where verb=%s and idempotency_key is not null",
-            (SPAWN_VERB,)).fetchall()}
+    ctx["spawned"] = legacy_spawn_keys(conn)
 
     return ctx
+
+
+def configured_door() -> engine_mail.Door | None:
+    settings = outlook_settings.load_cadence_settings()
+    if settings is None:
+        return None
+    assert settings.engine_credentials is not None
+    return engine_mail.connect(settings.engine_credentials, job="cadence")
+
+
+def call_engine(door: engine_mail.Door, method: str, path: str,
+                body: bytes | None = None) -> tuple[engine_mail.Reply, bool]:
+    for attempt in range(3):
+        reply = door(method, path, body)
+        if 0 < reply.status < 500:
+            return reply, attempt > 0
+    return reply, True
+
+
+class EngineReadError(ValueError):
+    pass
+
+
+def cadence_items(door: engine_mail.Door, collection: str, status: str | None = None):
+    query = {"collection": collection, "limit": "500"}
+    if status is not None:
+        query["status"] = status
+    while True:
+        reply, _ = call_engine(door, "GET", "/jobs/cadence?" + urlencode(query))
+        if reply.status != 200:
+            raise EngineReadError(f"read {collection}: {reply.status} {reply.error}")
+        rows = reply.body.get("items")
+        cursor = reply.body.get("next_cursor")
+        if (not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows)
+                or "next_cursor" not in reply.body
+                or (cursor is not None and (not isinstance(cursor, str)
+                    or cursor <= query.get("after", "") or not rows or rows[-1].get("id") != cursor))):
+            raise ValueError(f"invalid {collection} page")
+        yield from rows
+        if cursor is None:
+            break
+        query["after"] = cursor
+
+
+def load_engine_context(conn, door: engine_mail.Door):
+    subjects, lease_dates = {}, []
+    by_party: dict[str, list[str]] = {}
+    for kind, collection in (("client", "clients"), ("lead", "leads"), ("vendor", "vendors")):
+        for row in cadence_items(door, collection):
+            sid = row["id"]
+            subjects[kind, sid] = dict(name=row["name"], ref=row["ref"], owner=row["owner_party_id"],
+                                       status=row["client_status"], old_ids=[v["value"] for v in row["old_ids"]])
+            by_party.setdefault(sid, []).append(kind)
+            if kind == "lead" and row["estimated_lease_on"] is not None:
+                lease_dates.append((sid, date.fromisoformat(row["estimated_lease_on"])))
+
+    open_balls = {("party", row["party_id"], row["owner_party_id"])
+                  for row in cadence_items(door, "next_steps", "open")}
+    completed: dict[str, list[tuple[str, str, str | None, date, str]]] = {}
+    for row in cadence_items(door, "next_steps", "done"):
+        if row["done_at"] is None:
+            continue
+        sid = row["party_id"]
+        done_on = date.fromisoformat(row["done_at"][:10])
+        for kind in by_party.get(sid, ()):
+            completed.setdefault(kind, []).append(
+                (row["id"], sid, row["owner_party_id"], done_on, row["description"]))
+    for actions in completed.values():
+        actions.sort(key=lambda row: (row[3], row[0]))
+    return dict(engine=True, subjects=subjects, open_balls=open_balls, completed=completed, lease_dates=lease_dates,
+                lookback_days=lookback_days(conn), spawned=legacy_spawn_keys(conn))
+
+
+def ball_key(ctx, kind, sid, owner):
+    return ("party" if ctx["engine"] else kind, sid, owner)
+
+
+def save_engine_step(door: engine_mail.Door, step) -> tuple[engine_mail.Reply, bool]:
+    # A late lease run moves the displayed due date, but never opens a second milestone.
+    party, rule, due = step["subject_id"], step["rule_id"], step.get("milestone_on", step["due_on"])
+    key = str(uuid5(NAMESPACE_URL, f"engine|cadence|{party}|{rule}|{due}"))
+    body = json.dumps(dict(idempotency_key=key, party_id=party, what=step["description"],
+                           owner_party_id=step["owner"], due_on=step["due_on"].isoformat())).encode()
+    return call_engine(door, "POST", "/jobs/next-steps", body)
 
 
 def guard_reason(ctx, stype, sid, status_filter=None):
@@ -211,7 +308,7 @@ def plan_on_complete(conn, ctx, rule, today, plan, skips):
         skips.append((lane, "rule has no interval_days — an on_complete rule without "
                             "one cannot date its successor", None))
         return
-    rows = conn.execute("""
+    rows = ctx["completed"].get(stype, []) if ctx["engine"] else conn.execute("""
         select n.id, n.subject_id, n.owner_id, n.updated_at::date, n.description
           from next_action n
          where n.status = 'done' and n.subject_type = %s
@@ -233,7 +330,7 @@ def plan_on_complete(conn, ctx, rule, today, plan, skips):
         # the completed action's own owner inherits the successor: the ball
         # stays with whoever was carrying it.
         own = owner or s["owner"]
-        if (stype, sid, own) in ctx["open_balls"]:
+        if ball_key(ctx, stype, sid, own) in ctx["open_balls"]:
             skips.append((lane, "owner already holds an open ball on this subject "
                                 "— the engine never takes a human's ball", key))
             continue
@@ -262,7 +359,7 @@ def plan_on_date(conn, ctx, rules_for_lane, lane, stype, today, plan, skips):
         return
     table, column = src
     rules = sorted(rules_for_lane, key=lambda r: -(r[4] or 0))   # widest first
-    rows = conn.execute(
+    rows = ctx["lease_dates"] if ctx["engine"] else conn.execute(
         "select id, %s from %s where %s is not null" % (column, table, column)).fetchall()
     for i, rule in enumerate(rules):
         rid, _lane, _st, _tg, interval, template, _a, sfilter = rule
@@ -285,13 +382,17 @@ def plan_on_date(conn, ctx, rules_for_lane, lane, stype, today, plan, skips):
                 skips.append((lane, why, key))
                 continue
             s = ctx["subjects"][(stype, sid)]
-            if (stype, sid, s["owner"]) in ctx["open_balls"]:
+            if any("cadence:%s:date:%s:%s" % (rid, old_id, event_on.isoformat()) in ctx["spawned"]
+                   for old_id in s.get("old_ids", ())):
+                continue
+            if ball_key(ctx, stype, sid, s["owner"]) in ctx["open_balls"]:
                 skips.append((lane, "owner already holds an open ball on this subject "
                                     "— the engine never takes a human's ball", key))
                 continue
             plan.append(dict(
                 key=key, rule_id=rid, lane=lane, subject_type=stype, subject_id=sid,
                 owner=s["owner"], due_on=max(fire_on, today),
+                milestone_on=fire_on,
                 description=fmt(template, subject=s["name"], ref=s["ref"] or "",
                                 date=event_on.isoformat()),
                 why="on_date %s = %s, milestone opens %s"
@@ -301,15 +402,15 @@ def plan_on_date(conn, ctx, rules_for_lane, lane, stype, today, plan, skips):
 
 # ── report ───────────────────────────────────────────────────────────────────
 
-def write_report(path, rules, plan, skips, applied, wrote, lookback):
+def write_report(path, rules, plan, skips, applied, wrote, lookback, *, engine):
     cold = [s for s in skips if s[1].startswith("abundance rule")]
     L, A = [], None
     A = L.append
     A("# Cadence engine — %s" % ("APPLIED" if applied else "DRY RUN"))
     A("")
+    outcome = "DoctorCRE Engine apply" if engine else "wrote to the database"
     A("Generated %s · %s"
-      % (datetime.now(timezone.utc).isoformat(timespec="seconds"),
-         "wrote to the database" if applied else "nothing written"))
+      % (datetime.now(timezone.utc).isoformat(timespec="seconds"), outcome if applied else "nothing written"))
     A("")
     A("## Counts")
     A("")
@@ -400,9 +501,24 @@ def main():
 
     today = date.fromisoformat(a.today) if a.today else date.today()
     OUT.mkdir(exist_ok=True)
+    try:
+        door = configured_door()
+    except (ValueError, OSError):
+        print("cadence engine: invalid Studio engine settings or credentials", file=sys.stderr)
+        return 1
 
     with psycopg.connect(url) as conn:
-        ctx = load_context(conn)
+        if door is None:
+            ctx = load_context(conn)
+        else:
+            try:
+                ctx = load_engine_context(conn, door)
+            except EngineReadError as error:
+                print(f"cadence engine: {error}", file=sys.stderr)
+                return 1
+            except (KeyError, TypeError, ValueError):
+                print("cadence engine: invalid cadence inputs", file=sys.stderr)
+                return 1
         rules = conn.execute("""
             select id, lane, subject_type, trigger, interval_days, action_template,
                    active, status_filter
@@ -412,6 +528,9 @@ def main():
         plan, skips = [], []
         by_lane = {}
         for r in rules:
+            if door is not None and r[2] == "deal":
+                skips.append((r[1], "the engine cadence door has no deal subjects or deal steps", None))
+                continue
             if r[3] == "on_complete":
                 plan_on_complete(conn, ctx, r, today, plan, skips)
             elif r[3] == "on_date":
@@ -419,15 +538,32 @@ def main():
         for (lane, stype), group in by_lane.items():
             plan_on_date(conn, ctx, group, lane, stype, today, plan, skips)
 
-        wrote = 0
+        wrote, failed = 0, False
         if a.apply:
             for p in plan:
                 # last-instant re-check: two spawns in one run must not collide on
                 # the one-open-ball-per-owner index.
-                if (p["subject_type"], p["subject_id"], p["owner"]) in ctx["open_balls"]:
+                ball = ball_key(ctx, p["subject_type"], p["subject_id"], p["owner"])
+                if ball in ctx["open_balls"]:
                     skips.append((p["lane"], "owner already holds an open ball on this "
                                              "subject — the engine never takes a human's "
                                              "ball", p["key"]))
+                    continue
+                if door is not None:
+                    reply, retried = save_engine_step(door, p)
+                    if reply.status == 409 and reply.error == "key_reuse":
+                        skips.append((p["lane"], "already spawned for this cadence rule and date", p["key"]))
+                    elif reply.status == 201 and reply.body.get("next_step_id") and reply.body.get("change_id"):
+                        if retried or reply.body.get("replayed") is not True:
+                            ctx["open_balls"].add(ball)
+                            wrote += 1
+                    else:
+                        failed = True
+                        reason = f"engine save failed: {reply.status} {reply.error}"
+                        print(f"cadence engine: {reason}", file=sys.stderr)
+                        skips.append((p["lane"], reason, p["key"]))
+                        if 200 <= reply.status < 300 or engine_mail.verdict(reply) in ("caller", "retry"):
+                            break
                     continue
                 r = conn.execute("""
                     insert into next_action
@@ -447,19 +583,20 @@ def main():
                      "Owner unchanged from the record; the engine never reassigns a ball."
                      % (p["rule_id"], p["lane"], p["why"]),
                      p["key"]))
-                ctx["open_balls"].add((p["subject_type"], p["subject_id"], p["owner"]))
+                ctx["open_balls"].add(ball)
                 ctx["spawned"].add(p["key"])
                 wrote += 1
-            conn.commit()
+            if door is None:
+                conn.commit()
 
-        write_report(REPORT, rules, plan, skips, a.apply, wrote, ctx["lookback_days"])
+        write_report(REPORT, rules, plan, skips, a.apply, wrote, ctx["lookback_days"], engine=ctx["engine"])
 
     cold = sum(1 for s in skips if s[1].startswith("abundance rule"))
     print("cadence engine %s — rules %d · planned %d · spawned %d · "
           "skipped %d per the abundance rule · other skips %d · report %s"
           % ("APPLIED" if a.apply else "DRY RUN", len(rules), len(plan), wrote,
              cold, len(skips) - cold, REPORT))
-    return 0
+    return int(failed)
 
 
 if __name__ == "__main__":

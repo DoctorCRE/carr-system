@@ -75,8 +75,8 @@ def verdict(reply: Reply) -> str:
     return 'caller' if reply.status in (401, 403) or reply.error in CALLER else 'settled'
 
 
-def connect(credentials: Path, user: str) -> Door:
-    """The /jobs entrance, behind the Studio's Access service token, stamped mail_capture for user."""
+def connect(credentials: Path, user: str | None = None, *, job: str = JOB) -> Door:
+    """The /jobs entrance behind the Studio's Access service token."""
     info = os.stat(credentials)
     if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:
         raise PermissionError('engine credentials must be a 0600 file owned by this user')
@@ -84,8 +84,9 @@ def connect(credentials: Path, user: str) -> Door:
     url, client, secret = (values.get(name) or '' for name in CREDENTIALS)
     if not (url.startswith('https://') and client and secret):
         raise PermissionError('engine credentials need ENGINE_URL (https), ENGINE_ACCESS_CLIENT_ID and SECRET')
-    headers = {'CF-Access-Client-Id': client, 'CF-Access-Client-Secret': secret,
-               'Engine-Job': JOB, 'Engine-For-User': user}
+    headers = {'CF-Access-Client-Id': client, 'CF-Access-Client-Secret': secret, 'Engine-Job': job}
+    if user is not None:
+        headers['Engine-For-User'] = user
 
     def call(method: str, path: str, body: bytes | None) -> Reply:
         kind = 'application/octet-stream' if method == 'PUT' else 'application/json'
