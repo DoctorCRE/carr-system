@@ -41,6 +41,11 @@ MAX_ATTEMPTS times is abandoned (still exit 1). State lives in
 out/email-router/state.json (0600) and is pruned after the queue window. A state version
 change reconsiders recent mail handled under the earlier proposal contract. The receipt
 line carries counts and exception type names only.
+
+With engine_router set in outlook.json, the three verbs are answered from the engine's
+doors 21 and 22 instead (lib/engine_router.py), and the router writes nothing to the
+record layer: the blocked-proposal expiry and email summaries are not run, since the
+engine has no door for either yet.
 """
 from __future__ import annotations
 
@@ -249,8 +254,9 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
                     codes[code] = codes.get(code, 0) + 1
 
         # Filing first: matching and thread inheritance never wait on the next-step model below.
+        # An email already on several deals stays there: no new link, and nothing is stored against one of them.
         deal = email.get('deal')
-        if not deal and not rechecking:
+        if not deal and not rechecking and not email.get('several_deals'):
             try:
                 decision = matching(email, queue['open_deals'], email.get('thread_history', []))
             except Exception as error:
@@ -327,7 +333,8 @@ def _save(out: Path, state: dict) -> None:
 
 def run(out: Path, carr: Callable[[str, dict], dict], classify: Callable[[dict, date], dict],
         refusal_code: Callable[[Exception], str | None], now: datetime,
-        clock: Callable[[], datetime] | None = None, account: str = '', summary_model=None) -> tuple[str, dict]:
+        clock: Callable[[], datetime] | None = None, account: str = '', summary_model=None,
+        expire_blocked: bool = True) -> tuple[str, dict]:
     """Route once under the router's own lock; a second concurrent run is skipped."""
     out.mkdir(mode=0o700, parents=True, exist_ok=True)
     with open(os.open(out / 'run.lock', os.O_WRONLY | os.O_CREAT, 0o600), 'w') as lock:
@@ -338,13 +345,14 @@ def run(out: Path, carr: Callable[[str, dict], dict], classify: Callable[[dict, 
         state = _state(out)
         try:
             counts = route(carr, classify, refusal_code, state, now, clock, account=account)
-            try:
-                maintenance = carr('record-email-proposal', {'mode': 'expire_blocked', 'idempotency_key': str(uuid.uuid4()),
-                    **({'cursor': state['expiry_cursor']} if state.get('expiry_cursor') else {})})
-                counts['expired_blocked'] = maintenance.get('expired_count', 0)
-                state['expiry_cursor'] = maintenance.get('next_cursor')
-            except Exception:
-                counts['maintenance_failed'] = 1
+            if expire_blocked:
+                try:
+                    maintenance = carr('record-email-proposal', {'mode': 'expire_blocked', 'idempotency_key': str(uuid.uuid4()),
+                        **({'cursor': state['expiry_cursor']} if state.get('expiry_cursor') else {})})
+                    counts['expired_blocked'] = maintenance.get('expired_count', 0)
+                    state['expiry_cursor'] = maintenance.get('next_cursor')
+                except Exception:
+                    counts['maintenance_failed'] = 1
             if summary_model is not None:
                 try:
                     summary = email_summary.backfill(carr, summary_model, now=now, clock=clock,
@@ -375,14 +383,23 @@ def receipt(outcome: str, counts: dict) -> str:
 def step(repo: Path, settings) -> int:
     """Run the router once and print its receipt. Never raises: the caller's result stays its own."""
     try:
-        from lib.outlook_intake import CarrError, _carr
+        def classify(email: dict, today: date) -> dict:
+            return ask_model(email, today, settings.model)
+        if getattr(settings, 'engine_router', False):
+            from lib import engine_mail, engine_router
+            outcome, counts = run(repo / OUT, engine_router.verbs(engine_mail.connect(settings.engine_credentials, settings.owner),
+                                                                  settings.owner),
+                                  classify, engine_router.refusal_code, datetime.now(timezone.utc),
+                                  account=settings.account, expire_blocked=False)
+        else:
+            from lib.outlook_intake import CarrError, _carr
 
-        def refusal_code(error: Exception) -> str | None:
-            code = error.tool_refusal if isinstance(error, CarrError) else None
-            return code if isinstance(code, str) and REFUSAL.fullmatch(code) else None
-        outcome, counts = run(repo / OUT, _carr(repo), lambda email, today: ask_model(email, today, settings.model),
-                              refusal_code, datetime.now(timezone.utc), account=settings.account,
-                              summary_model=lambda text: email_summary.ask_model(text, settings.model))
+            def refusal_code(error: Exception) -> str | None:
+                code = error.tool_refusal if isinstance(error, CarrError) else None
+                return code if isinstance(code, str) and REFUSAL.fullmatch(code) else None
+            outcome, counts = run(repo / OUT, _carr(repo), classify, refusal_code, datetime.now(timezone.utc),
+                                  account=settings.account,
+                                  summary_model=lambda text: email_summary.ask_model(text, settings.model))
     except Exception:
         outcome, counts = 'failed', {'error': 1}
     print(receipt(outcome, counts))

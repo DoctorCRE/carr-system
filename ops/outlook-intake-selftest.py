@@ -6633,6 +6633,19 @@ class EngineMailTest(unittest.TestCase):
         write_settings(self.home, self.repo, owner='joe')
         self.assertFalse(load_settings(self.home).engine_mail)
 
+    def test_router_switch_is_off_by_default_and_needs_engine_credentials(self):
+        write_settings(self.home, self.repo, owner='joe', engine_router=True)
+        with self.assertRaisesRegex(ValueError, 'engine_credentials'):
+            load_settings(self.home)
+        write_settings(self.home, self.repo, owner='joe', engine_router=1, engine_credentials=str(self.home / 'engine.env'))
+        with self.assertRaisesRegex(ValueError, 'engine_router'):
+            load_settings(self.home)
+        write_settings(self.home, self.repo, owner='joe', engine_router=True, engine_credentials=str(self.home / 'engine.env'))
+        settings = load_settings(self.home)
+        self.assertEqual((settings.engine_router, settings.engine_mail), (True, False))
+        write_settings(self.home, self.repo, owner='joe')
+        self.assertFalse(load_settings(self.home).engine_router)
+
     def test_connect_refuses_a_shared_credential_file_and_sends_access_headers(self):
         path = self.home / 'engine.env'
         path.write_text('ENGINE_URL=https://engine.example.test\nENGINE_ACCESS_CLIENT_ID=id-1\n'
