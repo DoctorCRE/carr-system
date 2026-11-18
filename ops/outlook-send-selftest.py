@@ -2179,6 +2179,40 @@ class EngineOutboxTests(unittest.TestCase):
         [saved] = self.receipts()
         self.assertEqual(json.loads(saved.read_text())['refused'], 'draft_changed')
 
+    def reapprove_after_unpressed_refusal(self, door, status, refusal):
+        door.refuse.append(('/jobs/reply-drafts/' + self.draft['proposal_id'], status, refusal))
+        self.assertEqual(self.run_outbox(door)['sent'], 0)
+        self.assertEqual(self.sent, [])
+        door.drafts[self.draft['proposal_id']].update(version=3, cc='partner@example.test')
+        counts = self.run_outbox(door)
+        self.assertEqual((counts['sent'], counts['failed'], counts['receipt_failed']), (1, 0, 0))
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(self.receipts(), [])
+        return [(d['version'], d['status']) for d in door.deliveries()]
+
+    def test_unsendable_draft_refused_as_changed_lets_its_reapproval_send(self):
+        self.assertEqual(self.reapprove_after_unpressed_refusal(
+            self.door(cc='someone-else@example.test'), 409, 'draft_changed'), [(2, 'failed'), (3, 'sent')])
+
+    def test_replayed_unsendable_receipt_refused_as_changed_lets_its_reapproval_send_that_run(self):
+        self.assertEqual(self.reapprove_after_unpressed_refusal(
+            self.door(cc='someone-else@example.test'), 503, 'database_unavailable'),
+            [(2, 'failed'), (2, 'failed'), (3, 'sent')])
+
+    def test_aborted_press_refused_as_stale_lets_its_reapproval_send(self):
+        original = self.ports.open_form
+
+        def abort_once(item):
+            form = original(item)
+            def abort(**kwargs):
+                self.ports.open_form = original
+                raise send_mod.UserActive('user_active')
+            form.press = abort
+            return form
+        self.ports.open_form = abort_once
+        self.assertEqual(self.reapprove_after_unpressed_refusal(self.door(), 409, 'version_conflict'),
+                         [(2, 'failed'), (3, 'sent')])
+
     def test_access_refusal_is_tried_again_next_run(self):
         door = self.door()
         door.refuse.append(('/jobs/reply-drafts/' + self.draft['proposal_id'], 401, 'unauthorized'))

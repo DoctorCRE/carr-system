@@ -20,6 +20,12 @@ from lib import engine_mail, outlook_send as send
 from lib.outlook_settings import OutlookSettings, load_settings
 from lib.outlook_runtime import receipt_line
 
+BEFORE_SEND = ('invalid_submission', 'submission_hash_mismatch', 'submission_recipients_invalid',
+               'submission_attachment_mismatch', 'attachment_settings_missing', 'attachment_root_missing',
+               'attachment_path_not_absolute', 'attachment_missing', 'attachment_outside_root',
+               'attachment_not_regular_file', 'attachment_unreadable', 'attachments_too_large')
+NOT_PRESSED = frozenset(BEFORE_SEND + ('aborted_before_dispatch',))
+
 
 @dataclass(frozen=True)
 class SubmittedDraft:
@@ -110,6 +116,7 @@ class Engine:
     FINAL = frozenset({'draft_changed', 'already_sent', 'not_mailbox_owner', 'not_found', 'key_reuse',
                        'version_conflict', 'invalid_json', 'missing_required', 'invalid_field_value',
                        'database_refused_the_statement'})
+    SUPERSEDED = frozenset({'draft_changed', 'version_conflict'})
 
     def __init__(self, door: engine_mail.Door, owner: str, counts: dict[str, int]):
         self.door, self.owner, self.counts = door, owner, counts
@@ -164,13 +171,18 @@ class Engine:
         raise Refused(reply.error)
 
 
-def _record(book, path: Path, receipt: dict, counts: dict[str, int]) -> None:
-    """Record one saved receipt; it leaves disk only once recorded, and a refused one is never sent again."""
+def _record(book, path: Path, receipt: dict, counts: dict[str, int]) -> bool:
+    """Record one saved receipt; it leaves disk only once recorded, and a refused one is never sent again.
+    True when the door refused it because the draft moved on before Send was pressed, so a later version may go."""
     try:
         if receipt.get('refused'):
             raise Refused(receipt['refused'])
         book.record(receipt)
     except Refused as refusal:
+        if str(refusal) in Engine.SUPERSEDED and receipt.get('reason') in NOT_PRESSED:
+            path.unlink()
+            counts['receipt_superseded'] = counts.get('receipt_superseded', 0) + 1
+            return True
         if not receipt.get('refused'):
             _save(path, dict(receipt, refused=str(refusal)))
             logging.getLogger(__name__).error('outlook-outbox receipt_refused %s', refusal)
@@ -180,6 +192,7 @@ def _record(book, path: Path, receipt: dict, counts: dict[str, int]) -> None:
         counts['receipt_failed'] += 1
     else:
         path.unlink()
+    return False
 
 
 def _save(path: Path, receipt: dict):
@@ -243,7 +256,6 @@ def run(settings: OutlookSettings, ports: send.Ports, engine: engine_mail.Door |
                 counts['receipt_failed'] += 1
                 logging.getLogger(__name__).error('outlook-outbox corrupt_receipt_recovery_required')
                 continue
-            pending.add(receipt['proposal_id'])
             try:
                 if receipt.get('status') == 'sent' and not receipt.get('sent_at'):
                     snapshot = ports.mailbox.snapshot()
@@ -254,8 +266,10 @@ def run(settings: OutlookSettings, ports: send.Ports, engine: engine_mail.Door |
                     _save(path, receipt)
             except Exception:
                 counts['receipt_failed'] += 1
+                pending.add(receipt['proposal_id'])
                 continue
-            _record(book, path, receipt, counts)
+            if not _record(book, path, receipt, counts):
+                pending.add(receipt['proposal_id'])
         drafts = book.approved()
         quarantine = root / 'quarantine'
         quarantine.mkdir(exist_ok=True, mode=0o700)
@@ -294,11 +308,7 @@ def run(settings: OutlookSettings, ports: send.Ports, engine: engine_mail.Door |
                     _save(quarantined, dict(row_sha256=row_hash, reason='invalid_submission'))
                     counts['quarantined'] += 1
                     continue
-                reason = str(exc) if str(exc) in (
-                    'invalid_submission', 'submission_hash_mismatch', 'submission_recipients_invalid',
-                    'submission_attachment_mismatch', 'attachment_settings_missing', 'attachment_root_missing',
-                    'attachment_path_not_absolute', 'attachment_missing', 'attachment_outside_root',
-                    'attachment_not_regular_file', 'attachment_unreadable', 'attachments_too_large') else 'invalid_submission'
+                reason = str(exc) if str(exc) in BEFORE_SEND else 'invalid_submission'
                 receipt = dict(idempotency_key=key, proposal_id=ident, base_version=version,
                                sha256=digest, status='failed', reason=reason)
             else:
