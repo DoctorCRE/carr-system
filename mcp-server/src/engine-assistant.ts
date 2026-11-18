@@ -35,10 +35,6 @@ type Save =
 const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const errorSlug = /^[a-z][a-z0-9_]{0,63}$/;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 export async function saveAssistantChange(env: EngineEnv, partner: string, save: Save) {
   const url = URL.parse(env.ENGINE_URL ?? "");
   const clientId = env.ENGINE_ACCESS_CLIENT_ID;
@@ -77,8 +73,11 @@ export async function saveAssistantChange(env: EngineEnv, partner: string, save:
       await response.body?.cancel().catch(() => {});
       continue;
     }
-    const payload = await response.json().catch(() => null);
-    const result = isRecord(payload) ? payload : null;
+    const payload: unknown = await response.json().catch(() => null);
+    const result: Record<string, unknown> | null =
+      typeof payload === "object" && payload !== null && !Array.isArray(payload)
+        ? Object.fromEntries(Object.entries(payload))
+        : null;
     if (!response.ok) {
       const code = result?.error;
       throw new ToolError({

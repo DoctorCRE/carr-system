@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { type TestContext, test } from "node:test";
 import { Pool } from "@neondatabase/serverless";
+import { publicError } from "../src/public-errors.ts";
 import { NOW } from "./helpers/fixed-clock.ts";
 import { executeRegisteredTool, record, ToolError } from "./helpers/legacy-test-registry.ts";
 
@@ -28,6 +29,8 @@ const activity = {
   occurred_at: "2026-10-10T15:13:27-05:00",
 };
 
+class LegacyReached extends Error {}
+
 function legacy({ writes = false, subject = "deal" } = {}) {
   const changes: string[] = [];
   return {
@@ -39,7 +42,7 @@ function legacy({ writes = false, subject = "deal" } = {}) {
         changes.push(sql);
         return { rows: [{ id: savedId }] };
       }
-      assert.fail(`Unexpected legacy SQL: ${sql}`);
+      throw new LegacyReached(sql);
     },
   };
 }
@@ -225,4 +228,97 @@ test("a future activity is still refused before either write path", async (t) =>
     (error: unknown) => error instanceof ToolError && error.payload.error === "occurred_at_in_future",
   );
   assert.equal(upstream.calls.length, 0);
+});
+
+test("saves the engine cannot take yet stay on the legacy handler", async (t) => {
+  const step = { idempotency_key: key, ref: deal, description: "Send sample measurements" };
+  const link = { from_ref: "L-001", to_ref: "C-001", kind: "intro" };
+  const assignment = { vendor_id: savedId, base_version: 1, assignment_base_version: 1 };
+  const cases = [
+    { name: "client activity", subject: "client", verb: "log-activity", args: activity },
+    { name: "lead step", subject: "lead", verb: "set-next-action", args: step },
+    { name: "human quote", verb: "log-activity", args: { ...activity, human_quote: "Send it over." } },
+    { name: "links", verb: "log-activity", args: { ...activity, links: [link] } },
+    { name: "vendor roles", verb: "log-activity", args: { ...activity, vendor_assignments: [assignment] } },
+    { name: "conditional step", verb: "set-next-action", args: { ...step, expected_action: null } },
+    { name: "agent-owned step", verb: "set-next-action", args: { ...step, owner: agent.slug } },
+    { name: "unpermitted owner", verb: "set-next-action", args: { ...step, owner: "someone-else" } },
+    {
+      name: "non-partner caller",
+      actor: { ...agent, native_agent_verified: false },
+      verb: "log-activity",
+      args: activity,
+    },
+  ];
+  const upstream = engine(t, () => Response.json({ activity_id: savedId, next_step_id: savedId }, { status: 201 }));
+  for (const { name, subject, actor = agent, verb, args } of cases)
+    await assert.rejects(
+      executeRegisteredTool(legacy({ subject }), actor, verb, { ...args }, upstream.env),
+      LegacyReached,
+      name,
+    );
+  assert.equal(upstream.calls.length, 0);
+});
+
+test("owed information stays in the activity summary", async (t) => {
+  const upstream = engine(t, () => Response.json({ activity_id: savedId }, { status: 201 }));
+  await executeRegisteredTool(legacy(), agent, "log-activity", { ...activity, owed: "The asking rent" }, upstream.env);
+  const [request] = upstream.calls;
+  assert.ok(request);
+  assert.equal(
+    record(request.body).summary,
+    "Reviewed the specimen\n\nFollow up on the measurements.\n\nInformation still missing\nThe asking rent",
+  );
+});
+
+test("an ownerless step from a sponsored agent belongs to its partner", async (t) => {
+  const upstream = engine(t, () => Response.json({ next_step_id: savedId }, { status: 201 }));
+  const reply = record(
+    await executeRegisteredTool(
+      legacy(),
+      agent,
+      "set-next-action",
+      { idempotency_key: key, ref: deal, description: "Send sample measurements" },
+      upstream.env,
+    ),
+  );
+  assert.equal(reply.owner, "dell");
+  const [request] = upstream.calls;
+  assert.ok(request);
+  assert.equal(request.headers.get("Engine-For-User"), "dell");
+  assert.equal(Object.hasOwn(record(request.body), "owner"), false);
+});
+
+test("a success without an id is retried with the same key", async (t) => {
+  let replies = 0;
+  const upstream = engine(t, () =>
+    Response.json(replies++ ? { activity_id: savedId, replayed: true } : {}, { status: 201 }),
+  );
+  const reply = record(await executeRegisteredTool(legacy(), agent, "log-activity", { ...activity }, upstream.env));
+  assert.equal(reply.activity_id, savedId);
+  assert.equal(upstream.calls.length, 2);
+  assert.deepEqual(upstream.calls[0]?.body, upstream.calls[1]?.body);
+});
+
+test("three server failures end as unavailable without a legacy write", async (t) => {
+  const upstream = engine(t, () => Response.json({ error: "database_unavailable" }, { status: 503 }));
+  await assert.rejects(executeRegisteredTool(legacy(), agent, "log-activity", { ...activity }, upstream.env), {
+    payload: { error: "engine_assistant_unavailable" },
+  });
+  assert.equal(upstream.calls.length, 3);
+});
+
+test("the caller sees the engine's refusal code", async (t) => {
+  t.mock.method(console, "error", () => {});
+  const refuse = (error: string) => engine(t, () => Response.json({ error }, { status: 409 })).env;
+  const refusal = async (error: string) =>
+    publicError(
+      await executeRegisteredTool(legacy(), agent, "log-activity", { ...activity }, refuse(error)).catch(
+        (thrown: unknown) => thrown,
+      ),
+    );
+  const projected = await refusal("open_step_exists");
+  assert.equal(projected.error, "engine_assistant_refused");
+  assert.equal(projected.engine_error, "open_step_exists");
+  assert.equal(Object.hasOwn(await refusal("Not A Slug"), "engine_error"), false);
 });

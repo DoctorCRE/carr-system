@@ -18,6 +18,7 @@ type PublicError = {
   suggested_card_title?: string;
   suggested_description?: string;
   allowed_values?: string[];
+  engine_error?: string;
 };
 type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSchema; enum?: unknown[] };
 
@@ -538,6 +539,12 @@ export function publicError(
     ["base_rent_per_sf", "landlord_ti_per_sf", "term_months", "free_rent_months"].includes(String(payload?.field))
   )
     result.fields = [payload?.field];
+  if (
+    code === "engine_assistant_refused" &&
+    typeof payload?.engine_error === "string" &&
+    /^[a-z][a-z0-9_]{0,63}$/.test(payload.engine_error)
+  )
+    result.engine_error = payload.engine_error;
   if (
     ["unsupported_decision_about", "decision_about_work_request_not_found"].includes(code) &&
     typeof payload?.ref === "string" &&

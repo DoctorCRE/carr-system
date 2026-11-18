@@ -250,14 +250,18 @@ function assertActivityTime(occurred_at) {
 
 const ENGINE_ACTIVITY_FIELDS = new Set(['idempotency_key', 'ref', 'kind', 'summary', 'detail', 'owed', 'occurred_at']);
 
-async function saveAssistantVerb(client, actor, verb, args, env) {
-  const partner = partnerAuthoritySlugForActor(actor);
-  if (!partner) return;
-  // Door 19 hashes happened_at, so a replay needs the timestamp the caller supplied.
-  const activity = verb === 'log-activity' && ['call', 'meeting', 'note'].includes(args.kind) &&
+// Door 19 hashes happened_at, so a replay needs the timestamp the caller supplied.
+function isEngineActivity(args) {
+  return ['call', 'meeting', 'note'].includes(args.kind) &&
     typeof args.occurred_at === 'string' && /T.*(?:Z|[+-]\d\d:\d\d)$/.test(args.occurred_at) &&
     isCalendarDate(args.occurred_at.slice(0, 10)) && Number.isFinite(Date.parse(args.occurred_at)) &&
     Object.keys(args).every(field => ENGINE_ACTIVITY_FIELDS.has(field));
+}
+
+async function saveAssistantVerb(client, actor, verb, args, env) {
+  const partner = partnerAuthoritySlugForActor(actor);
+  if (!partner) return;
+  const activity = verb === 'log-activity' && isEngineActivity(args);
   const step = verb === 'set-next-action' && !Object.hasOwn(args, 'expected_action') && !args.work_request;
   if (!activity && !step) return;
 
@@ -282,9 +286,6 @@ async function saveAssistantVerb(client, actor, verb, args, env) {
 
   const owner = args.owner === undefined || args.owner === null || args.owner === ''
     ? partner : String(args.owner).trim().toLowerCase();
-  const permitted = permittedActionOwnerSlugs(actor);
-  if (!permitted.includes(owner))
-    throw new ToolError({ error: 'owner_not_permitted', owner, permitted });
   if (!isKnownPartner(owner)) return;
 
   assertDealRoomField('next_date', args.due_on || null, ToolError);
