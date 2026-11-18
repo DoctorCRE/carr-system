@@ -16,7 +16,7 @@ type Save =
         kind: string;
         happened_at?: string;
         summary: string;
-        about: { deal_id: string }[];
+        about: ({ deal_id: string } | { party_id: string })[];
       };
     }
   | {
@@ -121,7 +121,6 @@ export async function saveAssistantChange(env: EngineEnv, partner: string, save:
       if (!note) continue;
       return { ...receipt, ...note };
     }
-    if (save.path === "/jobs/next-steps/complete" && result.status !== "done") continue;
     return receipt;
   }
   throw new ToolError({ error: "engine_assistant_unavailable" });

@@ -3,7 +3,7 @@ import { type TestContext, test } from "node:test";
 import { Pool } from "@neondatabase/serverless";
 import { publicError } from "../src/public-errors.ts";
 import { NOW } from "./helpers/fixed-clock.ts";
-import { executeRegisteredTool, record, ToolError } from "./helpers/legacy-test-registry.ts";
+import { derivedIdempotencyKey, executeRegisteredTool, record, ToolError } from "./helpers/legacy-test-registry.ts";
 
 const { callTool } = record(await import(new URL("../src/mcp.js", import.meta.url).href));
 const identity = record(await import(new URL("../src/identity.js", import.meta.url).href));
@@ -47,7 +47,7 @@ function legacy({ writes = false, subject = "deal" } = {}) {
   };
 }
 
-function engine(t: TestContext, respond: (body: unknown) => Response, enabled = "true") {
+function engine(t: TestContext, respond: (body: unknown, path: string) => Response, enabled = "true") {
   const calls: {
     path: string;
     headers: Headers;
@@ -60,7 +60,7 @@ function engine(t: TestContext, respond: (body: unknown) => Response, enabled = 
     assert.ok(typeof body === "string");
     const parsed: unknown = JSON.parse(body);
     calls.push({ path: url.pathname, headers: new Headers(headers), method, redirect, body: parsed });
-    return respond(parsed);
+    return respond(parsed, url.pathname);
   });
   return {
     calls,
@@ -297,27 +297,71 @@ test("completes the sponsor's current step by deal or party and preserves its re
 test("a completion refusal is final and does not fall through to legacy writes", async (t) => {
   const upstream = engine(t, () => Response.json({ error: "no_open_step" }, { status: 409 }));
   await assert.rejects(
-    executeRegisteredTool(legacy(), agent, "complete-action", { idempotency_key: key, ref: deal }, upstream.env),
+    executeRegisteredTool(
+      legacy(),
+      agent,
+      "complete-action",
+      { idempotency_key: key, ref: deal, outcome: "The example survey was sent." },
+      upstream.env,
+    ),
     {
       payload: { error: "engine_assistant_refused", engine_status: 409, engine_error: "no_open_step" },
     },
   );
   assert.equal(upstream.calls.length, 1);
+  assert.equal(upstream.calls[0]?.path, "/jobs/next-steps/complete");
 });
 
-test("completion with an outcome or an excluded record uses the legacy handler", async (t) => {
+for (const type of ["deal", "party"]) {
+  test(`a ${type} completion replays and saves its outcome after three note failures`, async (t) => {
+    const noteId = "01000000-0000-4000-8000-000000000005";
+    let closed = false;
+    let noteAttempts = 0;
+    const upstream = engine(t, (_, path) => {
+      if (path === "/jobs/next-steps/complete") {
+        const replayed = closed;
+        closed = true;
+        return Response.json({ next_step_id: savedId, status: "done", replayed });
+      }
+      assert.equal(path, "/jobs/activities");
+      return ++noteAttempts <= 3
+        ? Response.json({ error: "database_unavailable" }, { status: 503 })
+        : Response.json({ activity_id: noteId }, { status: 201 });
+    });
+    const c = legacy({ subject: type });
+    const summary = "The example survey was sent.";
+    const args = { idempotency_key: key, ref: deal, outcome: `  ${summary}  ` };
+    const complete = () => executeRegisteredTool(c, agent, "complete-action", { ...args }, upstream.env);
+    await assert.rejects(complete(), { payload: { error: "engine_assistant_unavailable" } });
+    assert.equal(noteAttempts, 3);
+    assert.deepEqual(await complete(), {
+      ok: true,
+      subject: { type, id: deal },
+      count: 1,
+      completed: [{ next_action_id: savedId }],
+      replayed: true,
+    });
+    const target = { [`${type}_id`]: deal };
+    const completion = ["/jobs/next-steps/complete", { idempotency_key: key, ...target }];
+    const note = [
+      "/jobs/activities",
+      {
+        idempotency_key: derivedIdempotencyKey("complete-action-outcome", key),
+        kind: "note",
+        about: [target],
+        summary,
+      },
+    ];
+    assert.deepEqual(
+      upstream.calls.map(({ path, body }) => [path, body]),
+      [completion, note, note, note, completion, note],
+    );
+  });
+}
+
+test("completion of an excluded record uses the legacy handler", async (t) => {
   const upstream = engine(t, () => assert.fail("legacy completion made an engine request"));
   const args = { idempotency_key: key, ref: deal };
-  await assert.rejects(
-    executeRegisteredTool(
-      legacy(),
-      agent,
-      "complete-action",
-      { ...args, outcome: "The example survey was sent." },
-      upstream.env,
-    ),
-    LegacyReached,
-  );
   for (const subject of ["client", "lead", "vendor"])
     await assert.rejects(
       executeRegisteredTool(legacy({ subject }), agent, "complete-action", args, upstream.env),

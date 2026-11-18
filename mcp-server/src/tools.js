@@ -271,8 +271,7 @@ async function saveAssistantVerb(client, actor, verb, args, env) {
   if (!partner) return;
   const activity = verb === 'log-activity' && isEngineActivity(args);
   const step = verb === 'set-next-action' && !Object.hasOwn(args, 'expected_action') && !args.work_request;
-  // The engine cannot commit an outcome note atomically with the completion.
-  const completion = verb === 'complete-action' && !args.outcome?.trim();
+  const completion = verb === 'complete-action';
   const dealNote = verb === 'add-deal-note';
   if (!activity && !step && !completion && !dealNote) return;
 
@@ -288,6 +287,15 @@ async function saveAssistantVerb(client, actor, verb, args, env) {
     const { id, replayed } = await saveAssistantChange(env, partner, {
       path: '/jobs/next-steps/complete', id: 'next_step_id', body: { idempotency_key, ...target },
     });
+    const outcome = args.outcome?.trim();
+    if (outcome) {
+      await saveAssistantChange(env, partner, {
+        path: '/jobs/activities', id: 'activity_id', body: {
+          idempotency_key: derivedIdempotencyKey('complete-action-outcome', idempotency_key),
+          kind: 'note', about: [target], summary: outcome,
+        },
+      });
+    }
     return { ok: true, subject, count: 1, completed: [{ next_action_id: id }], ...(replayed && { replayed }) };
   }
 
