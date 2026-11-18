@@ -46,6 +46,7 @@ from enum import IntEnum
 from pathlib import Path
 from typing import Any
 
+import engine_calls
 import post_call
 import transcribe_session
 from post_call import call_record_command
@@ -485,24 +486,34 @@ def publish_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         log_line(f"NOOP publish post-call report unavailable session={session_dir.name}: {exc}")
         return 0
 
+    try:
+        connect = engine_calls.connector(load_config_raw() or {})
+    except ValueError as exc:
+        log_line(f"UNAVAILABLE publish engine config session={session_dir.name}: {exc}")
+        return Outcome.UNCONFIGURED
     bindings = shaped.get("bindings") or []
+    post_items = shaped.get("post_call_items") or []
     post_bindings = [item for item in bindings if item.get("remote") == "post_call"]
+    legacy_items = shaped.get("legacy_items") or []
     legacy_bindings = [item for item in bindings if item.get("remote") == "legacy"]
+    if connect:
+        post_items, post_bindings = engine_calls.worker_drafts(shaped)
+        legacy_items, legacy_bindings = [], []
     status_rc = status_cmd(cfg, session_dir, "distilling", None)
     posted = post_batch(
         cfg, session_dir, "/capture/post-call/candidates",
-        shaped.get("post_call_items") or [], post_bindings, "post-call",
+        post_items, post_bindings, "post-call",
     )
     legacy = post_batch(
         cfg, session_dir, "/capture/candidates",
-        shaped.get("legacy_items") or [], legacy_bindings, "legacy",
+        legacy_items, legacy_bindings, "legacy",
     )
     if not (posted and legacy) or status_rc != 0:
         return 1
     marker = {
         "published_at": iso_now_utc(),
-        "post_call_count": len(shaped.get("post_call_items") or []),
-        "legacy_count": len(shaped.get("legacy_items") or []),
+        "post_call_count": len(post_items),
+        "legacy_count": len(legacy_items),
     }
     if not write_json_atomic(session_dir / post_call.PUSH_FILE, marker, mode=0o600):
         return Outcome.UNAVAILABLE
@@ -510,7 +521,23 @@ def publish_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         f"PUBLISHED session={session_dir.name} "
         f"post_call={marker['post_call_count']} legacy={marker['legacy_count']}"
     )
+    if connect:
+        return 0 if publish_engine(connect, session_dir) else 1
     return 0 if apply_automatic(session_dir) else 1
+
+
+def publish_engine(connect: engine_calls.Connect, session_dir: Path) -> bool:
+    """Send the call and its suggestions to the engine, stamped call_capture for the session's partner."""
+    partner = engine_calls.partner(session_dir)
+    if partner is None:
+        log_line(f"ERROR publish engine partner unknown session={session_dir.name}")
+        return False
+    try:
+        door = connect(partner)
+    except OSError as exc:
+        log_line(f"UNAVAILABLE publish engine credentials session={session_dir.name}: {type(exc).__name__}")
+        return False
+    return engine_calls.Run(door, session_dir, log_line).publish()
 
 
 def apply_automatic(session_dir: Path) -> bool:

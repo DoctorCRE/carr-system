@@ -409,12 +409,13 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
                         counts['pending'] += 1
                         continue
                     report = required_json(session / post_call.REPORT_FILE)
-                    code, receipt = bridge.http_request('POST',
-                        f"{cfg['base_url']}/capture/phone/v1/call-sessions/{metadata['session_id']}/report",
-                        report['report'], {'Authorization': f'Bearer {token}'})
-                    if code != 200 or receipt.get('ok') is not True:
-                        counts['pending'] += 1
-                        continue
+                    if not bridge.engine_calls.connector(bridge.load_config_raw() or {}):
+                        code, receipt = bridge.http_request('POST',
+                            f"{cfg['base_url']}/capture/phone/v1/call-sessions/{metadata['session_id']}/report",
+                            report['report'], {'Authorization': f'Bearer {token}'})
+                        if code != 200 or receipt.get('ok') is not True:
+                            counts['pending'] += 1
+                            continue
                     bridge.poll_cmd(cfg, session)
                     if not publish_status(session, cfg, token, bridge):
                         counts['pending'] += 1
