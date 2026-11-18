@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 import subprocess
 import traceback
 
@@ -136,7 +136,8 @@ class EngineInvoiceCloseTests(unittest.TestCase):
 
     def test_refusal_is_final_on_later_runs(self):
         reply = job.engine_mail.Reply(422, {"rule": "invoice_email_needs_user"})
-        with patch.object(job, "list_engine_invoice_closes", return_value=[self.invoice]), \
+        changed = self.invoice._replace(payment_id="10000000-0000-4000-8000-000000000004")
+        with patch.object(job, "list_engine_invoice_closes", side_effect=[[self.invoice], [changed]]), \
                 patch.object(job.engine_mail, "connect") as connect:
             connect.return_value.return_value = reply
             for _ in range(2):
@@ -144,13 +145,53 @@ class EngineInvoiceCloseTests(unittest.TestCase):
                 self.assertEqual(result["engine_invoice_closes"], {"refused": 1})
         connect.return_value.assert_called_once()
 
-    def test_pending_list_fails_without_falling_back_to_legacy_invoices(self):
+    def test_lists_as_lead_stage_and_applies_only_the_engine_selected_target(self):
+        i = self.invoice
         with patch.object(job.engine_mail, "connect") as connect:
+            list_door, apply_door = connect.return_value, Mock()
+            connect.side_effect = [list_door, apply_door]
+            list_door.side_effect = [job.engine_mail.Reply(503, {}), job.engine_mail.Reply(200, {"invoices": [
+                {"invoice_id": "10000000-0000-4000-8000-000000000004", "target": None},
+                {"invoice_id": i.invoice_id, "target": {
+                    "deal_id": i.deal_id, "payment_id": i.payment_id, "for_user": i.for_user,
+                }, "evidence_ref": "local-mail:synthetic-invoice"},
+            ]})]
+            apply_door.return_value = job.engine_mail.Reply(200, {
+                "invoice_id": i.invoice_id, "deal_id": i.deal_id, "payment_id": i.payment_id,
+                "status": "attached", "application_id": "10000000-0000-4000-8000-000000000005",
+            })
+            result = job.run_job(self.call, engine_invoices=self.job)
+        self.assertEqual(result["engine_invoice_closes"], {"attached": 1})
+        self.assertEqual(connect.call_args_list, [
+            call(self.credentials, job="lead_stage"),
+            call(self.credentials, i.for_user, job="lead_stage"),
+        ])
+        self.assertEqual(list_door.call_args_list, [call("GET", "/jobs/invoice-emails", None)] * 2)
+        apply_door.assert_called_once()
+        self.assertEqual(apply_door.call_args.args[:2], ("POST", f"/jobs/invoice-emails/{i.invoice_id}/apply"))
+        self.assertEqual([verb for verb, _ in self.calls], ["advance-leads"])
+        self.assertIs(self.calls[0][1]["engine_invoice_closes"], True)
+
+    def test_refused_list_fails_without_falling_back_to_legacy_invoices(self):
+        with patch.object(job.engine_mail, "connect") as connect:
+            connect.return_value.return_value = job.engine_mail.Reply(403, {})
             with self.assertRaisesRegex(RuntimeError, "invoice list"):
                 job.run_job(self.call, engine_invoices=self.job)
         self.assertEqual([verb for verb, _ in self.calls], ["advance-leads"])
         self.assertIs(self.calls[0][1]["engine_invoice_closes"], True)
-        connect.assert_not_called()
+        connect.return_value.assert_called_once_with("GET", "/jobs/invoice-emails", None)
+
+    def test_malformed_list_does_not_apply_any_invoice(self):
+        i = self.invoice
+        target = {"deal_id": i.deal_id, "payment_id": i.payment_id, "for_user": i.for_user}
+        invoices = [{"invoice_id": i.invoice_id, "target": target},
+                    {"invoice_id": "10000000-0000-4000-8000-000000000004",
+                     "target": {**target, "payment_id": "../invalid"}}]
+        with patch.object(job.engine_mail, "connect") as connect:
+            connect.return_value.return_value = job.engine_mail.Reply(200, {"invoices": invoices})
+            with self.assertRaisesRegex(RuntimeError, "^Invalid engine invoice list target$"):
+                job.run_job(self.call, engine_invoices=self.job)
+        connect.return_value.assert_called_once_with("GET", "/jobs/invoice-emails", None)
 
     def test_switched_dry_run_never_applies_an_invoice(self):
         with patch.object(job, "list_engine_invoice_closes", return_value=[self.invoice]), \

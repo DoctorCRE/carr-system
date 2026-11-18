@@ -31,9 +31,45 @@ class InvoiceClose(NamedTuple):
     for_user: str
 
 
+def call_engine(door: engine_mail.Door, method: str, path: str, body: bytes | None = None) -> engine_mail.Reply:
+    for _ in range(3):
+        reply = door(method, path, body)
+        if 0 < reply.status < 500:
+            break
+    return reply
+
+
+def is_uuid(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        return str(uuid.UUID(value)) == value
+    except ValueError:
+        return False
+
+
 def list_engine_invoice_closes(credentials: Path) -> list[InvoiceClose]:
-    """Read engine candidates with a selected payment and its deal's partner slug."""
-    raise RuntimeError("Engine invoice list is pending")
+    door = engine_mail.connect(credentials, job="lead_stage")
+    reply = call_engine(door, "GET", "/jobs/invoice-emails")
+    if reply.status != 200:
+        raise RuntimeError(f"Engine invoice list failed (HTTP {reply.status})")
+    invoices = reply.body.get("invoices")
+    if not isinstance(invoices, list):
+        raise RuntimeError("Invalid engine invoice list")
+    closes = []
+    for invoice in invoices:
+        if not isinstance(invoice, dict) or not is_uuid(invoice.get("invoice_id")) or "target" not in invoice:
+            raise RuntimeError("Invalid engine invoice list row")
+        target = invoice["target"]
+        if target is None:
+            continue
+        if not isinstance(target, dict) or not all(is_uuid(target.get(k)) for k in ("deal_id", "payment_id")):
+            raise RuntimeError("Invalid engine invoice list target")
+        partner = target.get("for_user")
+        if not isinstance(partner, str) or not partner or partner != partner.strip() or not partner.isprintable():
+            raise RuntimeError("Invalid engine invoice list partner")
+        closes.append(InvoiceClose(invoice["invoice_id"], target["deal_id"], target["payment_id"], partner))
+    return closes
 
 
 class EngineInvoiceCloses(NamedTuple):
@@ -51,14 +87,14 @@ class EngineInvoiceCloses(NamedTuple):
         doors: dict[str, engine_mail.Door] = {}
         with local_jobs.locked(self.receipts / "run.lock"):
             for invoice in invoices:
-                key = str(uuid.uuid5(uuid.NAMESPACE_URL, json.dumps(["apply-invoice-email", *invoice])))
                 # A terminal refusal can leave an invoice captured in the engine.
-                refused = self.receipts / key
+                refused = self.receipts / invoice.invoice_id
                 if refused.exists():
                     counts["refused"] += 1
                     continue
                 if invoice.for_user not in doors:
                     doors[invoice.for_user] = engine_mail.connect(self.credentials, invoice.for_user, job="lead_stage")
+                key = str(uuid.uuid5(uuid.NAMESPACE_URL, json.dumps(["apply-invoice-email", *invoice])))
                 outcome = apply_engine_invoice(doors[invoice.for_user], invoice, key)
                 if outcome == "refused":
                     refused.touch(mode=0o600)
@@ -70,21 +106,17 @@ def apply_engine_invoice(door: engine_mail.Door, invoice: InvoiceClose, key: str
     path = f"/jobs/invoice-emails/{invoice.invoice_id}/apply"
     target = {"deal_id": invoice.deal_id, "payment_id": invoice.payment_id}
     body = json.dumps({**target, "idempotency_key": key}).encode()
-    for _ in range(3):
-        reply = door("POST", path, body)
-        if 400 <= reply.status < 500:
-            return "refused"
-        if reply.status == 200:
-            answer = reply.body
-            if all(answer.get(k) == v for k, v in {**target, "invoice_id": invoice.invoice_id}.items()):
-                status = answer.get("status")
-                if status == "applied" and "application_id" in answer and answer["application_id"] is None:
-                    return status
-                if status == "attached" and isinstance(answer.get("application_id"), str):
-                    return status
-            return "unavailable"
-        if 0 < reply.status < 500:
-            return "unavailable"
+    reply = call_engine(door, "POST", path, body)
+    if 400 <= reply.status < 500:
+        return "refused"
+    answer = reply.body
+    expected_ids = {**target, "invoice_id": invoice.invoice_id}
+    if reply.status == 200 and all(answer.get(k) == v for k, v in expected_ids.items()):
+        status = answer.get("status")
+        if status == "applied" and "application_id" in answer and answer["application_id"] is None:
+            return status
+        if status == "attached" and is_uuid(answer.get("application_id")):
+            return status
     return "unavailable"
 
 
