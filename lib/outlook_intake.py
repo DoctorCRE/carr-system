@@ -1337,13 +1337,16 @@ class Run:
                 continue
             recipients = [{'address': address, 'kind': kind} for field, kind in (('recipients', 'to'), ('cc', 'cc'))
                           for address in dict.fromkeys(_addresses(m.get(field)))]
+            conversation_id = m.get('conversation_id')
             self.engine.offer(message_id, m['sent_unix'], m['full'] and bool(recipients or inbound),
                               (m['full'], len(m['text'])), inbound,
                               {'kind': 'email', 'happened_at': _iso(m['sent_unix']),
                                'email': {'message_id': message_id, 'sender': m['sender'].lower(),
                                          'recipients': recipients, 'subject': m['subject'] or '',
                                          'body': m['text'],
-                                         **({'sender_name': m['sender_name']} if m.get('sender_name') else {})}})
+                                         **({'sender_name': m['sender_name']} if m.get('sender_name') else {}),
+                                         **({'conversation_id': conversation_id}
+                                            if conversation_id and conversation_id.strip() else {})}})
         self.engine.send_emails()
 
     def emails(self, mails: list[dict], matcher: Matcher, since: int) -> None:
