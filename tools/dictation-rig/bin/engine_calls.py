@@ -193,24 +193,26 @@ class Run:
             if request and reply is None:
                 return False
             stored = settled(reply, "activity_id") if reply else {"outcome": "about_nothing"}
-        activity_id = stored.get("activity_id")
+            if reply and "activity_id" in stored and isinstance(reply.body.get("about"), list):
+                stored["about"] = reply.body["about"]
         for move in moves(self.session_dir, report, self.recorder):
             if "engine" in move.item or self.blocked:
                 continue
-            self.outcomes[move.key] = self.send(move, activity_id)
+            self.outcomes[move.key] = self.send(move, stored)
         self.outcomes = {name: outcome for name, outcome in self.outcomes.items() if outcome}
         if self.outcomes or report.get("engine_call") != stored:
             self.record(stored)
         return not self.blocked
 
-    def send(self, move: Move, activity_id: Optional[str]) -> Dict[str, Any]:
+    def send(self, move: Move, call_receipt: Dict[str, Any]) -> Dict[str, Any]:
         path, body, answer = move.path, move.body, move.answer
+        activity_id = call_receipt.get("activity_id")
         reason = None
         if move.fallback is not None:
             reason = (move.item.get("engine_pending") or {}).get("refused")
             if reason is None:
                 if move.fallback["kind"] == "phase_move":
-                    reply = self.apply_phase(move, move.fallback["deal_id"])
+                    reply = self.apply_phase(move, move.fallback["deal_id"], call_receipt)
                 elif confident(body["what"]):
                     evidence = move.fallback["evidence"]
                     if activity_id and evidence.strip():
@@ -233,9 +235,15 @@ class Run:
         reply = self.request(path, body)
         return {**settled(reply, answer), **refused} if reply else {}
 
-    def apply_phase(self, move: Move, deal_id: str) -> Optional[engine_mail.Reply]:
+    def apply_phase(self, move: Move, deal_id: str, call_receipt: Dict[str, Any]) -> Optional[engine_mail.Reply]:
+        activity_id = call_receipt.get("activity_id")
+        if not activity_id or {"deal_id": deal_id} not in call_receipt.get("about", []):
+            return engine_mail.Reply(422, {"error": "call_not_filed_to_deal"})
+
         pending = (move.item.get("engine_pending") or {}).get("request")
         if pending is not None:
+            if pending["phase"].get("activity_id") != activity_id:
+                return engine_mail.Reply(422, {"error": "phase_request_missing_source_call"})
             return self.request(move.path, pending)
 
         read = self.request(f"/jobs/deals/{deal_id}")
@@ -244,8 +252,6 @@ class Run:
         deal = read.body
         current, target = deal.get("phase"), move.body["phase"]
         is_requested_deal = deal.get("deal_id") == deal_id
-        if is_requested_deal and current == target["to"]:
-            return engine_mail.Reply(200, {"deal_id": deal_id})
 
         saved, seen = deal.get("phase_saved_at"), deal.get("change_id")
         phase_saved = timestamp(saved)
@@ -255,6 +261,8 @@ class Run:
                            isinstance(current, str) and bool(current) and phase_saved is not None)
         if not (is_requested_deal and has_phase_fields and has_change_id and has_valid_phase):
             return engine_mail.Reply(422, {"error": "missing_phase_chronology"})
+        if current is None or current == target["to"] or current in {"closed", "invoiced", "dead"}:
+            return engine_mail.Reply(422, {"error": "phase_not_eligible"})
 
         started = (post_call.read_json(self.session_dir / "meta.json") or {}).get("started")
         call_start = timestamp(started)
@@ -262,10 +270,8 @@ class Run:
             return engine_mail.Reply(422, {"error": "missing_phase_chronology"})
         if phase_saved is not None and phase_saved >= call_start:
             return engine_mail.Reply(409, {"error": "newer_change_exists"})
-        if current in {"closed", "invoiced", "dead"}:
-            return engine_mail.Reply(422, {"error": "phase_not_eligible"})
-
-        request = {**move.body, "seen_change_id": seen, "phase": {"from": current, **target}}
+        request = {**move.body, "seen_change_id": seen,
+                   "phase": {"from": current, **target, "activity_id": activity_id}}
         # A lost save response must replay the same body, even if the deal has moved.
         self.checkpoint(move, request=request)
         return self.request(move.path, request)
