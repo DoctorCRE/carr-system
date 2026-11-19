@@ -2591,34 +2591,34 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
                                                   if key not in (*MAIL_STORE_COUNTERS, 'mail_rows_reusing_prior_identity',
                                                                  'decoder_alarm', 'signature_held')
                                                   and not key.endswith(('_bp', '_sample'))))
-        if catch_up is None:
-            work.events(events, matcher, since)
-            snapshot, agenda_counts = agenda(events, meta, settings, now)
-            work.counts.update(agenda_counts)
-            try:
-                if work.engine:
-                    publication = work.engine.publish_agenda(snapshot)
-                    state['calendar_agenda_engine'] = True
-                else:
-                    state.pop('calendar_agenda_engine', None)
-                    publish_agenda(ports.carr, snapshot)
-                    publication = 'published'
-            except CarrError:
-                publication = 'retry'
-            if publication == 'retry':
-                # Display only: mail and its watermark carry on; the next run retries.
-                state.pop('calendar_review_at', None)
-            else:
-                state['calendar_review_at'] = min((e['end_unix'] for e in events
-                    if now.timestamp() < e['end_unix']),
-                    default=None)
-            work.counts.update(calendar_agenda_published=int(publication == 'published'),
-                               calendar_agenda_failed=int(publication in ('refused', 'retry')))
     except CarrError as error:
         if not dry_run:
             work.report(out)
             _save(out, state)
         return Outcome('failed', 'carr_unreachable' if error.code == 'transport_error' else error.code, work.counts)
+    if catch_up is None:
+        work.events(events, matcher, since)
+        snapshot, agenda_counts = agenda(events, meta, settings, now)
+        work.counts.update(agenda_counts)
+        try:
+            if work.engine:
+                publication = work.engine.publish_agenda(snapshot)
+                state['calendar_agenda_engine'] = True
+            else:
+                state.pop('calendar_agenda_engine', None)
+                publish_agenda(ports.carr, snapshot)
+                publication = 'published'
+        except CarrError:
+            publication = 'retry'
+        if publication == 'retry':
+            # Display only: mail and its watermark carry on; the next run retries.
+            state.pop('calendar_review_at', None)
+        else:
+            state['calendar_review_at'] = min((e['end_unix'] for e in events
+                if now.timestamp() < e['end_unix']),
+                default=None)
+        work.counts.update(calendar_agenda_published=int(publication == 'published'),
+                           calendar_agenda_failed=int(publication in ('refused', 'retry')))
     work.counts.update(mapping_counts(state))
     for code in ERROR_CODES:
         work.counts['error_' + code] = sum(not r['acknowledged'] and r.get('error_code') == code
@@ -2775,13 +2775,10 @@ def main(*, reconcile_binding: bool = False, reconcile_vendor: Path | None = Non
 
 def cli() -> int:
     parser = argparse.ArgumentParser(description='Run Outlook intake for the configured mailbox.')
-    parser.add_argument('--since', metavar='YYYY-MM-DD', help='catch up from midnight in the configured time zone')
+    parser.add_argument('--since', required=True, metavar='YYYY-MM-DD',
+                        help='catch up from midnight in the configured time zone')
     parser.add_argument('--dry-run', action='store_true', help='show how many emails would file per day')
     args = parser.parse_args()
-    if args.since is None:
-        if args.dry_run:
-            parser.error('--dry-run requires --since')
-        return main()
     try:
         if not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', args.since):
             raise ValueError

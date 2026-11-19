@@ -411,8 +411,8 @@ class IntakeTest(unittest.TestCase):
         path.write_text(json.dumps(values))
         original = intake._ledger_binding
 
-        def admit_then_replace(out, settings, state):
-            binding = original(out, settings, state)
+        def admit_then_replace(out, settings, state, *, write=True):
+            binding = original(out, settings, state, write=write)
             path.write_text(json.dumps({**values, 'owner': changed_owner, 'account': changed_account}))
             self.settings = load_settings(self.home)
             return binding
@@ -923,7 +923,10 @@ class IntakeTest(unittest.TestCase):
         write_db(self.fake.fixture, [mail(CLIENT.email, timedelta(hours=-1), body='orchard fixture')])
         ports = self.fake.ports()
         ports.decode = self.search_decode
-        return intake.run(self.repo, self.home, ports)
+        # A synthetic home can live inside the outer checkout during local tests.
+        index = self.home / '.local/share/carr/email-search/email-search-7.db'
+        with patch('lib.email_local_search.published_index_path', return_value=index):
+            return intake.run(self.repo, self.home, ports)
 
     def test_loaded_signature_html_is_bound_to_its_message_without_changing_body(self):
         source = mail(CLIENT.email, timedelta(hours=-1), body='Hello Pat 555-0199 pat@example.test', local_keys='101')
@@ -1180,8 +1183,7 @@ class IntakeTest(unittest.TestCase):
         write_db(self.fake.fixture, mails, events, **db)
         if touch:
             self.store.write_bytes(self.store.read_bytes() + b'.')
-        options = {} if catch_up is None else {'catch_up': catch_up}
-        return intake.run(self.repo, self.home, self.fake.ports(), **options)
+        return intake.run(self.repo, self.home, self.fake.ports(), catch_up=catch_up)
 
     def out(self):
         return self.repo / intake.OUT
@@ -3496,11 +3498,12 @@ class IntakeTest(unittest.TestCase):
                                                 'counts': {'run': {'mail_ids': 0, 'writes_failed': 3}, 'backlog': {}}})
 
     def test_main_runs_the_router_after_intake_releases_its_lock_without_changing_the_result(self):
-        write_settings(self.home, ROOT, model='sonnet')
+        write_settings(self.home, self.repo, model='sonnet')
         settings = load_settings(self.home)
         order, models = [], []
 
-        def fake_run(repo, home, ports, *, settings=None, reconcile_binding=False, legacy_decode=None, attest_mailbox=None):
+        def fake_run(repo, home, ports, *, settings=None, reconcile_binding=False,
+                     legacy_decode=None, attest_mailbox=None, catch_up=None):
             order.append('intake')
             ports.read_unresolved({'subject': 'S', 'text': 'T', 'sender': 'a@b.test'}, datetime(2026, 10, 26).date(), [], [])
             return intake.Outcome('succeeded', 'ok')
@@ -5912,11 +5915,12 @@ class ModelCallTest(unittest.TestCase):
 
     def test_the_model_name_comes_from_settings_and_defaults_to_haiku(self):
         with tempfile.TemporaryDirectory() as home:
-            write_settings(Path(home), ROOT)
+            repo = Path(home) / 'repo'
+            write_settings(Path(home), repo)
             self.assertEqual(load_settings(Path(home)).model, 'haiku')
-            write_settings(Path(home), ROOT, model='sonnet')
+            write_settings(Path(home), repo, model='sonnet')
             self.assertEqual(load_settings(Path(home)).model, 'sonnet')
-            write_settings(Path(home), ROOT, model='haiku; rm -rf')
+            write_settings(Path(home), repo, model='haiku; rm -rf')
             with self.assertRaises(ValueError):
                 load_settings(Path(home))
         seen = {}
