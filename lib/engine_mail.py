@@ -84,7 +84,13 @@ def connect(credentials: Path, user: str | None = None, *, job: str = JOB) -> Do
     url, client, secret = (values.get(name) or '' for name in CREDENTIALS)
     if not (url.startswith('https://') and client and secret):
         raise PermissionError('engine credentials need ENGINE_URL (https), ENGINE_ACCESS_CLIENT_ID and SECRET')
-    headers = {'CF-Access-Client-Id': client, 'CF-Access-Client-Secret': secret, 'Engine-Job': job}
+    config = Path(__file__).resolve().parents[1] / 'mcp-server/src/engine-client.json'
+    headers = {
+        'CF-Access-Client-Id': client,
+        'CF-Access-Client-Secret': secret,
+        'Engine-Job': job,
+        'User-Agent': json.loads(config.read_text())['userAgent'],
+    }
     if user is not None:
         headers['Engine-For-User'] = user
 

@@ -1,5 +1,6 @@
 // Send assistant saves to DoctorCRE Engine from the Worker.
 import { derivedIdempotencyKey } from "./derived-key.ts";
+import engineClient from "./engine-client.json" with { type: "json" };
 import { isInvoiceEvidence } from "./invoice-evidence.ts";
 import { ToolError } from "./tool-error.ts";
 import type { VerbInputs } from "./verb-contract.ts";
@@ -135,6 +136,7 @@ export async function saveAssistantChange(env: EngineEnv, partner: string, save:
   const body = JSON.stringify(save.body);
   const headers = {
     "Content-Type": "application/json",
+    "User-Agent": engineClient.userAgent,
     "CF-Access-Client-Id": clientId,
     "CF-Access-Client-Secret": secret,
     "Engine-Job": save.job ?? "agent",
