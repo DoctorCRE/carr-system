@@ -109,6 +109,7 @@ test("deal activity retries a committed save without changing its time, key, or 
   assert.equal(request.path, "/jobs/activities");
   assert.equal(request.method, "POST");
   assert.equal(request.redirect, "error");
+  assert.equal(request.headers.get("User-Agent"), "carr-engine-client/1");
   assert.equal(request.headers.get("Engine-Job"), "agent");
   assert.equal(request.headers.get("Engine-For-User"), "dell");
   assert.equal(request.headers.get("CF-Access-Client-Id"), upstream.env.ENGINE_ACCESS_CLIENT_ID);

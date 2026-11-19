@@ -6876,6 +6876,7 @@ class EngineMailTest(unittest.TestCase):
         self.assertEqual([seen[0].get_header(k) for k in ('Cf-access-client-id', 'Engine-job', 'Engine-for-user')],
                          ['id-1', 'mail_capture', 'joe'])
         self.assertEqual(seen[1].get_header('Engine-for-user'), 'dell')
+        self.assertEqual([req.get_header('User-agent') for req in seen], ['carr-engine-client/1'] * 3)
         self.assertEqual([req.get_header('Content-type') for req in seen],
                          ['application/json', 'application/json', 'application/octet-stream'])
 
