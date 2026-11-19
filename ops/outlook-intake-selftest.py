@@ -2,7 +2,7 @@
 """Offline tests for the Outlook intake. Made-up fixtures and fake ports only:
 no Outlook store, no record layer, no model."""
 from io import StringIO
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import errno
 import fcntl
 import hashlib
@@ -1122,13 +1122,66 @@ class IntakeTest(unittest.TestCase):
                 os.chmod(Path(directory) / name, 0o600)
         return subprocess.CompletedProcess(command, 0)
 
-    def run_intake(self, mails=(), events=(), touch=True, **db):
+    def test_catch_up_previews_and_files_from_local_midnight_on_an_unchanged_store(self):
+        start = date(2026, 10, 12)
+        midnight = datetime(2026, 10, 12, 5, tzinfo=timezone.utc) - NOW
+        recent = mail(CLIENT.email, -timedelta(hours=1), message_id='<recent@example.test>', local_keys='9')
+        self.assertEqual(self.run_intake([recent]).state, 'succeeded')
+        rows = [recent,
+                mail(CLIENT.email, midnight - timedelta(seconds=1), message_id='<early@example.test>', local_keys='1'),
+                mail(CLIENT.email, midnight, message_id='<start@example.test>', local_keys='2'),
+                mail(CLIENT.email, midnight + timedelta(days=1), message_id='next@example.test', local_keys='3'),
+                {**mail(CLIENT.email, midnight, message_id='<other@example.test>', local_keys='4'), 'folder_account': 8},
+                mail(CLIENT.email, midnight, local_keys='5'),
+                mail('unknown@example.test', midnight, message_id='<unknown@example.test>', local_keys='6')]
+        self.fake.calls.clear()
+        self.fake.board_calls.clear()
+        before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in (*self.repo.rglob('*'), *self.home.rglob('*'))
+                  if p.is_file()}
+        self.fake.now -= timedelta(hours=7)
+        preview = self.run_intake(rows, touch=False, catch_up=intake.CatchUp(start, dry_run=True))
+        self.fake.now = NOW
+        self.assertEqual(preview.would_file_by_day, {'2026-10-12': 1, '2026-10-13': 1})
+        after = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in (*self.repo.rglob('*'), *self.home.rglob('*'))
+                 if p.is_file()}
+        self.assertEqual(after, before)
+        self.assertEqual((self.fake.writes(), self.fake.board_calls, self.fake.intent_calls), ([], [], []))
+        for catch_up in (intake.CatchUp(start), intake.CatchUp(start), None):
+            self.assertEqual(self.run_intake(rows, touch=False, catch_up=catch_up).state, 'succeeded')
+            self.assertEqual([args['message_id'] for _, args in self.fake.writes('log-activity')],
+                             ['<start@example.test>', '<next@example.test>'])
+        repeat_preview = self.run_intake(rows, touch=False, catch_up=intake.CatchUp(start, dry_run=True))
+        self.assertEqual(repeat_preview.would_file_by_day, {})
+
+    def test_catch_up_checks_decoder_health_and_binding_in_preview(self):
+        start = intake.CatchUp(date(2026, 10, 12), dry_run=True)
+        row = mail(CLIENT.email, -timedelta(days=8), message_id='<history@example.test>')
+        outcome = self.run_intake([row], found=100, verified=94, catch_up=start)
+        self.assertEqual((outcome.reason, outcome.would_file_by_day), ('writes_deferred', None))
+        self.assertEqual(self.fake.writes(), [])
+        self.assertFalse((self.out() / intake.STATE).exists())
+        self.assertFalse((self.out() / 'binding.json').exists())
+        (self.out() / 'binding.json').write_text('{}')
+        self.assertEqual(self.run_intake([row], catch_up=start).reason, 'ledger_binding_mismatch')
+        self.assertEqual(self.fake.decodes, 1)
+
+    def test_catch_up_requires_the_verified_folder_account(self):
+        write_settings(self.home, self.repo, owner='joe', folder_account_id=8)
+        row = mail(CLIENT.email, -timedelta(days=8), message_id='<history@example.test>')
+        for dry_run in (True, False):
+            result = self.run_intake([{**row, 'folder_account': 8}],
+                                     catch_up=intake.CatchUp(date(2026, 10, 12), dry_run))
+            self.assertEqual((result.reason, result.detail), ('decode_failed', 'folder_account_mailbox_unverified'))
+        self.assertEqual(self.fake.writes(), [])
+
+    def run_intake(self, mails=(), events=(), touch=True, catch_up=None, **db):
         if self.fake.fixture.exists():
             self.fake.fixture.unlink()
         write_db(self.fake.fixture, mails, events, **db)
         if touch:
             self.store.write_bytes(self.store.read_bytes() + b'.')
-        return intake.run(self.repo, self.home, self.fake.ports())
+        options = {} if catch_up is None else {'catch_up': catch_up}
+        return intake.run(self.repo, self.home, self.fake.ports(), **options)
 
     def out(self):
         return self.repo / intake.OUT
@@ -6390,6 +6443,29 @@ class EngineMailTest(unittest.TestCase):
         self.assertIsNotNone(self.fake.agenda)
         self.assertNotIn('engine_mail', json.loads((self.out() / intake.STATE).read_text()))
 
+    def test_catch_up_previews_and_files_through_engine_once(self):
+        start = date(2026, 9, 15)
+        rows = [mail(CLIENT.email, -timedelta(days=35), message_id='<old@example.test>', local_keys='1'),
+                mail(CLIENT.email, -timedelta(days=35), message_id='<old@example.test>', local_keys='2'),
+                mail(CLIENT.email, -timedelta(days=35), message_id='<waiting@example.test>', local_keys='3',
+                     kind='preview')]
+        preview = self.run_intake(rows, catch_up=intake.CatchUp(start, dry_run=True))
+        self.assertEqual(preview.would_file_by_day, {'2026-09-15': 1})
+        self.assertEqual(self.engine.calls, [])
+        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual(list(self.out().iterdir()), [])
+        for catch_up in (intake.CatchUp(start), intake.CatchUp(start), None):
+            self.assertEqual(self.run_intake(rows, touch=False, catch_up=catch_up).state, 'succeeded')
+        [request] = self.engine.posts('/jobs/activities')
+        self.assertEqual(request['email']['message_id'], 'old@example.test')
+        self.assertEqual(request['idempotency_key'], str(uuid.uuid5(
+            uuid.NAMESPACE_URL, f'engine|joe|{OWNER}|old@example.test|activity')))
+        self.fake.now += engine_mail.FULL_TEXT_WAIT
+        after_wait = self.run_intake(rows, touch=False)
+        self.assertEqual(after_wait.counts['engine_emails_stored'], 1)
+        self.assertEqual(set(self.engine.activities), {'old@example.test', 'waiting@example.test'})
+        self.assertEqual(self.fake.writes('log-activity'), [])
+
     def test_switch_on_sends_each_email_once_and_writes_no_old_activity(self):
         self.fake.intent_reply = read('new_matter', 'Needs a suite')
         rows = [mail(CLIENT.email, -timedelta(hours=1), message_id='<M1@Example.test>', name='Pat Example',
@@ -6779,12 +6855,24 @@ class EngineMailTest(unittest.TestCase):
         self.assertEqual((email['email']['message_id'], tie['message_id']), ('att@example.test', 'att@example.test'))
         self.assertEqual(len(self.engine.documents), 1)
 
-    def attachment_run(self, sent=timedelta(hours=1)):
+    def test_catch_up_ties_engine_attachment_once(self):
+        start = date(2026, 10, 12)
+        preview = self.attachment_run(sent=timedelta(days=8), catch_up=intake.CatchUp(start, True))
+        self.assertEqual(preview.would_file_by_day, {'2026-10-12': 1})
+        self.assertEqual((self.copied, self.engine.calls), ([], []))
+        for _ in range(2):
+            result = self.attachment_run(sent=timedelta(days=8), catch_up=intake.CatchUp(start))
+            self.assertEqual(result.state, 'succeeded', result)
+        [tie] = self.engine.posts('/jobs/attachments')
+        self.assertEqual(tie['message_id'], 'att@example.test')
+        self.assertEqual(len(self.engine.documents), 1)
+
+    def attachment_run(self, sent=timedelta(hours=1), catch_up=None):
         self.fake.fixture.unlink(missing_ok=True)
         ports = self.attachment_fixture(sent=sent)
         with closing(sqlite3.connect(self.fake.fixture)) as con, con:
             con.execute("UPDATE messages SET message_id = '<att@example.test>' WHERE id = 1")
-        return intake.run(self.repo, self.home, ports)
+        return intake.run(self.repo, self.home, ports, catch_up=catch_up)
 
     def test_attachment_is_uploaded_then_tied_to_its_email_and_deal(self):
         outcome = self.attachment_run()

@@ -159,7 +159,7 @@ class Mailbox:
         if held is None or (ready, rank) > held[:2]:
             self.offers[message_id] = (ready, rank, sent, inbound, activity)
 
-    def send_emails(self) -> None:
+    def _stage_emails(self) -> None:
         for message_id, (ready, _, sent, inbound, activity) in self.offers.items():
             entry = self.emails.setdefault(message_id, {'sent': sent, 'seen': self.at})
             if 'request' in entry:
@@ -168,6 +168,14 @@ class Mailbox:
                 self.count('engine_emails_waiting')
                 continue
             entry.update(inbound=inbound, request={'idempotency_key': self.key(message_id, 'activity'), **activity})
+
+    def preview_emails(self) -> dict[str, str]:
+        self._stage_emails()
+        return {mid: entry['request']['happened_at'] for mid, entry in self.emails.items()
+                if mid in self.offers and 'request' in entry and 'outcome' not in entry}
+
+    def send_emails(self) -> None:
+        self._stage_emails()
         self.save()
         for entry in self.emails.values():
             if 'request' in entry and 'outcome' not in entry:
@@ -299,5 +307,6 @@ class Mailbox:
         oldest = self.at - KEEP.total_seconds()
         for table in (self.emails, self.files, self.notes):
             for name in [name for name, entry in table.items()
-                         if entry['sent'] < oldest and (table is not self.notes or 'outcome' in entry)]:
+                         if max(entry['sent'], entry.get('seen', 0)) < oldest
+                         and (table is not self.notes or 'outcome' in entry)]:
                 del table[name]
