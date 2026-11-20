@@ -179,7 +179,7 @@ DEALROOM_PROGRAM6_ACTIONS_ENABLED = "true"
 WORKSPACE_COMMAND_CENTER_READ_ENABLED = "true"
 # Program 28: "true" routes supported assistant deal saves to DoctorCRE Engine.
 # It needs the ENGINE_URL, ENGINE_ACCESS_CLIENT_ID and ENGINE_ACCESS_CLIENT_SECRET secrets.
-ENGINE_ASSISTANT = "false"
+ENGINE_ASSISTANT = "true"
 # Final half of the reviewed zero-downtime credential cutover. Dedicated Codex
 # and Claude token maps and native profiles passed the isolated live lifecycle
 # proof on the compatibility release, so this release requires surface-bound
@@ -293,7 +293,6 @@ AI_DAILY_NEURON_BUDGET = "1500"
 CARR_MCP_ALLOWED_ORIGINS = '["https://carr-mcp-staging.joe-bookout-carr-us.workers.dev","https://doctorcre-app-staging.joe-bookout-carr-us.workers.dev"]'
 DEALROOM_PROGRAM6_ACTIONS_ENABLED = "true"
 WORKSPACE_COMMAND_CENTER_READ_ENABLED = "true"
-ENGINE_ASSISTANT = "false"
 CONTINUITY_SURFACE_ENFORCEMENT = "required"
 CANONICAL_OWNERSHIP_RUNTIME_MODE = "disabled"
 CANONICAL_OWNERSHIP_ISSUER_ACTIVE_GENERATION = "none"
