@@ -114,14 +114,12 @@ class NightlyStatusTests(unittest.TestCase):
         self.assertIn("HC_CHAIN_RC=7", (self.root / "pings").read_text())
 
 
-    def test_checklist_reminder_failure_is_reported_without_suppressing_later_jobs(self):
-        result, receipts = self.run_nightly({'deal-checklist-reminders': 1})
-        self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn('nightly.deal-checklist-reminders 1', receipts)
-        self.assertIn('./.venv/bin/python tools/deal-checklist-reminders.py --apply',
-                      (self.root / 'commands').read_text().splitlines())
-        self.assertIn('nightly.verb-probe 0', receipts)
-        self.assertIn('HC_CHAIN_RC=1', (self.root / 'pings').read_text())
+    def test_nightly_does_not_send_checklist_reminders(self):
+        result, receipts = self.run_nightly({})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('nightly.deal-checklist-reminders 0', receipts)
+        self.assertNotIn('tools/deal-checklist-reminders.py',
+                         (self.root / 'commands').read_text())
 
     def test_export_failure_remains_visible_after_later_success(self):
         result, receipts = self.run_nightly({"exports": 7}, "--exports")
