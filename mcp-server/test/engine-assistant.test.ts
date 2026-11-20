@@ -60,6 +60,7 @@ function engine(t: TestContext, respond: (body: unknown, path: string) => Respon
   }[] = [];
   t.mock.method(globalThis, "fetch", async (url: URL, request: RequestInit) => {
     const { headers, method, redirect, body } = request;
+    if (redirect === "error") throw new TypeError('Invalid redirect value, must be one of "follow" or "manual"');
     assert.ok(typeof body === "string");
     const parsed: unknown = JSON.parse(body);
     calls.push({ path: url.pathname, headers: new Headers(headers), method, redirect, body: parsed });
@@ -108,7 +109,7 @@ test("deal activity retries a committed save without changing its time, key, or 
   assert.equal(receipts.size, 1);
   assert.equal(request.path, "/jobs/activities");
   assert.equal(request.method, "POST");
-  assert.equal(request.redirect, "error");
+  assert.equal(request.redirect, "manual");
   assert.equal(request.headers.get("User-Agent"), "carr-engine-client/1");
   assert.equal(request.headers.get("Engine-Job"), "agent");
   assert.equal(request.headers.get("Engine-For-User"), "dell");
@@ -131,6 +132,43 @@ test("a final refusal never retries or writes to the legacy database", async (t)
     payload: { error: "engine_assistant_refused", engine_status: 403, engine_error: "unknown_job" },
   });
   assert.equal(upstream.calls.length, 1);
+});
+
+test("an engine redirect is refused after one request", async (t) => {
+  const upstream = engine(t, () =>
+    Response.json({ error: "key_reuse" }, { status: 307, headers: { Location: "https://other.example.test/" } }),
+  );
+  await assert.rejects(executeRegisteredTool(legacy(), agent, "log-activity", { ...activity }, upstream.env), {
+    payload: { error: "engine_assistant_refused", engine_status: 307 },
+  });
+  assert.equal(upstream.calls.length, 1);
+  assert.equal(upstream.calls[0]?.redirect, "manual");
+});
+
+test("an exhausted transport failure logs its cause without Access credentials", async (t) => {
+  const log = t.mock.method(console, "error", () => {});
+  const upstream = engine(t, () => {
+    throw new TypeError(
+      `Fetch failed for ${upstream.env.ENGINE_ACCESS_CLIENT_ID} and ${upstream.env.ENGINE_ACCESS_CLIENT_SECRET}`,
+    );
+  });
+  const reply = record(
+    await executeRegisteredTool(legacy(), agent, "log-activity", { ...activity }, upstream.env).catch(
+      (error: unknown) => publicError(error),
+    ),
+  );
+  assert.equal(reply.error, "engine_assistant_unavailable");
+  assert.equal(Object.hasOwn(reply, "cause"), false);
+  assert.equal(upstream.calls.length, 3);
+  assert.equal(log.mock.callCount(), 1);
+  const line: unknown = log.mock.calls[0]?.arguments[0];
+  assert.ok(typeof line === "string");
+  const event = record(JSON.parse(line));
+  assert.equal(event.correlation_id, reply.correlation_id);
+  assert.deepEqual(record(event.diagnostic).cause, {
+    name: "TypeError",
+    message: "Fetch failed for [redacted] and [redacted]",
+  });
 });
 
 test("sets a deal step using the atomic replacement and explicit owner contract", async (t) => {
