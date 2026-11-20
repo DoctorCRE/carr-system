@@ -159,7 +159,7 @@ class Mailbox:
         if held is None or (ready, rank) > held[:2]:
             self.offers[message_id] = (ready, rank, sent, inbound, activity)
 
-    def send_emails(self) -> None:
+    def _stage_emails(self) -> None:
         for message_id, (ready, _, sent, inbound, activity) in self.offers.items():
             entry = self.emails.setdefault(message_id, {'sent': sent, 'seen': self.at})
             if 'request' in entry:
@@ -168,10 +168,19 @@ class Mailbox:
                 self.count('engine_emails_waiting')
                 continue
             entry.update(inbound=inbound, request={'idempotency_key': self.key(message_id, 'activity'), **activity})
+
+    def email_requests(self, since: int | None) -> dict[str, dict]:
+        self._stage_emails()
+        return {mid: entry['request'] for mid, entry in self.emails.items()
+                if 'request' in entry and 'outcome' not in entry
+                and (since is None or (mid in self.offers
+                     and datetime.fromisoformat(entry['request']['happened_at']).timestamp() >= since))}
+
+    def send_emails(self, since: int | None = None) -> None:
+        requests = self.email_requests(since)
         self.save()
-        for entry in self.emails.values():
-            if 'request' in entry and 'outcome' not in entry:
-                self.answer(entry, self.post('/jobs/activities', entry['request']), 'emails')
+        for mid, request in requests.items():
+            self.answer(self.emails[mid], self.post('/jobs/activities', request), 'emails')
         self.save()
 
     def upload(self, source: str, data: bytes, name: str, message_id: str | None, deal_id: str) -> str:
@@ -188,11 +197,11 @@ class Mailbox:
         self.save()
         return 'kept'
 
-    def tie_files(self) -> list[str]:
+    def tie_files(self, sources: set[str] | None = None) -> list[str]:
         """Tie each uploaded file to its email and deal. Returns sources whose bytes must be read again."""
         again = []
         for source, entry in self.files.items():
-            if 'outcome' in entry:
+            if (sources is not None and source not in sources) or 'outcome' in entry:
                 continue
             email = self.emails.get(entry['message_id'] or '', {})
             if 'seen' in email and 'outcome' not in email:
@@ -299,5 +308,6 @@ class Mailbox:
         oldest = self.at - KEEP.total_seconds()
         for table in (self.emails, self.files, self.notes):
             for name in [name for name, entry in table.items()
-                         if entry['sent'] < oldest and (table is not self.notes or 'outcome' in entry)]:
+                         if max(entry['sent'], entry.get('seen', 0)) < oldest
+                         and (table is not self.notes or 'outcome' in entry)]:
                 del table[name]
