@@ -1814,16 +1814,18 @@ class Run:
         self.state['attachments_done'] = {source: at for source, at in done.items() if at >= cutoff}
         _save(self.out, self.state)
 
-    def stage_engine_lead(self, progress: dict, args: dict) -> None:
+    def stage_engine_lead(self, progress: dict, args: dict, mail: dict | None = None) -> None:
         assert self.engine
-        if args['applies_to'] == 'new_matter':
+        if args['applies_to'] == 'new_matter' and 'request' not in progress:
             request = {k: v for k, v in args.items() if k not in ('deal', 'party', 'idempotency_key')}
+            if mail is not None:
+                request.update(self.engine.pin_proposal_email_identity(mail))
             for field, limit in (('display_name', 200), ('summary', 300), ('evidence_quote', 500)):
                 if request.get(field):
                     request[field] = _trim_utf16(request[field], limit)
             request['idempotency_key'] = self.engine.key('email-lead', args['address'], args['message_ref'])
             progress['read'] = 'new_matter'
-            progress.setdefault('request', request)
+            progress['request'] = request
 
     def send_engine_lead(self, progress: dict) -> None:
         assert self.engine
@@ -1916,7 +1918,7 @@ class Run:
                     'applies_to': read['applies_to'], 'confidence': read['confidence'],
                     **{k: read[k] for k in ('deal', 'party', 'evidence_quote') if read[k] is not None}}
             if self.engine:
-                self.stage_engine_lead(progress, {**args, **self.engine.proposal_email_identity(m)})
+                self.stage_engine_lead(progress, args, m)
                 _save(self.out, self.state)
                 if 'request' in progress:
                     self.send_engine_lead(progress)

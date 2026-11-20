@@ -6698,6 +6698,53 @@ class EngineMailTest(unittest.TestCase):
             self.assertEqual(proposal[field], activity['email'][field])
         self.assertEqual(proposal['message_ref'], ident(row))
 
+    def test_engine_lead_and_activity_strip_padding_on_both_sides_of_brackets(self):
+        self.fake.intent_reply = read('new_matter', 'Needs a suite.')
+        row = mail('stranger@example.test', -timedelta(hours=1), message_id='  <  MiXeD@Example.test  >  ')
+        self.assertEqual(self.run_intake([row]).counts['lead_proposed'], 1)
+        [activity] = self.engine.posts('/jobs/activities')
+        [proposal] = self.engine.posts('/jobs/proposals/email-lead')
+        self.assertEqual(activity['email']['message_id'], 'MiXeD@Example.test')
+        self.assertEqual(proposal['message_id'], activity['email']['message_id'])
+
+    def preview_lead_then_full_email(self, *, lose_reply):
+        self.fake.intent_reply = read('new_matter', 'Needs a suite.')
+        preview = dict(mail('stranger@example.test', -timedelta(minutes=10), kind='preview',
+                            message_id='<MiXeD@Example.test>'), conversation_id='Preview-Conversation')
+        lead_path = '/jobs/proposals/email-lead'
+        door = self.engine.door('joe')
+
+        def lose_first_lead_reply(method, path, body):
+            reply = door(method, path, body)
+            if path == lead_path and not reply.body.get('replayed'):
+                return engine_mail.Reply(0, {})
+            return reply
+
+        if lose_reply:
+            self.fake.ports = lambda: replace(self.plain_ports(), engine=lose_first_lead_reply)
+        first = self.run_intake([preview])
+        self.assertEqual(first.state, 'failed' if lose_reply else 'succeeded')
+        self.assertEqual(len(self.engine.leads), 1)
+        self.assertEqual(self.engine.posts('/jobs/activities'), [])
+        [proposal] = self.engine.posts(lead_path)
+
+        self.fake.now += timedelta(minutes=30)
+        full = dict(preview, body_kind='full', body='Can we meet Thursday to discuss the suite?',
+                    conversation_id='Full-Conversation')
+        self.assertEqual(self.run_intake([full]).state, 'succeeded')
+        self.assertEqual(self.engine.posts(lead_path), [proposal, proposal] if lose_reply else [proposal])
+        self.assertEqual(len(self.fake.intent_calls), 1)
+        [activity] = self.engine.posts('/jobs/activities')
+        self.assertEqual(activity['email']['body'], full['body'])
+        self.assertEqual(proposal['message_id'], activity['email']['message_id'])
+        self.assertEqual(proposal['conversation_id'], activity['email']['conversation_id'])
+
+    def test_preview_proposal_and_full_activity_share_the_same_identity(self):
+        self.preview_lead_then_full_email(lose_reply=False)
+
+    def test_preview_proposal_retry_and_full_activity_share_the_same_identity(self):
+        self.preview_lead_then_full_email(lose_reply=True)
+
     def test_engine_lead_omits_each_unavailable_email_identifier(self):
         self.fake.intent_reply = read('new_matter', 'Needs a suite.')
         sources = [(None, None), ('< >', ' \t '), ('<Only-Message@Example.test>', None), (None, 'Only-Conversation')]
