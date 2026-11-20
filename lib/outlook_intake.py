@@ -1389,7 +1389,8 @@ class Run:
                   if r['verb'] == 'log-activity' and r['acknowledged'] and r.get('disposition') != 'moved_to_engine'
                   and json.loads(r['payload']).get('kind') in ('email_in', 'email_out')} - {''}
         for m in mails:
-            message_id = (m.get('message_id') or '').strip().strip('<>')
+            identity = engine_mail.decoded_email_identity(m)
+            message_id = identity.get('message_id', '')
             if message_id:
                 self.message_ids[m['ident']] = message_id
             if (m['metadata_incomplete'] or m['sent_unix'] > self.now.timestamp() + 300 or message_id in copied
@@ -1403,16 +1404,13 @@ class Run:
                 continue
             recipients = [{'address': address, 'kind': kind} for field, kind in (('recipients', 'to'), ('cc', 'cc'))
                           for address in dict.fromkeys(_addresses(m.get(field)))]
-            conversation_id = m.get('conversation_id')
             self.engine.offer(message_id, m['sent_unix'], m['full'] and bool(recipients or inbound),
                               (m['full'], len(m['text'])), inbound,
                               {'kind': 'email', 'happened_at': _iso(m['sent_unix']),
-                               'email': {'message_id': message_id, 'sender': m['sender'].lower(),
+                               'email': {**identity, 'sender': m['sender'].lower(),
                                          'recipients': recipients, 'subject': m['subject'] or '',
                                          'body': m['text'],
-                                         **({'sender_name': m['sender_name']} if m.get('sender_name') else {}),
-                                         **({'conversation_id': conversation_id}
-                                            if conversation_id and conversation_id.strip() else {})}})
+                                         **({'sender_name': m['sender_name']} if m.get('sender_name') else {})}})
         if self.preview is None:
             self.engine.send_emails(self.catch_up_since)
         else:
@@ -1816,16 +1814,18 @@ class Run:
         self.state['attachments_done'] = {source: at for source, at in done.items() if at >= cutoff}
         _save(self.out, self.state)
 
-    def stage_engine_lead(self, progress: dict, args: dict) -> None:
+    def stage_engine_lead(self, progress: dict, args: dict, mail: dict | None = None) -> None:
         assert self.engine
-        if args['applies_to'] == 'new_matter':
+        if args['applies_to'] == 'new_matter' and 'request' not in progress:
             request = {k: v for k, v in args.items() if k not in ('deal', 'party', 'idempotency_key')}
+            if mail is not None:
+                request.update(self.engine.pin_proposal_email_identity(mail))
             for field, limit in (('display_name', 200), ('summary', 300), ('evidence_quote', 500)):
                 if request.get(field):
                     request[field] = _trim_utf16(request[field], limit)
             request['idempotency_key'] = self.engine.key('email-lead', args['address'], args['message_ref'])
             progress['read'] = 'new_matter'
-            progress.setdefault('request', request)
+            progress['request'] = request
 
     def send_engine_lead(self, progress: dict) -> None:
         assert self.engine
@@ -1918,7 +1918,7 @@ class Run:
                     'applies_to': read['applies_to'], 'confidence': read['confidence'],
                     **{k: read[k] for k in ('deal', 'party', 'evidence_quote') if read[k] is not None}}
             if self.engine:
-                self.stage_engine_lead(progress, args)
+                self.stage_engine_lead(progress, args, m)
                 _save(self.out, self.state)
                 if 'request' in progress:
                     self.send_engine_lead(progress)
