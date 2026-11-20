@@ -62,6 +62,13 @@ class Reply:
 Door = Callable[[str, str, Optional[bytes]], Reply]
 
 
+def decoded_email_identity(mail: dict) -> dict[str, str]:
+    return {field: value for field, value in (
+        ('message_id', (mail.get('message_id') or '').strip().strip('<>')),
+        ('conversation_id', mail.get('conversation_id')),
+    ) if value and value.strip()}
+
+
 def verdict(reply: Reply) -> str:
     """done, settled, later, upload (the file must be sent again), retry, or caller (fix the setup)."""
     if 200 <= reply.status < 300:
@@ -158,6 +165,19 @@ class Mailbox:
         held = self.offers.get(message_id)
         if held is None or (ready, rank) > held[:2]:
             self.offers[message_id] = (ready, rank, sent, inbound, activity)
+
+    def proposal_email_identity(self, mail: dict) -> dict[str, str]:
+        identity = decoded_email_identity(mail)
+        message_id = identity.get('message_id')
+        if message_id is None:
+            return identity
+        request = self.emails.get(message_id, {}).get('request')
+        if request is None and message_id in self.offers:
+            request = self.offers[message_id][-1]
+        if request is None:
+            return identity
+        email = request['email']
+        return {field: email[field] for field in ('message_id', 'conversation_id') if field in email}
 
     def _stage_emails(self) -> None:
         for message_id, (ready, _, sent, inbound, activity) in self.offers.items():

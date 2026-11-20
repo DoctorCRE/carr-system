@@ -6686,6 +6686,45 @@ class EngineMailTest(unittest.TestCase):
         self.assertEqual((request['display_name'], request['summary'], request['evidence_quote']),
                          (name[:-1], summary[:-1], quote[:-1]))
 
+    def test_engine_lead_carries_the_activity_email_identity(self):
+        self.fake.intent_reply = read('new_matter', 'Needs a suite.')
+        row = dict(mail('stranger@example.test', -timedelta(hours=1), message_id='<MiXeD@Example.test>'),
+                   conversation_id='Outlook-AbC123')
+        self.assertEqual(self.run_intake([row]).counts['lead_proposed'], 1)
+        [activity] = self.engine.posts('/jobs/activities')
+        [proposal] = self.engine.posts('/jobs/proposals/email-lead')
+        for field, expected in (('message_id', 'MiXeD@Example.test'), ('conversation_id', 'Outlook-AbC123')):
+            self.assertEqual(activity['email'][field], expected)
+            self.assertEqual(proposal[field], activity['email'][field])
+        self.assertEqual(proposal['message_ref'], ident(row))
+
+    def test_engine_lead_omits_each_unavailable_email_identifier(self):
+        self.fake.intent_reply = read('new_matter', 'Needs a suite.')
+        sources = [(None, None), ('< >', ' \t '), ('<Only-Message@Example.test>', None), (None, 'Only-Conversation')]
+        rows = [dict(mail(f'sender{i}@example.test', -timedelta(minutes=30 + i), message_id=message_id),
+                     conversation_id=conversation_id)
+                for i, (message_id, conversation_id) in enumerate(sources)]
+        self.assertEqual(self.run_intake(rows).counts['lead_proposed'], len(rows))
+        requests = {request['address']: request for request in self.engine.posts('/jobs/proposals/email-lead')}
+        for row, expected in zip(rows, ({}, {}, {'message_id': 'Only-Message@Example.test'},
+                                        {'conversation_id': 'Only-Conversation'}), strict=True):
+            request = requests[row['sender']]
+            self.assertEqual({k: request[k] for k in ('message_id', 'conversation_id') if k in request}, expected)
+
+    def test_engine_lead_reuses_the_identity_from_a_previously_sent_activity(self):
+        row = dict(mail('stranger@example.test', -timedelta(hours=1), message_id='<MiXeD@Example.test>'),
+                   conversation_id='Original-Conversation')
+        self.fake.ports = lambda: replace(self.plain_ports(), engine=self.engine.door('joe'), read_unresolved=None)
+        self.assertEqual(self.run_intake([row]).state, 'succeeded')
+        self.assertEqual(self.engine.posts('/jobs/proposals/email-lead'), [])
+        self.fake.ports = lambda: replace(self.plain_ports(), engine=self.engine.door('joe'))
+        self.fake.intent_reply = read('new_matter', 'Needs a suite.')
+        self.assertEqual(self.run_intake([dict(row, conversation_id='Different-Conversation')]).counts['lead_proposed'], 1)
+        [activity] = self.engine.posts('/jobs/activities')
+        [proposal] = self.engine.posts('/jobs/proposals/email-lead')
+        self.assertEqual(proposal['message_id'], activity['email']['message_id'])
+        self.assertEqual(proposal['conversation_id'], activity['email']['conversation_id'])
+
     def test_lead_replays_identical_payload_after_engine_commits_and_response_is_lost(self):
         self.fake.intent_reply = read('new_matter', 'Needs a suite.', quote='Can we meet Thursday?')
         row = mail('stranger@example.test', -timedelta(hours=1), name='Pat Example', message_id='<r1@example.test>')
@@ -6708,6 +6747,7 @@ class EngineMailTest(unittest.TestCase):
                                  'display_name': 'Pat Example', 'summary': 'Needs a suite.',
                                  'first_seen_at': (NOW - timedelta(hours=1)).isoformat(),
                                  'message_ref': ident(row), 'applies_to': 'new_matter', 'confidence': 0.9,
+                                 'message_id': 'r1@example.test',
                                  'evidence_quote': 'Can we meet Thursday?'})
         self.assertEqual(uuid.UUID(first['idempotency_key']).version, 5)
         self.assertEqual(len(self.fake.intent_calls), 1)
