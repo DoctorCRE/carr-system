@@ -143,15 +143,25 @@ export async function saveAssistantChange(env: EngineEnv, partner: string, save:
     "Engine-For-User": partner,
   };
   const target = new URL(save.path, url);
+  let fetchError: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const response = await fetch(target, {
-      method: "POST",
-      headers,
-      body,
-      redirect: "error",
-      signal: AbortSignal.timeout(5_000),
-    }).catch(() => null);
-    if (!response) continue;
+    let response: Response;
+    try {
+      response = await fetch(target, {
+        method: "POST",
+        headers,
+        body,
+        redirect: "manual",
+        signal: AbortSignal.timeout(5_000),
+      });
+    } catch (error) {
+      fetchError = error;
+      continue;
+    }
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel().catch(() => {});
+      throw new ToolError({ error: "engine_assistant_refused", engine_status: response.status });
+    }
     if (response.status >= 500) {
       await response.body?.cancel().catch(() => {});
       continue;
@@ -190,5 +200,10 @@ export async function saveAssistantChange(env: EngineEnv, partner: string, save:
     }
     return receipt;
   }
-  throw new ToolError({ error: "engine_assistant_unavailable" });
+  const unavailable = new ToolError({ error: "engine_assistant_unavailable" });
+  if (fetchError instanceof Error) {
+    const redact = (text: string) => text.replaceAll(secret, "[redacted]").replaceAll(clientId, "[redacted]");
+    unavailable.cause = { name: redact(fetchError.name), message: redact(fetchError.message) };
+  }
+  throw unavailable;
 }
