@@ -1156,7 +1156,50 @@ class IntakeTest(unittest.TestCase):
         repeat_preview = self.run_intake(rows, touch=False, catch_up=intake.CatchUp(start, dry_run=True))
         self.assertEqual(repeat_preview.would_file_by_day, {})
 
+    def test_catch_up_refuses_missing_intake_directory_without_creating_it(self):
+        result = self.run_intake(catch_up=intake.CatchUp(date(2026, 10, 12), True))
+        self.assertEqual((result.state, result.reason), ('failed', 'intake_directory_missing'))
+        self.assertFalse(self.out().exists())
+        self.assertEqual(self.fake.decodes, 0)
+
+    def test_catch_up_keeps_original_refused_key_across_decoder_rows(self):
+        row = mail(CLIENT.email, -timedelta(hours=9), message_id='<held@example.test>', local_keys='1')
+        another = {**row, 'local_keys': '2'}
+        original = self.fake.carr
+        attempts = []
+
+        def refuse_first(verb, args):
+            if verb == 'log-activity':
+                attempts.append(args['idempotency_key'])
+                if len(attempts) == 1:
+                    raise intake.CarrError(code='key_reuse')
+            return original(verb, args)
+
+        self.fake.carr = refuse_first
+        start = date(2026, 10, 19)
+        self.assertEqual(self.run_intake([row, another], catch_up=intake.CatchUp(start)).state, 'failed')
+        for catch_up in (intake.CatchUp(start), None):
+            self.run_intake([another], catch_up=catch_up)
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(self.fake.writes('log-activity'), [])
+
+    def test_catch_up_leaves_earlier_legacy_retries_to_schedule(self):
+        old = mail(CLIENT.email, -timedelta(hours=12), message_id='<old@example.test>')
+        self.fake.fail_verbs.add('log-activity')
+        self.assertEqual(self.run_intake([old]).state, 'failed')
+        self.fake.fail_verbs.clear()
+        self.fake.now += timedelta(minutes=2)
+        start = date(2026, 10, 20)
+        self.assertEqual(self.run_intake([old], catch_up=intake.CatchUp(start, True)).would_file_by_day, {})
+        self.assertEqual(self.run_intake([old], catch_up=intake.CatchUp(start)).state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+        self.assertEqual(self.run_intake([old]).state, 'succeeded')
+        attempts = [args['idempotency_key'] for _, args in self.fake.writes('log-activity')]
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(len(set(attempts)), 1)
+
     def test_catch_up_checks_decoder_health_and_binding_in_preview(self):
+        self.out().mkdir(parents=True)
         start = intake.CatchUp(date(2026, 10, 12), dry_run=True)
         row = mail(CLIENT.email, -timedelta(days=8), message_id='<history@example.test>')
         outcome = self.run_intake([row], found=100, verified=94, catch_up=start)
@@ -1169,6 +1212,7 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.fake.decodes, 1)
 
     def test_catch_up_requires_the_verified_folder_account(self):
+        self.out().mkdir(parents=True)
         write_settings(self.home, self.repo, owner='joe', folder_account_id=8)
         row = mail(CLIENT.email, -timedelta(days=8), message_id='<history@example.test>')
         for dry_run in (True, False):
@@ -6348,6 +6392,7 @@ class FakeEngine:
         self.refuse = []  # (path, status, error), each answered once, in order
         self.filed, self.notes = [], []
         self.agendas, self.leads = {}, {}
+        self.contact_addresses = None
 
     def door(self, user):
         def call(method, path, body):
@@ -6400,10 +6445,13 @@ class FakeEngine:
             self.notes.append(request)
             return engine_mail.Reply(201, {'activity_id': f'n-{len(self.notes)}', 'existing': False,
                                            'about': request['about'], 'unmatched': []})
-        mid = request['email']['message_id']
-        if 'nothing' in request['email']['subject']:
-            return engine_mail.Reply(422, {'error': 'about_nothing'})
+        email = request['email']
+        mid = email['message_id']
         existing = mid in self.activities
+        addresses = {email['sender'], *(r['address'] for r in email['recipients'])}
+        if not existing and ('nothing' in email['subject'] or
+                             self.contact_addresses is not None and addresses.isdisjoint(self.contact_addresses)):
+            return engine_mail.Reply(422, {'error': 'about_nothing'})
         self.activities.setdefault(mid, request)
         return engine_mail.Reply(201, {'activity_id': 'a-' + mid, 'existing': existing, 'about': [], 'unmatched': []})
 
@@ -6447,7 +6495,40 @@ class EngineMailTest(unittest.TestCase):
         self.assertIsNotNone(self.fake.agenda)
         self.assertNotIn('engine_mail', json.loads((self.out() / intake.STATE).read_text()))
 
+    def test_catch_up_refuses_date_bounds_and_leaves_earlier_engine_retries_to_schedule(self):
+        old = mail(CLIENT.email, -timedelta(hours=12), message_id='<old@example.test>')
+        self.engine.refuse.append(('/jobs/activities', 503, 'database_unavailable'))
+        self.assertEqual(self.run_intake([old]).state, 'failed')
+        state = (self.out() / intake.STATE).read_bytes()
+        for day in (date(2025, 12, 31), date(2026, 10, 21)):
+            for dry_run in (True, False):
+                result = self.run_intake([old], catch_up=intake.CatchUp(day, dry_run))
+                self.assertEqual((result.state, result.reason), ('failed', 'catch_up_date_out_of_range'))
+                self.assertEqual((self.out() / intake.STATE).read_bytes(), state)
+        today = date(2026, 10, 20)
+        self.assertEqual(self.run_intake([old], catch_up=intake.CatchUp(today, True)).would_file_by_day, {})
+        self.assertEqual(self.run_intake([old], catch_up=intake.CatchUp(today)).state, 'succeeded')
+        self.assertEqual(len(self.engine.posts('/jobs/activities')), 1)
+        self.assertEqual(self.run_intake([old]).state, 'succeeded')
+        self.assertEqual(list(self.engine.activities), ['old@example.test'])
+
+    def test_engine_catch_up_labels_estimate_and_unverified_separately(self):
+        self.out().mkdir(parents=True)
+        start = date(2026, 10, 12)
+        self.engine.contact_addresses = {CLIENT.email}
+        sender = 'unknown@example.test'
+        rows = [{**mail(sender, -timedelta(days=8), message_id='<matched@example.test>', local_keys='1'),
+                 'cc': CLIENT.email},
+                mail(sender, -timedelta(days=8), message_id='<unmatched@example.test>', local_keys='2')]
+        preview = self.run_intake(rows, catch_up=intake.CatchUp(start, True))
+        self.assertEqual(preview.unverified_by_day, {'2026-10-12': 1})
+        self.assertEqual(self.engine.calls, [])
+        filed = self.run_intake(rows, catch_up=intake.CatchUp(start))
+        self.assertEqual(preview.would_file_by_day, {'2026-10-12': filed.counts['engine_emails_stored']})
+        self.assertEqual(filed.counts['engine_emails_about_nothing'], 1)
+
     def test_catch_up_previews_and_files_through_engine_once(self):
+        self.out().mkdir(parents=True)
         start = date(2026, 9, 15)
         rows = [mail(CLIENT.email, -timedelta(days=35), message_id='<old@example.test>', local_keys='1'),
                 mail(CLIENT.email, -timedelta(days=35), message_id='<old@example.test>', local_keys='2'),
@@ -6860,6 +6941,7 @@ class EngineMailTest(unittest.TestCase):
         self.assertEqual(len(self.engine.documents), 1)
 
     def test_catch_up_ties_engine_attachment_once(self):
+        self.out().mkdir(parents=True)
         start = date(2026, 10, 12)
         preview = self.attachment_run(sent=timedelta(days=8), catch_up=intake.CatchUp(start, True))
         self.assertEqual(preview.would_file_by_day, {'2026-10-12': 1})

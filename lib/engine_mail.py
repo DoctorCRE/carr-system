@@ -169,17 +169,18 @@ class Mailbox:
                 continue
             entry.update(inbound=inbound, request={'idempotency_key': self.key(message_id, 'activity'), **activity})
 
-    def preview_emails(self) -> dict[str, str]:
+    def email_requests(self, since: int | None) -> dict[str, dict]:
         self._stage_emails()
-        return {mid: entry['request']['happened_at'] for mid, entry in self.emails.items()
-                if mid in self.offers and 'request' in entry and 'outcome' not in entry}
+        return {mid: entry['request'] for mid, entry in self.emails.items()
+                if 'request' in entry and 'outcome' not in entry
+                and (since is None or (mid in self.offers
+                     and datetime.fromisoformat(entry['request']['happened_at']).timestamp() >= since))}
 
-    def send_emails(self) -> None:
-        self._stage_emails()
+    def send_emails(self, since: int | None = None) -> None:
+        requests = self.email_requests(since)
         self.save()
-        for entry in self.emails.values():
-            if 'request' in entry and 'outcome' not in entry:
-                self.answer(entry, self.post('/jobs/activities', entry['request']), 'emails')
+        for mid, request in requests.items():
+            self.answer(self.emails[mid], self.post('/jobs/activities', request), 'emails')
         self.save()
 
     def upload(self, source: str, data: bytes, name: str, message_id: str | None, deal_id: str) -> str:
@@ -196,11 +197,11 @@ class Mailbox:
         self.save()
         return 'kept'
 
-    def tie_files(self) -> list[str]:
+    def tie_files(self, sources: set[str] | None = None) -> list[str]:
         """Tie each uploaded file to its email and deal. Returns sources whose bytes must be read again."""
         again = []
         for source, entry in self.files.items():
-            if 'outcome' in entry:
+            if (sources is not None and source not in sources) or 'outcome' in entry:
                 continue
             email = self.emails.get(entry['message_id'] or '', {})
             if 'seen' in email and 'outcome' not in email:

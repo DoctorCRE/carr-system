@@ -134,6 +134,7 @@ DEAL_REF = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 EXIT = {'succeeded': 0, 'skipped': 78, 'failed': 1}
 
 BACKFILL = timedelta(hours=48)
+EARLIEST_CATCH_UP = date(2026, 1, 1)
 LOOKBACK = timedelta(hours=6)
 UPCOMING = timedelta(days=7)
 REFRESH_DAYS = timedelta(days=7)
@@ -246,6 +247,7 @@ class Outcome:
     detail: str = ''
     monitoring: dict = field(default_factory=dict)
     would_file_by_day: dict[str, int] | None = None
+    unverified_by_day: dict[str, int] | None = None
 
 
 FOLDER_CLASSES = {
@@ -1014,7 +1016,7 @@ class Matcher:
 
 class Run:
     def __init__(self, ports: Ports, state: dict, now: datetime, out: Path, settings: OutlookSettings,
-                 *, preview: bool = False):
+                 *, preview: bool = False, catch_up_since: int | None = None):
         self.settings = settings
         self.ports, self.state, self.now, self.out = ports, state, now, out
         self.today = now.astimezone(self.settings.timezone).date()
@@ -1041,6 +1043,27 @@ class Run:
         self.message_ids: dict[str, str] = {}
         self.file_idents: set[str] = set()
         self.preview: dict[str, str] | None = {} if preview else None
+        self.unverified: dict[str, str] = {}
+        self.catch_up_since = catch_up_since
+        self.email_keys: dict[tuple[str, str], str] = {}
+        if not self.engine:
+            for request_key, request in state.get('requests', {}).items():
+                refused = request.get('error_code') == 'key_reuse'
+                if (request['verb'] == 'log-activity' and request.get('disposition') != 'moved_to_engine'
+                        and (refused or catch_up_since is not None)):
+                    slot = self.email_slot(json.loads(request['payload']))
+                    if slot and (refused or slot not in self.email_keys):
+                        self.email_keys[slot] = request_key
+
+    def email_slot(self, args: dict) -> tuple[str, str] | None:
+        if args.get('kind') not in ('email_in', 'email_out'):
+            return None
+        identity = args.get('email_identity')
+        if identity and (identity.get('mailbox_owner'), identity.get('mailbox_account')) != (
+                self.settings.owner, self.settings.account):
+            return None
+        mid = email_delivery_failure.message_id(args.get('message_id'))
+        return (mid, args['ref']) if mid else None
 
     def owner_key(self, verb: str, ref: str, source: str) -> str:
         legacy = key(verb, ref, source)
@@ -1049,12 +1072,22 @@ class Run:
         return key(verb, ref, f'{self.settings.owner}|{source}')
 
     def activity_key(self, ref: str, source: str) -> str:
-        return self.owner_key('log-activity', ref, source)
+        original = self.owner_key('log-activity', ref, source)
+        if mid := self.message_ids.get(source):
+            slot = (mid, ref)
+            if self.catch_up_since is not None and not self.engine:
+                return self.email_keys.setdefault(slot, original)
+            return self.email_keys.get(slot, original)
+        return original
 
     def write(self, verb: str, args: dict, who: str, note: str = '') -> bool:
         requests = self.state.setdefault('requests', {})
+        request = requests.get(args['idempotency_key'], {})
+        if self.catch_up_since is not None and request and verb == 'log-activity':
+            stamp = json.loads(request['payload']).get('occurred_at')
+            if stamp and datetime.fromisoformat(stamp).timestamp() < self.catch_up_since:
+                return bool(request['acknowledged'])
         if self.preview is not None:
-            request = requests.get(args['idempotency_key'], {})
             if request.get('acknowledged'):
                 return True
             if request.get('disposition') == 'blocked' or (request.get('retry_at') or 0) > self.now.timestamp():
@@ -1087,6 +1120,8 @@ class Run:
                 if not isinstance(reply, dict) or reply.get('ok') is not True:
                     raise CarrError(code=_reply_error(reply) if isinstance(reply, dict) else 'reply_unreadable')
             except CarrError as error:
+                if error.code == 'key_reuse' and verb == 'log-activity' and (slot := self.email_slot(args)):
+                    self.email_keys[slot] = args['idempotency_key']
                 if (verb == 'propose-email-lead' or (verb == 'log-activity' and args.get('summary') == 'Links from matched email')) and error.code in BLOCKED_ERRORS:
                     request.update(acknowledged=True, disposition='refused', outcome='refused',
                                    retry_at=None, error_code=error.code)
@@ -1379,9 +1414,14 @@ class Run:
                                          **({'conversation_id': conversation_id}
                                             if conversation_id and conversation_id.strip() else {})}})
         if self.preview is None:
-            self.engine.send_emails()
+            self.engine.send_emails(self.catch_up_since)
         else:
-            self.preview.update(self.engine.preview_emails())
+            for mid, request in self.engine.email_requests(since).items():
+                email = request['email']
+                addresses = [email['sender'], *(r['address'] for r in email['recipients'])]
+                matched = any(a in matcher.contact_rows and not _internal(a, self.settings.internal_domain)
+                              for a in addresses)
+                (self.preview if matched else self.unverified)[mid] = request['happened_at']
 
     def emails(self, mails: list[dict], matcher: Matcher, since: int) -> None:
         if not self.engine:
@@ -1418,8 +1458,11 @@ class Run:
                           if sent is not None and _same_mail(m, sent, m['first_sent'])), None)
             if prior:
                 m['ident'], m['sent_unix'] = prior
-            if (m['sent_unix'] < since and m['ident'] not in unresolved) or m['sent_unix'] > self.now.timestamp() + 300:
+            if (m['sent_unix'] < since and (self.catch_up_since is not None or m['ident'] not in unresolved)
+                    or m['sent_unix'] > self.now.timestamp() + 300):
                 continue
+            if mid := email_delivery_failure.message_id(m.get('message_id')):
+                self.message_ids[m['ident']] = mid
             outbound = _internal(m['sender'], self.settings.internal_domain)
             recipients_unknown = outbound and not (_addresses(m['recipients']) or _addresses(m.get('cc')))
             if m['ident'] not in unresolved and any(_same_mail(m, t, m['sent_unix']) for t in done.get(m['ck'], [])):
@@ -1730,7 +1773,9 @@ class Run:
                 done[source] = int(self.now.timestamp())
             elif uploaded == 'again':
                 self.state['attachments_pending'] = True
-        if self.engine.tie_files():
+        sources = ({f"{ident}/{result['attachment']}" for ident, _, result, _ in prepared}
+                   if self.catch_up_since is not None else None)
+        if self.engine.tie_files(sources):
             self.state['attachments_pending'] = True
         done.update({source: int(self.now.timestamp()) for source, f in self.engine.files.items()
                      if 'outcome' in f and source not in done})
@@ -1803,8 +1848,9 @@ class Run:
         email at most one attempt; the run moves past it and stops reading after
         MAX_FAILURES_IN_A_ROW. Once a sender is on the queue, that address's later email is not read
         again: the queue holds one row per address. A refused proposal does not count as queued."""
-        self.state['reads_due'] = False
-        if self.engine:
+        if self.catch_up_since is None:
+            self.state['reads_due'] = False
+        if self.engine and self.catch_up_since is None:
             for progress in self.state['engine_leads'].values():
                 if 'request' in progress:
                     self.send_engine_lead(progress)
@@ -2275,15 +2321,21 @@ def run(repo: Path, home: Path, ports: Ports, *, settings: OutlookSettings | Non
     dry_run = catch_up is not None and catch_up.dry_run
     if catch_up and reconcile_binding:
         raise ValueError('catch-up and binding reconciliation are separate commands')
+    if catch_up and not EARLIEST_CATCH_UP <= catch_up.since <= ports.now().astimezone(settings.timezone).date():
+        return Outcome('failed', 'catch_up_date_out_of_range',
+                       detail='Choose a date from 2026-01-01 through today in the mailbox time zone.')
     out = repo / OUT
-    out.mkdir(mode=0o700, parents=True, exist_ok=True)
     fd = None
     if dry_run:
+        if not out.is_dir():
+            return Outcome('failed', 'intake_directory_missing',
+                           detail='The installed intake directory is missing. Run scheduled intake before previewing.')
         try:
             fd = os.open(out / 'lock', os.O_RDONLY)
         except FileNotFoundError:
             pass
     else:
+        out.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(out, 0o700)
         fd = _private_fd(out / 'lock', os.O_RDWR)
     try:
@@ -2338,7 +2390,11 @@ def _execute(out: Path, home: Path, ports: Ports, settings: OutlookSettings, sta
         for name in ('filing_observed_at', 'last_email_in_filed_at'):
             state.pop(name, None)
         state['filing_account'] = filing_account
-    outcome = _run(out, home, ports, state, settings, catch_up)
+    if catch_up:
+        # Scheduled intake still needs to see mail outside the catch-up window.
+        state.pop('store', None)
+        return _run(out, home, ports, state, settings, catch_up)
+    outcome = _run(out, home, ports, state, settings, None)
     if outcome.state != 'succeeded':
         if outcome.state == 'degraded':
             return _filing_outcome(out, state, outcome, ports.now(), settings)
@@ -2365,8 +2421,6 @@ def _execute(out: Path, home: Path, ports: Ports, settings: OutlookSettings, sta
         return Outcome('failed', 'flags_pending', outcome.counts)
     if work.counts['links_filed']:
         outcome.reason = 'processed'
-    if catch_up:
-        return _filing_outcome(out, state, outcome, ports.now(), settings)
     local = ports.now().astimezone(settings.timezone)
     today = local.date()
     previous_day = (today - timedelta(days=1)).isoformat()
@@ -2418,7 +2472,7 @@ def _run(out: Path, home: Path, ports: Ports, state: dict, settings: OutlookSett
         store = resolve_store(home, settings)
     except FileNotFoundError:
         return Outcome('failed', 'store_missing')
-    if not dry_run and _retire_email_steps(state):
+    if not catch_up and _retire_email_steps(state):
         _save(out, state)
     info = store.stat()
     try:
@@ -2537,7 +2591,8 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         mails = selected
     mails = _best_copies(mails, state)
     state['hydration_check_at'] = int((now + REFRESH_INTERVAL).timestamp())
-    work = Run(ports, state, now, out, settings, preview=dry_run)
+    work = Run(ports, state, now, out, settings, preview=dry_run,
+               catch_up_since=mail_since if catch_up else None)
     work.counts['mail_rows_reusing_prior_identity'] = sum(bool(m.get('mail_rows_reusing_prior_identity')) for m in mails)
     work.counts.update({name: meta[name] for name in MAIL_STORE_COUNTERS})
     work.counts['decoder_alarm'] = alarm
@@ -2548,18 +2603,24 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         matcher = matcher or Matcher(ports.contacts(), settings.internal_domain)
         if work.preview is not None:
             work.emails(mails, matcher, mail_since)
-            days: dict[str, int] = {}
-            for stamp in work.preview.values():
-                day = datetime.fromisoformat(stamp).astimezone(settings.timezone).date().isoformat()
-                days[day] = days.get(day, 0) + 1
-            return Outcome('succeeded', 'dry_run', work.counts, would_file_by_day=days)
+            def by_day(stamps: dict[str, str]) -> dict[str, int]:
+                days: dict[str, int] = {}
+                for stamp in stamps.values():
+                    day = datetime.fromisoformat(stamp).astimezone(settings.timezone).date().isoformat()
+                    days[day] = days.get(day, 0) + 1
+                return days
+
+            return Outcome('succeeded', 'dry_run', work.counts, would_file_by_day=by_day(work.preview),
+                           unverified_by_day=by_day(work.unverified) if work.engine else None)
         complete_mails = [m for m in mails if not m['metadata_incomplete']]
         prepared = work.prepare_attachments(complete_mails, matcher, db, files)
         work.file_idents = {ident for ident, *_ in prepared}
         _remove(files.parent)
-        _quarantine_calendar_requests(state)
+        if not catch_up:
+            _quarantine_calendar_requests(state)
         _save(out, state)
-        for request in list(state.get('requests', {}).values()):
+        requests = () if catch_up else tuple(state.get('requests', {}).values())
+        for request in requests:
             if request['verb'] in ('record-deal-item', 'complete-deal-item', 'drop-action'):
                 continue
             if work.engine and request['verb'] == 'log-activity' and not request['acknowledged']:
@@ -2579,13 +2640,15 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
                 continue
             if not request['acknowledged'] and request.get('disposition') != 'calendar_unsupported':
                 args = json.loads(request['payload'])
-                work.write(request['verb'], args, 'pending write')
+                slot = work.email_slot(args) if request['verb'] == 'log-activity' else None
+                if not slot or work.email_keys.get(slot, args['idempotency_key']) == args['idempotency_key']:
+                    work.write(request['verb'], args, 'pending write')
         work.emails(mails, matcher, mail_since)
         work.file_attachments(prepared)
         work.counts['legacy_unmatched'] = _legacy_unmatched(state)
         work.observe_flags(complete_mails, matcher)
         work.leads(matcher)
-        if not work.engine:
+        if not work.engine and not catch_up:
             work.full_text(complete_mails)
         mail_processed = bool(work.written or any(value for key, value in work.counts.items()
                                                   if key not in (*MAIL_STORE_COUNTERS, 'mail_rows_reusing_prior_identity',
@@ -2634,10 +2697,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
     if failed:
         _save(out, state)
         return Outcome('failed', failed, counts)
-    if catch_up:
-        # The scheduled run still needs to see calendar and mail before this date.
-        state.pop('store', None)
-    else:
+    if not catch_up:
         state.update(store=signature, high_water=int(now.timestamp()))
     state.update(contact_map=matcher.fingerprint(), attachment_policy=2, signature_policy=SIGNATURE_POLICY,
                  **{name: meta[name] for name in MAIL_STORE_COUNTERS},
@@ -2755,7 +2815,10 @@ def main(*, reconcile_binding: bool = False, reconcile_vendor: Path | None = Non
     print(status_line(outcome))
     if catch_up and catch_up.dry_run:
         if outcome.would_file_by_day is not None:
-            print('outlook-intake-preview ' + json.dumps(outcome.would_file_by_day, sort_keys=True))
+            days = outcome.would_file_by_day
+            preview = days if outcome.unverified_by_day is None else {
+                'estimated matches': days, 'unverified': outcome.unverified_by_day}
+            print('outlook-intake-preview ' + json.dumps(preview, sort_keys=True))
         if outcome.detail:
             print(outcome.detail, file=sys.stderr)
         return EXIT[outcome.state]

@@ -14,6 +14,8 @@ See [the per-Mac settings and helper signing steps](studio-settings-migration.md
 On the mailbox's Mac, use a local terminal with Full Disk Access. Open the
 installed Outlook runtime named by `repo` in `~/.config/carr/outlook.json`.
 Set the independently verified `folder_account_id` before running intake.
+Preview requires an intake directory initialized by scheduled intake.
+Choose a date from January 1, 2026 through today in the mailbox time zone.
 See [the settings guide](studio-settings-migration.md#settings-schema).
 
 1. Preview the counts from midnight on the start date in the configured time zone.
@@ -34,11 +36,14 @@ See [the settings guide](studio-settings-migration.md#settings-schema).
 The preview reads the existing ledger and uses a temporary private copy of the
 store. It counts each eligible Message-ID once. The destination can also
 recognize emails that the local ledger no longer tracks. With `engine_mail`
-enabled, the preview counts emails ready to send to Engine. Emails waiting
-for a full body can file in a later scheduled run.
+enabled, the preview reports two daily counts for emails ready to send.
+`estimated matches` have a sender or recipient in the old contact export,
+excluding internal addresses. `unverified` covers the remaining offers. Engine
+uses its own contacts to decide what to store when the real run sends the mail.
+Emails waiting for a full body can file in a later scheduled run.
 
-A real run uses the configured filing route and the same request keys as
-scheduled intake. The catch-up window applies only to that command.
+A real run uses the configured filing route and the existing request keys.
+Scheduled intake handles retries outside the catch-up window.
 
 ## Data contract
 
