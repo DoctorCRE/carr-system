@@ -161,11 +161,13 @@ function engineResult(payload: unknown): Record<string, unknown> | null {
 
 function readDealWatchField(value: unknown) {
   const change = engineResult(value);
-  const { change_id, field, old_value, new_value, actor, for_user, changed_at } = change ?? {};
+  const { change_id, table_name, action, field, old_value, new_value, actor, for_user, changed_at } = change ?? {};
   if (
     !change ||
     typeof change_id !== "string" ||
     !/^\d+$/.test(change_id) ||
+    typeof table_name !== "string" ||
+    (action !== "insert" && action !== "update" && action !== "delete") ||
     typeof field !== "string" ||
     !/^[a-z][a-z0-9_]*$/.test(field) ||
     typeof actor !== "string" ||
@@ -176,10 +178,16 @@ function readDealWatchField(value: unknown) {
     !Number.isFinite(Date.parse(changed_at))
   )
     throw new Error("invalid_engine_watch_change");
-  return { change_id, field, old_value, new_value, actor, for_user, changed_at };
+  return { change_id, table_name, action, field, old_value, new_value, actor, for_user, changed_at };
 }
 
-export async function readEngineDealWatch(env: EngineEnv, watch: DealWatchTarget, timeout: number) {
+type EngineWatchRead =
+  | { status: "ok"; changes: ReturnType<typeof readDealWatchField>[] }
+  | { status: "missing" };
+
+export async function readEngineDealWatch(
+  env: EngineEnv, watch: DealWatchTarget, timeout: number,
+): Promise<EngineWatchRead> {
   const { target, headers } = engineJobRequest(
     env,
     `/jobs/deal-watches/deal/${watch.deal_id}`,
@@ -194,7 +202,12 @@ export async function readEngineDealWatch(env: EngineEnv, watch: DealWatchTarget
     },
   );
   if (!response.ok) {
-    await response.body?.cancel().catch(() => {});
+    if (response.status === 404) {
+      const refusal = engineResult(await response.json().catch(() => null));
+      if (refusal?.error === "not_found") return { status: "missing" };
+    } else {
+      await response.body?.cancel().catch(() => {});
+    }
     throw new Error("engine_watch_unavailable");
   }
   const payload = engineResult(await response.json().catch(() => null));
@@ -206,8 +219,7 @@ export async function readEngineDealWatch(env: EngineEnv, watch: DealWatchTarget
   )
     throw new Error("invalid_engine_watch_response");
   return {
-    watch_id: watch.watch_id,
-    lifecycle_version: watch.lifecycle_version,
+    status: "ok",
     changes: payload.changes.map(readDealWatchField),
   };
 }

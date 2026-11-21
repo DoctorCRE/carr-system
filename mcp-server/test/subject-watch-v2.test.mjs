@@ -150,10 +150,7 @@ test('engine intake stays off by default and retries an overlapping sweep withou
       case slug when 'joe' then 'watching' else 'paused' end,'2027-02-01T11:50:00Z'
     from actor where slug in ('joe','dell')`, [deal]);
 
-  const change = {
-    change_id: '9007199254740993', field: 'phase', old_value: 'research', new_value: 'negotiation',
-    actor: 'dell', for_user: null, changed_at: '2027-02-01T12:03:00Z',
-  };
+  const change = phaseMove(deal, '9007199254740993', 3, 'negotiation');
   const calls = [];
   let upstreamFails = true;
   let pauseDuringRead = false;
@@ -164,10 +161,11 @@ test('engine intake stays off by default and retries an overlapping sweep withou
     assert.equal(request.headers['Engine-Job'], 'agent');
     if (upstreamFails) return new Response(null, { status: 503 });
     if (pauseDuringRead) await c.query("update ops.subject_watch_v2_subscription set state='paused',lifecycle_version=2 where actor_id=$1", [joe]);
-    return Response.json({ kind: 'deal', id: deal, deal_id: deal, changes: [
-      change, change, { ...change, change_id: '2', actor: 'agent', for_user: 'joe' },
-      { ...change, change_id: '3', changed_at: '2027-02-01T12:12:00Z', new_value: 'closed' },
-    ] });
+    return engineWatchResponse(deal, [
+      ...change, ...change,
+      ...phaseMove(deal, '9007199254740994', 4, 'legal', 'joe'),
+      ...phaseMove(deal, '9007199254740995', 12, 'closed'),
+    ]);
   });
   const sweep = (minute, switched = {}) => sweepSubjectWatches({ scheduledTime: Date.UTC(2027, 1, 1, 12, minute) }, {
     DATABASE_URL_WRITER: writer.href, ENGINE_URL: 'https://engine.example.test',
@@ -325,11 +323,11 @@ test('engine phase inserts emit one transition per move and carry the prior phas
 
   await sweep(5);
   assert.deepEqual(await receipts(), [first]);
-  changes.push(...phaseMove(deal, '9007199254740994', 6, 'loi', 'joe'));
+  changes.push(...phaseMove(deal, '9007199254740994', 6, 'legal', 'joe'));
   changes.push(...phaseMove(deal, '9007199254740995', 7, 'closed'));
   await sweep(10);
   await sweep(15);
   assert.deepEqual(await receipts(), [
-    first, { field: 'phase', before: 'loi', after: 'closed', reason_code: 'value_changed' },
+    first, { field: 'phase', before: 'legal', after: 'closed', reason_code: 'value_changed' },
   ]);
 });
