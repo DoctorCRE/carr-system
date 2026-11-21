@@ -79,6 +79,7 @@ Changing the mailbox address also forces fresh binding verification.
 | `deal_prefix`, `vendor_prefix` | Folder matching prefixes, each ending in `/`. |
 | `full_screen_height` | Positive integer in screen points used to refuse full-screen mailbox windows. |
 | `services` | Explicit enabled local services from `intake`, `refresh`, and `triage`. |
+| `engine_checklist_reminders` | Optional boolean, off by default. Enables the nightly deal checklist sweep through `POST /jobs/deals/checklist-reminders`. Requires `engine_credentials`, the private file for the engine jobs token. |
 
 Outlook uses the configured MCP file with the existing local client profile. Ambient MCP token and break-glass overrides are removed for this route.
 The exporter uses the configured database credential file. Its other callers retain their existing credential selection behavior.

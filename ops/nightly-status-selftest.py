@@ -20,6 +20,12 @@ class NightlyStatusTests(unittest.TestCase):
             target.parent.mkdir(exist_ok=True)
             shutil.copy2(ROOT / name, target)
         (self.root / "outcomes").mkdir()
+        python = self.root / '.venv/bin/python'
+        python.parent.mkdir(parents=True)
+        python.write_text('#!/bin/zsh\n'
+                          '[ "$*" = "tools/deal-checklist-reminders.py --check-nightly-switch" ] &&\n'
+                          '  [ -f "$HOME/checklist-enabled" ]\n')
+        python.chmod(0o700)
         (self.root / "bin/routine-credential-env.sh").write_text(
             'carr_clear_routine_db_env() { return 0; }\n'
             'carr_load_routine_db_env() { return 0; }\n'
@@ -114,12 +120,18 @@ class NightlyStatusTests(unittest.TestCase):
         self.assertIn("HC_CHAIN_RC=7", (self.root / "pings").read_text())
 
 
-    def test_nightly_does_not_send_checklist_reminders(self):
+    def test_nightly_omits_the_checklist_step_when_disabled(self):
         result, receipts = self.run_nightly({})
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn('nightly.deal-checklist-reminders 0', receipts)
-        self.assertNotIn('tools/deal-checklist-reminders.py',
-                         (self.root / 'commands').read_text())
+        self.assertFalse(any('deal-checklist-reminders' in line for line in receipts))
+
+    def test_nightly_runs_the_engine_checklist_step_when_enabled(self):
+        (self.root / 'checklist-enabled').touch()
+        result, receipts = self.run_nightly({})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('nightly.deal-checklist-reminders 0', receipts)
+        self.assertIn('tools/deal-checklist-reminders.py --nightly',
+                      (self.root / 'commands').read_text())
 
     def test_export_failure_remains_visible_after_later_success(self):
         result, receipts = self.run_nightly({"exports": 7}, "--exports")
