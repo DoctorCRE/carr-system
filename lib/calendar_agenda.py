@@ -35,7 +35,7 @@ def _series(goid: str) -> str:
 
 
 def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datetime) -> tuple[dict, dict]:
-    """The display snapshot of upcoming meetings and recent outcome review proposals.
+    """The display snapshot of today's and upcoming meetings, plus recent outcome review proposals.
 
     Joe is the configured account. A meeting shows only when every stored copy
     names him as organizer or attendee, so TEST-account, personal and other
@@ -100,7 +100,7 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
                       'recurring': recurring, 'time_changed': len(starts) > 1,
                       'times': [_iso(t) for t in starts] if len(starts) > 1 else [],
                       'candidates': len(group), 'conflict': conflict}
-        if current and start + length > review_hi:
+        if current:
             items.append(item)
         if (review_lo < start + length <= review_hi and length > 0
                 and not item['all_day'] and not conflict and len(starts) == 1):
@@ -128,10 +128,19 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
                 'observed_at': now.astimezone(timezone.utc).isoformat(),
                 'window_start': _iso(lo), 'window_end': _iso(hi), 'time_zone': str(tz),
                 'warnings': warnings, 'items': items, 'follow_up_reviews': reviews}
+    ended = iter(sorted((i for i in items if i['end'] <= snapshot['observed_at']),
+                        key=lambda i: (i['end'], i['key'])))
     while len(json.dumps(snapshot)) > AGENDA_MAX_BYTES and (reviews or items):
-        rows, counter, code = ((reviews, 'calendar_follow_up_trimmed', 'follow_up_trimmed') if reviews
-                               else (items, 'calendar_agenda_trimmed', 'trimmed'))
-        rows.pop()
+        ended_item = next(ended, None)
+        if ended_item is not None:
+            items.remove(ended_item)
+            counter, code = 'calendar_agenda_trimmed', 'trimmed'
+        elif reviews:
+            reviews.pop()
+            counter, code = 'calendar_follow_up_trimmed', 'follow_up_trimmed'
+        else:
+            items.pop()
+            counter, code = 'calendar_agenda_trimmed', 'trimmed'
         counts[counter] += 1
         warning = next((w for w in warnings if w['code'] == code), None)
         if warning is None:
