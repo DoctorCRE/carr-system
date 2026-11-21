@@ -117,6 +117,11 @@ def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identiti
             con.execute(f'ALTER TABLE messages ADD COLUMN {field} {"INTEGER" if field.endswith("_unix") else "TEXT"}')
             for row_id, m in enumerate(mails, 1):
                 con.execute(f'UPDATE messages SET {field}=? WHERE id=?', (m.get(field), row_id))
+    if any('authored' in m or 'history' in m for m in mails):
+        con.execute('ALTER TABLE messages ADD COLUMN authored TEXT')
+        con.execute('ALTER TABLE messages ADD COLUMN history TEXT')
+        con.executemany('UPDATE messages SET authored=?, history=? WHERE id=?',
+                        [(m.get('authored'), m.get('history'), row_id) for row_id, m in enumerate(mails, 1)])
     for e in events:
         cur = con.execute('INSERT INTO events(goid,start_unix,end_unix,start_utc,end_utc,subject,location,'
                           'organizer_name,organizer_email,body) VALUES (?,?,?,?,?,?,?,?,?,?)',
@@ -7027,6 +7032,44 @@ class EngineMailTest(unittest.TestCase):
         self.assertEqual(set(emails), {f'm{i}@example.test' for i in range(len(rows))})
         self.assertEqual({mid: email['conversation_id'] for mid, email in emails.items() if 'conversation_id' in email},
                          {'m0@example.test': 'Outlook-AbC123'})
+
+    def test_door_19_sends_pairs_only_for_verified_full_bodies(self):
+        cases = [
+            ('split', 'full', 'complete', 'Friday works.\n\nUse the west door.', 'Earlier text.', True),
+            ('no-history', 'full', 'complete', 'Friday works.', '', True),
+            ('no-authored', 'full', 'complete', '', 'Earlier text.', True),
+            ('null', 'full', 'complete', None, None, False),
+            ('partial', 'full', 'complete', 'Friday works.', None, False),
+            ('blob', 'full', 'complete', 'Friday works.', b'Earlier text.', False),
+            ('preview', 'preview', 'preview', 'Friday works.', 'Earlier text.', False),
+            ('unverified', 'full', None, 'Friday works.', 'Earlier text.', False),
+        ]
+        captured = 'Friday works.\n\nUse the west door.\n\nEarlier text.'
+        rows = [dict(mail(CLIENT.email, -timedelta(hours=1), subject=name, body=f'  {captured}\n ',
+                          kind=kind, message_id=f'<{name}@example.test>'),
+                     body_completeness=completeness, authored=authored, history=history)
+                for name, kind, completeness, authored, history, _ in cases]
+        self.assertEqual(self.run_intake(rows).state, 'succeeded')
+        self.fake.now += engine_mail.FULL_TEXT_WAIT
+        self.assertEqual(self.run_intake(rows, touch=False).state, 'succeeded')
+        emails = {post['email']['message_id']: post['email'] for post in self.engine.posts('/jobs/activities')}
+        for name, _, _, authored, history, has_split in cases:
+            with self.subTest(name=name):
+                email = emails[f'{name}@example.test']
+                self.assertEqual(email['body'], captured)
+                self.assertEqual({field: email[field] for field in ('authored', 'history') if field in email},
+                                 {'authored': authored, 'history': history} if has_split else {})
+
+    def test_door_19_fallback_keeps_split_when_lead_intake_declines(self):
+        notice = self.lead_notice(history='')
+        notice['authored'] = notice['body'].strip()
+        path = '/jobs/leads/email-intake'
+        self.engine.refuse.append((path, 422, 'lead_email_not_eligible'))
+        self.assertEqual(self.run_intake([notice]).state, 'succeeded')
+        [lead] = self.engine.posts(path)
+        [activity] = self.engine.posts('/jobs/activities')
+        self.assertEqual(activity['email'], {**lead['email'], 'authored': notice['authored'], 'history': ''})
+        self.assertTrue({'authored', 'history'}.isdisjoint(lead['email']))
 
     def test_preview_waits_for_full_text_then_sends_once(self):
         preview = mail(CLIENT.email, -timedelta(minutes=10), kind='preview', message_id='<p1@example.test>')
