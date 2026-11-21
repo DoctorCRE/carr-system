@@ -181,12 +181,12 @@ function readDealWatchField(value: unknown) {
   return { change_id, table_name, action, field, old_value, new_value, actor, for_user, changed_at };
 }
 
-type EngineWatchRead =
-  | { status: "ok"; changes: ReturnType<typeof readDealWatchField>[] }
-  | { status: "missing" };
+type EngineWatchRead = { status: "ok"; changes: ReturnType<typeof readDealWatchField>[] } | { status: "missing" };
 
 export async function readEngineDealWatch(
-  env: EngineEnv, watch: DealWatchTarget, timeout: number,
+  env: EngineEnv,
+  watch: DealWatchTarget,
+  timeout: number,
 ): Promise<EngineWatchRead> {
   const { target, headers } = engineJobRequest(
     env,

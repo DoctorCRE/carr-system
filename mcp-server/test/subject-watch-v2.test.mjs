@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync, execFileSync } from 'node:child_process';
 import pg from 'pg';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
+import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import { sweepSubjectWatches } from '../src/subject-watch-scheduler.ts';
 import { Validator } from '@cfworker/json-schema';
 import { subjectWatchV2Tools, parseSubjectWatchV2 } from '../src/subject-watches.js';
@@ -225,10 +226,13 @@ test('only the scheduler writer can execute the bounded engine watch functions',
 });
 
 async function engineWatchFixture(t) {
-  const dsn = await snapshotDatabase('subject-watch-regression-');
-  const db = new pg.Client({ connectionString: dsn });
+  const fixture = await acquireDisposablePostgres({ prefix: 'subject-watch-regression-', snapshot: true });
+  const db = new pg.Client({ connectionString: fixture.dsn });
+  t.after(async () => {
+    try { await db.end(); }
+    finally { await fixture.close(); }
+  });
   await db.connect();
-  t.after(() => db.end());
   const { id: actor } = (await db.query("select id from actor where slug='joe'")).rows[0];
   const { id: party } = (await db.query(
     "insert into party(kind,name,created_by,updated_by) values('person','Synthetic watch client',$1,$1) returning id", [actor],
@@ -245,7 +249,7 @@ async function engineWatchFixture(t) {
     insert into ops.subject_watch_v2_subscription(actor_id,subject_type,subject_id,baseline,policy,state,subscribed_at)
     select $3,'deal',id,'{}','{"change_kinds":["reply_arrived"],"include_self_changes":false}',
       'watching','2027-02-01T11:50:00Z' from d returning id, subject_id as deal`, [client, name, actor])).rows[0];
-  const writer = new URL(dsn);
+  const writer = new URL(fixture.dsn);
   writer.searchParams.set('options', '-c role=carr_writer');
   const sweep = minute => sweepSubjectWatches({ scheduledTime: Date.UTC(2027, 1, 1, 12, minute) }, {
     DATABASE_URL_WRITER: writer.href, ENGINE_URL: 'https://engine.example.test',

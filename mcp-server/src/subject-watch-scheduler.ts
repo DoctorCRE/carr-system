@@ -60,14 +60,16 @@ export async function sweepSubjectWatches(controller: Controller, env: Environme
           }
           attempted.push(...watches.map((watch) => watch.watch_id));
           const timeout = Math.max(1, Math.min(5000, deadline - Date.now() - 2000));
-          engineChanges = await Promise.all(watches.map(async (watch): Promise<EngineWatchAttempt> => {
-            const { watch_id, lifecycle_version } = watch;
-            try {
-              return { watch_id, lifecycle_version, ...await readEngineDealWatch(env, watch, timeout) };
-            } catch {
-              return { watch_id, lifecycle_version, status: "retry" };
-            }
-          }));
+          engineChanges = await Promise.all(
+            watches.map(async (watch): Promise<EngineWatchAttempt> => {
+              const { watch_id, lifecycle_version } = watch;
+              try {
+                return { watch_id, lifecycle_version, ...(await readEngineDealWatch(env, watch, timeout)) };
+              } catch {
+                return { watch_id, lifecycle_version, status: "retry" };
+              }
+            }),
+          );
         }
         const { rows } = engineChanges
           ? await query("select ops.sweep_subject_watches($1::timestamptz,50,$2::jsonb) result", [
@@ -84,8 +86,8 @@ export async function sweepSubjectWatches(controller: Controller, env: Environme
           typeof result.scanned !== "number"
         )
           throw new Error("invalid_watch_sweep_result");
-        const failures = "engine_failures" in result && typeof result.engine_failures === "number"
-          ? result.engine_failures : 0;
+        const failures =
+          "engine_failures" in result && typeof result.engine_failures === "number" ? result.engine_failures : 0;
         engineFailures += failures;
         completedBatch ||= failures === 0 || failures < (engineChanges?.length ?? 0);
         if (result.scanned < 50 && (engineChanges?.length ?? 0) < engineBatchLimit) break;
