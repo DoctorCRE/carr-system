@@ -2,7 +2,7 @@
 import type { PoolClient, PoolConfig } from "@neondatabase/serverless";
 import { Pool } from "@neondatabase/serverless";
 import "./postgres.ts";
-import { readEngineDealWatch, type DealWatchTarget, type EngineEnv } from "./engine-assistant.ts";
+import { type DealWatchTarget, type EngineEnv, readEngineDealWatch } from "./engine-assistant.ts";
 
 type Controller = { scheduledTime: number };
 type Environment = EngineEnv & { DATABASE_URL_WRITER: string; ENGINE_DEAL_WATCH_CHANGES?: string };
@@ -39,7 +39,8 @@ export async function sweepSubjectWatches(controller: Controller, env: Environme
         let engineChanges: Awaited<ReturnType<typeof readEngineDealWatch>>[] | undefined;
         if (env.ENGINE_DEAL_WATCH_CHANGES === "true") {
           const { rows } = await query<DealWatchTarget[] | null>(
-            "select ops.read_subject_watch_engine_batch($1::timestamptz,$2::int) result", [now, String(engineBatchLimit)],
+            "select ops.read_subject_watch_engine_batch($1::timestamptz,$2::int) result",
+            [now, String(engineBatchLimit)],
           );
           const watches = rows[0]?.result;
           if (watches === null) {
@@ -48,10 +49,13 @@ export async function sweepSubjectWatches(controller: Controller, env: Environme
           }
           if (!Array.isArray(watches)) throw new Error("invalid_engine_watch_batch");
           const timeout = Math.max(1, Math.min(5000, deadline - Date.now() - 2000));
-          engineChanges = await Promise.all(watches.map(watch => readEngineDealWatch(env, watch, timeout)));
+          engineChanges = await Promise.all(watches.map((watch) => readEngineDealWatch(env, watch, timeout)));
         }
         const { rows } = engineChanges
-          ? await query("select ops.sweep_subject_watches($1::timestamptz,50,$2::jsonb) result", [now, JSON.stringify(engineChanges)])
+          ? await query("select ops.sweep_subject_watches($1::timestamptz,50,$2::jsonb) result", [
+              now,
+              JSON.stringify(engineChanges),
+            ])
           : await query("select ops.sweep_subject_watches($1::timestamptz,50) result", [now]);
         await query("commit");
         const result = rows[0]?.result;

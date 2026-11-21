@@ -153,36 +153,61 @@ export type DealWatchTarget = {
   since: string;
 };
 
+function engineResult(payload: unknown): Record<string, unknown> | null {
+  return typeof payload === "object" && payload !== null && !Array.isArray(payload)
+    ? Object.fromEntries(Object.entries(payload))
+    : null;
+}
+
 function readDealWatchField(value: unknown) {
-  if (typeof value !== "object" || value === null ||
-      !("change_id" in value) || typeof value.change_id !== "string" || !/^\d+$/.test(value.change_id) ||
-      !("field" in value) || typeof value.field !== "string" || !/^[a-z][a-z0-9_]*$/.test(value.field) ||
-      !("actor" in value) || typeof value.actor !== "string" ||
-      !("for_user" in value) || (value.for_user !== null && typeof value.for_user !== "string") ||
-      !("old_value" in value) || !("new_value" in value) ||
-      !("changed_at" in value) || typeof value.changed_at !== "string" || !Number.isFinite(Date.parse(value.changed_at)))
+  const change = engineResult(value);
+  const { change_id, field, old_value, new_value, actor, for_user, changed_at } = change ?? {};
+  if (
+    !change ||
+    typeof change_id !== "string" ||
+    !/^\d+$/.test(change_id) ||
+    typeof field !== "string" ||
+    !/^[a-z][a-z0-9_]*$/.test(field) ||
+    typeof actor !== "string" ||
+    (for_user !== null && typeof for_user !== "string") ||
+    !("old_value" in change) ||
+    !("new_value" in change) ||
+    typeof changed_at !== "string" ||
+    !Number.isFinite(Date.parse(changed_at))
+  )
     throw new Error("invalid_engine_watch_change");
-  const { change_id, field, old_value, new_value, actor, for_user, changed_at } = value;
   return { change_id, field, old_value, new_value, actor, for_user, changed_at };
 }
 
 export async function readEngineDealWatch(env: EngineEnv, watch: DealWatchTarget, timeout: number) {
-  const { target, headers } = engineJobRequest(env, `/jobs/deal-watches/deal/${watch.deal_id}`, "agent", watch.subscriber);
+  const { target, headers } = engineJobRequest(
+    env,
+    `/jobs/deal-watches/deal/${watch.deal_id}`,
+    "agent",
+    watch.subscriber,
+  );
   target.searchParams.set("subscriber", watch.subscriber);
   target.searchParams.set("since", watch.since);
-  const response = await fetch(target, { headers, redirect: "manual", signal: AbortSignal.timeout(timeout) })
-    .catch(() => { throw new Error("engine_watch_unavailable"); });
+  const response = await fetch(target, { headers, redirect: "manual", signal: AbortSignal.timeout(timeout) }).catch(
+    () => {
+      throw new Error("engine_watch_unavailable");
+    },
+  );
   if (!response.ok) {
     await response.body?.cancel().catch(() => {});
     throw new Error("engine_watch_unavailable");
   }
-  const payload: unknown = await response.json().catch(() => null);
-  if (typeof payload !== "object" || payload === null || !("kind" in payload) || payload.kind !== "deal" ||
-      !("id" in payload) || payload.id !== watch.deal_id || !("deal_id" in payload) || payload.deal_id !== watch.deal_id ||
-      !("changes" in payload) || !Array.isArray(payload.changes))
+  const payload = engineResult(await response.json().catch(() => null));
+  if (
+    payload?.kind !== "deal" ||
+    payload.id !== watch.deal_id ||
+    payload.deal_id !== watch.deal_id ||
+    !Array.isArray(payload.changes)
+  )
     throw new Error("invalid_engine_watch_response");
   return {
-    watch_id: watch.watch_id, lifecycle_version: watch.lifecycle_version,
+    watch_id: watch.watch_id,
+    lifecycle_version: watch.lifecycle_version,
     changes: payload.changes.map(readDealWatchField),
   };
 }
@@ -213,11 +238,7 @@ export async function saveAssistantChange(env: EngineEnv, partner: string, save:
       await response.body?.cancel().catch(() => {});
       continue;
     }
-    const payload: unknown = await response.json().catch(() => null);
-    const result: Record<string, unknown> | null =
-      typeof payload === "object" && payload !== null && !Array.isArray(payload)
-        ? Object.fromEntries(Object.entries(payload))
-        : null;
+    const result = engineResult(await response.json().catch(() => null));
     if (!response.ok) {
       const code = result?.error;
       throw new ToolError({
@@ -249,8 +270,10 @@ export async function saveAssistantChange(env: EngineEnv, partner: string, save:
   }
   const unavailable = new ToolError({ error: "engine_assistant_unavailable" });
   if (fetchError instanceof Error) {
-    const redact = (text: string) => text.replaceAll(headers["CF-Access-Client-Secret"], "[redacted]")
-      .replaceAll(headers["CF-Access-Client-Id"], "[redacted]");
+    const redact = (text: string) =>
+      text
+        .replaceAll(headers["CF-Access-Client-Secret"], "[redacted]")
+        .replaceAll(headers["CF-Access-Client-Id"], "[redacted]");
     unavailable.cause = { name: redact(fetchError.name), message: redact(fetchError.message) };
   }
   throw unavailable;
