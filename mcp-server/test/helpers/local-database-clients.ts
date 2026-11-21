@@ -1,21 +1,32 @@
+type DatabaseClient = {
+  once(event: "end", listener: () => void): unknown;
+  end(): Promise<void>;
+  connection: { stream: { destroy(): unknown } };
+};
+
+type DatabasePool = {
+  on(event: "connect", listener: (client: DatabaseClient) => void): unknown;
+  end(): Promise<void>;
+};
+
 const CLOSE_TIMEOUT_MS = 2_000;
 
 export function trackLocalDatabaseClients() {
-  const pending = new Map();
+  const pending = new Map<DatabaseClient, Promise<void>>();
   return {
-    watch(pool) {
-      pool.on('connect', client => {
-        const closed = new Promise(resolve => client.once('end', () => {
+    watch(pool: DatabasePool) {
+      pool.on("connect", client => {
+        const closed = new Promise<void>(resolve => client.once("end", () => {
           pending.delete(client);
           resolve();
         }));
         pending.set(client, closed);
       });
     },
-    async close(pools, stopDatabase) {
-      let timer;
+    async close(pools: Iterable<DatabasePool>, stopDatabase: () => Promise<void>) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        const deadline = new Promise((_, reject) => {
+        const deadline = new Promise<never>((_, reject) => {
           timer = setTimeout(() => reject(new Error(
             `Local CARR PostgreSQL clients did not close within ${CLOSE_TIMEOUT_MS} ms`,
           )), CLOSE_TIMEOUT_MS);
