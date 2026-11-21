@@ -11,7 +11,9 @@ function fixture() {
     connection: { stream: { destroy: () => events.push("socket destroyed") } },
   });
   const pool = Object.assign(new EventEmitter<{ connect: [typeof client] }>(), {
-    async end() { events.push("pool ended"); },
+    async end() {
+      events.push("pool ended");
+    },
   });
   const clients = trackLocalDatabaseClients();
   clients.watch(pool);
@@ -19,7 +21,10 @@ function fixture() {
   return {
     events,
     client,
-    close: () => clients.close([pool], async () => { events.push("database stopped"); }),
+    close: () =>
+      clients.close([pool], async () => {
+        events.push("database stopped");
+      }),
   };
 }
 
@@ -35,7 +40,7 @@ test("database shutdown waits for sockets after the pool ends", async () => {
   assert.deepEqual(events, ["pool ended", "socket closed", "database stopped"]);
 });
 
-test("database shutdown destroys a stuck socket and reports the timeout", async t => {
+test("database shutdown destroys a stuck socket and reports the timeout", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const { events, close } = fixture();
   const closed = assert.rejects(close(), /PostgreSQL clients did not close/);

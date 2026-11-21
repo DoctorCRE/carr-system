@@ -15,11 +15,13 @@ export function trackLocalDatabaseClients() {
   const pending = new Map<DatabaseClient, Promise<void>>();
   return {
     watch(pool: DatabasePool) {
-      pool.on("connect", client => {
-        const closed = new Promise<void>(resolve => client.once("end", () => {
-          pending.delete(client);
-          resolve();
-        }));
+      pool.on("connect", (client) => {
+        const closed = new Promise<void>((resolve) =>
+          client.once("end", () => {
+            pending.delete(client);
+            resolve();
+          }),
+        );
         pending.set(client, closed);
       });
     },
@@ -27,13 +29,15 @@ export function trackLocalDatabaseClients() {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         const deadline = new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error(
-            `Local CARR PostgreSQL clients did not close within ${CLOSE_TIMEOUT_MS} ms`,
-          )), CLOSE_TIMEOUT_MS);
+          timer = setTimeout(
+            () => reject(new Error(`Local CARR PostgreSQL clients did not close within ${CLOSE_TIMEOUT_MS} ms`)),
+            CLOSE_TIMEOUT_MS,
+          );
         });
         // Pool.end() can resolve while idle client sockets are still closing.
-        const drained = Promise.allSettled([...pools].map(pool => pool.end()))
-          .then(() => Promise.all(pending.values()));
+        const drained = Promise.allSettled([...pools].map((pool) => pool.end())).then(() =>
+          Promise.all(pending.values()),
+        );
         await Promise.race([drained, deadline]);
       } finally {
         clearTimeout(timer);
