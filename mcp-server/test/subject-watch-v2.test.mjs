@@ -273,9 +273,9 @@ function phaseMove(deal, changeId, minute, before, after, actor = 'dell') {
   ];
 }
 
-function engineWatchResponse(deal, changes) {
+function engineWatchResponse(deal, changes, reply_activity_ids = []) {
   return Response.json({
-    kind: 'deal', id: deal, deal_id: deal, href: '/deals?deal=' + deal, changes, reply_activity_ids: [],
+    kind: 'deal', id: deal, deal_id: deal, href: '/deals?deal=' + deal, changes, reply_activity_ids,
   });
 }
 
@@ -386,4 +386,67 @@ test('the first recorded engine phase emits a transition with no prior phase', a
     semantic_key: 'engine:1:phase',
     changes: [{ field: 'phase', before: null, after: 'negotiation', reason_code: 'unknown_to_known' }],
   }]);
+});
+
+test('first enabled sweep excludes previously recorded history and copied changes', async t => {
+  const { db, addWatch, sweep } = await engineWatchFixture(t);
+  const { id, deal } = await addWatch('Synthetic pre-cutover watch');
+  const history = [
+    ...phaseMove(deal, '1', 1, null, 'research', 'old_system'),
+    ...phaseMove(deal, '2', 2, 'research', 'negotiation', 'old_system'),
+    ...phaseMove(deal, '3', 3, 'negotiation', 'legal'),
+    ...phaseMove(deal, '4', 6, 'legal', 'negotiation', 'old_system'),
+  ];
+  t.mock.method(globalThis, 'fetch', async target => engineWatchResponse(deal,
+    history.filter(edit => Date.parse(edit.changed_at) >= Date.parse(target.searchParams.get('since')))));
+  const receipts = async () => (await db.query(
+    'select changes from ops.subject_watch_change where watch_generation_id=$1', [id],
+  )).rows;
+
+  await sweep(5);
+  assert.deepEqual(await receipts(), []);
+  history.push(...phaseMove(deal, '5', 7, 'negotiation', 'legal'));
+  await sweep(10);
+  assert.deepEqual(await receipts(), [{
+    changes: [{ field: 'phase', before: 'negotiation', after: 'legal', reason_code: 'value_changed' }],
+  }]);
+});
+
+test('step completion with two engine fields counts as one update', async t => {
+  const { db, addWatch, sweep } = await engineWatchFixture(t);
+  const { id, deal } = await addWatch('Synthetic step completion');
+  const stamp = '2027-02-01T12:06:00Z';
+  const edit = { change_id: '14', table_name: 'next_step', action: 'update', actor: 'dell', for_user: null, changed_at: stamp };
+  const changes = [
+    { ...edit, field: 'done_at', old_value: null, new_value: stamp },
+    { ...edit, field: 'status', old_value: 'open', new_value: 'done' },
+  ];
+  t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(deal, changes));
+  await sweep(5);
+  await sweep(10);
+  await sweep(11);
+  const { rows } = await db.query(
+    'select changes, disposition from ops.subject_watch_change where watch_generation_id=$1', [id],
+  );
+  assert.deepEqual(rows, [{
+    changes: [
+      { field: 'done_at', before: null, after: stamp, reason_code: 'unknown_to_known' },
+      { field: 'status', before: 'open', after: 'done', reason_code: 'value_changed' },
+    ],
+    disposition: 'emitted',
+  }]);
+});
+
+test('engine-only replies reach the subscriber once without a legacy activity row', async t => {
+  const { db, addWatch, sweep } = await engineWatchFixture(t);
+  const { id, deal } = await addWatch('Synthetic engine reply');
+  const replyId = '00000000-0000-4000-8000-000000000777';
+  t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(deal, [], [replyId, replyId]));
+  await sweep(5);
+  await sweep(6);
+  const { rows } = await db.query(
+    'select category, disposition, evidence_refs from ops.subject_watch_change where watch_generation_id=$1', [id],
+  );
+  assert.deepEqual(rows.map(row => [row.category, row.disposition, row.evidence_refs[0].activity_id]),
+    [['reply_arrived', 'emitted', replyId]]);
 });
