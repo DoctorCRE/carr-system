@@ -5,7 +5,7 @@ import { isInvoiceEvidence } from "./invoice-evidence.ts";
 import { ToolError } from "./tool-error.ts";
 import type { VerbInputs } from "./verb-contract.ts";
 
-type EngineEnv = {
+export type EngineEnv = {
   ENGINE_URL?: string;
   ENGINE_ACCESS_CLIENT_ID?: string;
   ENGINE_ACCESS_CLIENT_SECRET?: string;
@@ -117,7 +117,7 @@ function dealNoteReceipt(result: Record<string, unknown>, hasPlan: boolean) {
     : null;
 }
 
-export async function saveAssistantChange(env: EngineEnv, partner: string, save: Save) {
+function engineJobRequest(env: EngineEnv, path: string, job: string, partner: string) {
   const url = URL.parse(env.ENGINE_URL ?? "");
   const clientId = env.ENGINE_ACCESS_CLIENT_ID;
   const secret = env.ENGINE_ACCESS_CLIENT_SECRET;
@@ -133,23 +133,70 @@ export async function saveAssistantChange(env: EngineEnv, partner: string, save:
   )
     throw new ToolError({ error: "engine_assistant_configuration" });
 
-  const body = JSON.stringify(save.body);
-  const headers = {
-    "Content-Type": "application/json",
-    "User-Agent": engineClient.userAgent,
-    "CF-Access-Client-Id": clientId,
-    "CF-Access-Client-Secret": secret,
-    "Engine-Job": save.job ?? "agent",
-    "Engine-For-User": partner,
+  return {
+    target: new URL(path, url),
+    headers: {
+      "User-Agent": engineClient.userAgent,
+      "CF-Access-Client-Id": clientId,
+      "CF-Access-Client-Secret": secret,
+      "Engine-Job": job,
+      "Engine-For-User": partner,
+    },
   };
-  const target = new URL(save.path, url);
+}
+
+export type DealWatchTarget = {
+  watch_id: string;
+  lifecycle_version: number;
+  deal_id: string;
+  subscriber: string;
+  since: string;
+};
+
+function readDealWatchField(value: unknown) {
+  if (typeof value !== "object" || value === null ||
+      !("change_id" in value) || typeof value.change_id !== "string" || !/^\d+$/.test(value.change_id) ||
+      !("field" in value) || typeof value.field !== "string" || !/^[a-z][a-z0-9_]*$/.test(value.field) ||
+      !("actor" in value) || typeof value.actor !== "string" ||
+      !("for_user" in value) || (value.for_user !== null && typeof value.for_user !== "string") ||
+      !("old_value" in value) || !("new_value" in value) ||
+      !("changed_at" in value) || typeof value.changed_at !== "string" || !Number.isFinite(Date.parse(value.changed_at)))
+    throw new Error("invalid_engine_watch_change");
+  const { change_id, field, old_value, new_value, actor, for_user, changed_at } = value;
+  return { change_id, field, old_value, new_value, actor, for_user, changed_at };
+}
+
+export async function readEngineDealWatch(env: EngineEnv, watch: DealWatchTarget, timeout: number) {
+  const { target, headers } = engineJobRequest(env, `/jobs/deal-watches/deal/${watch.deal_id}`, "agent", watch.subscriber);
+  target.searchParams.set("subscriber", watch.subscriber);
+  target.searchParams.set("since", watch.since);
+  const response = await fetch(target, { headers, redirect: "manual", signal: AbortSignal.timeout(timeout) })
+    .catch(() => { throw new Error("engine_watch_unavailable"); });
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error("engine_watch_unavailable");
+  }
+  const payload: unknown = await response.json().catch(() => null);
+  if (typeof payload !== "object" || payload === null || !("kind" in payload) || payload.kind !== "deal" ||
+      !("id" in payload) || payload.id !== watch.deal_id || !("deal_id" in payload) || payload.deal_id !== watch.deal_id ||
+      !("changes" in payload) || !Array.isArray(payload.changes))
+    throw new Error("invalid_engine_watch_response");
+  return {
+    watch_id: watch.watch_id, lifecycle_version: watch.lifecycle_version,
+    changes: payload.changes.map(readDealWatchField),
+  };
+}
+
+export async function saveAssistantChange(env: EngineEnv, partner: string, save: Save) {
+  const { target, headers } = engineJobRequest(env, save.path, save.job ?? "agent", partner);
+  const body = JSON.stringify(save.body);
   let fetchError: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     let response: Response;
     try {
       response = await fetch(target, {
         method: "POST",
-        headers,
+        headers: { ...headers, "Content-Type": "application/json" },
         body,
         redirect: "manual",
         signal: AbortSignal.timeout(5_000),
@@ -202,7 +249,8 @@ export async function saveAssistantChange(env: EngineEnv, partner: string, save:
   }
   const unavailable = new ToolError({ error: "engine_assistant_unavailable" });
   if (fetchError instanceof Error) {
-    const redact = (text: string) => text.replaceAll(secret, "[redacted]").replaceAll(clientId, "[redacted]");
+    const redact = (text: string) => text.replaceAll(headers["CF-Access-Client-Secret"], "[redacted]")
+      .replaceAll(headers["CF-Access-Client-Id"], "[redacted]");
     unavailable.cause = { name: redact(fetchError.name), message: redact(fetchError.message) };
   }
   throw unavailable;

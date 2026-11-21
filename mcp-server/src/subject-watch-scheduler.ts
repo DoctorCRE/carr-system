@@ -2,9 +2,11 @@
 import type { PoolClient, PoolConfig } from "@neondatabase/serverless";
 import { Pool } from "@neondatabase/serverless";
 import "./postgres.ts";
+import { readEngineDealWatch, type DealWatchTarget, type EngineEnv } from "./engine-assistant.ts";
 
 type Controller = { scheduledTime: number };
-type Environment = { DATABASE_URL_WRITER: string };
+type Environment = EngineEnv & { DATABASE_URL_WRITER: string; ENGINE_DEAL_WATCH_CHANGES?: string };
+const engineBatchLimit = 4;
 type PoolConstructor = new (config: PoolConfig) => Pick<Pool, "connect" | "end">;
 
 export async function sweepSubjectWatches(controller: Controller, env: Environment, PoolClass: PoolConstructor = Pool) {
@@ -19,7 +21,7 @@ export async function sweepSubjectWatches(controller: Controller, env: Environme
   try {
     client = await pool.connect();
     const connectedClient = client;
-    const query = (text: string, values: string[] = []) => {
+    const query = <Result = unknown>(text: string, values: string[] = []) => {
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw new Error("watch_sweep_deadline");
       const config = {
@@ -27,15 +29,30 @@ export async function sweepSubjectWatches(controller: Controller, env: Environme
         values,
         query_timeout: Math.min(2000, remaining),
       };
-      return connectedClient.query<{ result: unknown }, string[]>(config);
+      return connectedClient.query<{ result: Result }, string[]>(config);
     };
+    const now = new Date(controller.scheduledTime).toISOString();
     for (let batch = 0; batch < 4 && Date.now() < deadline - 2000; batch++) {
       await query("begin");
       try {
         await query("set local statement_timeout='1500ms'; set local lock_timeout='100ms'");
-        const { rows } = await query("select ops.sweep_subject_watches($1::timestamptz,50) result", [
-          new Date(controller.scheduledTime).toISOString(),
-        ]);
+        let engineChanges: Awaited<ReturnType<typeof readEngineDealWatch>>[] | undefined;
+        if (env.ENGINE_DEAL_WATCH_CHANGES === "true") {
+          const { rows } = await query<DealWatchTarget[] | null>(
+            "select ops.read_subject_watch_engine_batch($1::timestamptz,$2::int) result", [now, String(engineBatchLimit)],
+          );
+          const watches = rows[0]?.result;
+          if (watches === null) {
+            await query("commit");
+            break;
+          }
+          if (!Array.isArray(watches)) throw new Error("invalid_engine_watch_batch");
+          const timeout = Math.max(1, Math.min(5000, deadline - Date.now() - 2000));
+          engineChanges = await Promise.all(watches.map(watch => readEngineDealWatch(env, watch, timeout)));
+        }
+        const { rows } = engineChanges
+          ? await query("select ops.sweep_subject_watches($1::timestamptz,50,$2::jsonb) result", [now, JSON.stringify(engineChanges)])
+          : await query("select ops.sweep_subject_watches($1::timestamptz,50) result", [now]);
         await query("commit");
         const result = rows[0]?.result;
         if (
@@ -45,7 +62,7 @@ export async function sweepSubjectWatches(controller: Controller, env: Environme
           typeof result.scanned !== "number"
         )
           throw new Error("invalid_watch_sweep_result");
-        if (result.scanned < 50) break;
+        if (result.scanned < 50 && (engineChanges?.length ?? 0) < engineBatchLimit) break;
       } catch (error) {
         await query("rollback");
         throw error;
