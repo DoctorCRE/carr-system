@@ -66,6 +66,8 @@ def ci_fixture():
             (root / name).mkdir()
             if name not in {"migrations", "mcp-server", "lib"}:
                 (root / name / (name.replace("-", "_") + "_fixture.py")).write_text("value: int = 1\n")
+        (root / "lib").mkdir(exist_ok=True)
+        (root / "lib/pg_capacity.py").write_text("def main(): return 0\n")
         (root / "ops/scac-mutation-inventory.ts").write_text("// Check the synthetic registry.\n")
         for name in ("release_reader.py", "release-reader-marker.json"):
             shutil.copy2(REPO / "lib" / name, root / "lib" / name)
@@ -498,6 +500,8 @@ def test_gates_build_hxprobe_before_parallel_selftests():
                      "ci-secret-scan.py", "pii_guard.py"):
             shutil.copy2(REPO / "ops" / name, root / "ops" / name)
         shutil.copy2(REPO / "bin/with-timeout.py", root / "bin/with-timeout.py")
+        (root / "lib").mkdir(exist_ok=True)
+        (root / "lib/pg_capacity.py").write_text("def main(): return 0\n")
         (root / "ops/scac-mutation-inventory.ts").write_text("// Check the synthetic registry.\n")
         (root / "ops/config/ci-check-scope.json").write_text('{}')
         (root / "vendor/hxprobe/Cargo.toml").touch()

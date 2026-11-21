@@ -205,6 +205,8 @@ def scrub_cloud_environment(source: Mapping[str, str]) -> dict[str, str]:
     """Build the minimal nonsecret environment needed by local tools."""
     allowed = {
         "HOME",
+        "CARR_PG_TELEMETRY",
+        "CARR_PG_JOB_ID",
         "LANG",
         "LC_ALL",
         "LC_CTYPE",
@@ -567,6 +569,10 @@ def main() -> int:
     # runner first, which decides whether teardown may delete the root.
     signal.signal(signal.SIGINT, cancelled)
     signal.signal(signal.SIGTERM, cancelled)
+    from lib.pg_capacity import main as capacity_preflight
+    capacity_exit = capacity_preflight()
+    if capacity_exit:
+        return capacity_exit
     try:
         return run_local_ci(
             repo=repo, ci_class=args.ci_class, port=args.port, runner=SubprocessRunner(), integration_base=args.integration_base,

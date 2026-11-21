@@ -165,8 +165,9 @@ class SharedMemoryPolicy(unittest.TestCase):
         def failed(args, **kwargs):
             calls.append(args)
             return subprocess.CompletedProcess(args, int('start' in args), '', 'startup failed')
-        with patch('lib.disposable_pg_fixture.subprocess.run',
-                   side_effect=AssertionError('must not inspect or remove host IPC')):
+        with patch.dict(os.environ, CARR_PG_TELEMETRY=''), \
+                patch('lib.disposable_pg_fixture.subprocess.run',
+                      side_effect=AssertionError('default fixture must not inspect or remove host IPC')):
             with DisposablePostgres('memory-policy-', '/fake/pg_ctl', runner=failed) as fixture:
                 result = fixture.run(['/fake/pg_ctl', '-D', fixture.root / 'data', 'start'])
                 self.assertEqual(result.returncode, 1)
