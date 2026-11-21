@@ -5317,6 +5317,21 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.fake.writes(), [], 'a scheduled end is not proof of attendance or a next action')
         self.assertNotIn('Agenda', json.dumps(review))
 
+    def test_unchanged_store_republishes_full_agenda_after_policy_upgrade(self):
+        events = [event(self.gid(74), -timedelta(hours=2), subject='Synthetic ended meeting')]
+        self.run_intake(events=events)
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        state['calendar_policy'] = 4
+        path.write_text(json.dumps(state))
+        self.fake.agenda = None
+
+        result = self.run_intake(events=events, touch=False)
+
+        self.assertEqual(result.counts.get('calendar_agenda_published'), 1)
+        self.assertEqual([i['title'] for i in self.fake.agenda['items']], ['Synthetic ended meeting'])
+        self.assertEqual(self.run_intake(events=events, touch=False).reason, 'store_unchanged')
+
     def test_follow_up_reviews_require_an_unambiguous_recent_timed_meeting(self):
         local = NOW.astimezone(load_settings(self.home).timezone)
         midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)

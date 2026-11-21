@@ -2,6 +2,7 @@
 """Pure calendar projection regressions; synthetic meetings only."""
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+import json
 from pathlib import Path
 from types import SimpleNamespace
 import sys
@@ -20,7 +21,7 @@ def event(n=1, *, instance='00000000', hours=2, **fields):
     return dict(goid=f'040000008200E00074C5B7101A82E008{instance}{n:012X}',
                 start_unix=start, end_unix=start + 3600, subject='Synthetic meeting',
                 location=None, organizer_name='Owner', organizer_email=SETTINGS.account,
-                attendees=[], **fields)
+                attendees=[]) | fields
 
 
 class CalendarAgendaTest(unittest.TestCase):
@@ -81,9 +82,56 @@ class CalendarAgendaTest(unittest.TestCase):
             self.assertEqual(counts['calendar_agenda_canceled'], 0)
             self.assertIn({'code': 'time_changed', 'count': 1}, snapshot['warnings'])
 
-    def test_recent_unsupported_meeting_still_proposes_review(self):
-        snapshot, _ = self.project([event(hours=-2, lifecycle_status='unsupported')])
-        self.assertEqual(len(snapshot['follow_up_reviews']), 1)
+    def test_ended_meeting_keeps_its_full_row_and_review(self):
+        snapshot, _ = self.project([
+            event(hours=-2, lifecycle_status='unsupported', location='Example Room',
+                  attendees=[('Pat', 'Pat@example.test')]),
+        ])
+        self.assertEqual(len(snapshot['items']), 1)
+        [meeting] = snapshot['items']
+        self.assertEqual(meeting['start'], '2026-10-20T13:00:00+00:00')
+        self.assertEqual(meeting['end'], '2026-10-20T14:00:00+00:00')
+        self.assertEqual(meeting['location'], 'Example Room')
+        self.assertEqual(meeting['attendees'], [{'name': 'Pat', 'email': 'pat@example.test'}])
+        self.assertEqual([r['key'] for r in snapshot['follow_up_reviews']], [meeting['key']])
+
+    def test_ended_conflicting_meeting_has_a_full_row_without_review(self):
+        snapshot, _ = self.project([
+            event(hours=-2, location='Example Room'),
+            event(hours=-2, location='Other Room'),
+        ])
+        self.assertEqual(len(snapshot['items']), 1)
+        self.assertTrue(snapshot['items'][0]['conflict'])
+        self.assertEqual(snapshot['follow_up_reviews'], [])
+
+    def test_ended_meetings_use_the_central_midnight_boundary(self):
+        snapshot, _ = self.project([
+            event(1, hours=-13, subject='Previous day'),
+            event(2, hours=-11, subject='Ends at midnight'),
+            event(3, hours=-11, end_unix=int((NOW - timedelta(hours=9)).timestamp()),
+                  subject='Crosses midnight'),
+            event(4, hours=-10, subject='Starts at midnight'),
+        ])
+        self.assertEqual([i['title'] for i in snapshot['items']], ['Crosses midnight', 'Starts at midnight'])
+        self.assertEqual({r['title'] for r in snapshot['follow_up_reviews']},
+                         {'Previous day', 'Ends at midnight', 'Crosses midnight', 'Starts at midnight'})
+
+    def test_byte_limit_trims_the_oldest_end_first(self):
+        large_location = 'é' * 12_000
+        snapshot, counts = self.project([
+            event(1, hours=-5, end_unix=int((NOW - timedelta(hours=2)).timestamp()),
+                  subject='Longer meeting', location=large_location),
+            event(2, hours=-4, subject='First to end', location=large_location),
+            event(3, hours=-2, subject='Latest to end', location=large_location),
+            event(4, subject='Upcoming'),
+        ])
+        self.assertLessEqual(len(json.dumps(snapshot).encode('utf-8')), 200_000)
+        self.assertEqual([i['title'] for i in snapshot['items']],
+                         ['Longer meeting', 'Latest to end', 'Upcoming'])
+        self.assertEqual([r['title'] for r in snapshot['follow_up_reviews']],
+                         ['Latest to end', 'Longer meeting', 'First to end'])
+        self.assertEqual(counts['calendar_agenda_trimmed'], 1)
+        self.assertIn({'code': 'trimmed', 'count': 1}, snapshot['warnings'])
 
     def test_other_accounts_and_outside_window_do_not_count_as_hidden_cancellations(self):
         other = event(lifecycle_status='canceled')
