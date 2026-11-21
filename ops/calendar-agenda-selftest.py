@@ -69,6 +69,14 @@ class CalendarAgendaTest(unittest.TestCase):
         self.assertEqual(counts['calendar_agenda_recurring'], 1)
         self.assertIn({'code': 'recurring_unverified', 'count': 1}, snapshot['warnings'])
 
+    def test_address_free_cancellation_still_hides_the_account_copy(self):
+        self.hidden([event(), event(organizer_email=None, lifecycle_status='canceled')])
+
+    def test_account_evidence_does_not_cover_another_start(self):
+        snapshot, counts = self.project([event(), event(hours=3, organizer_email=None)])
+        self.assertEqual(snapshot['items'], [])
+        self.assertEqual(counts['calendar_agenda_other_accounts'], 1)
+
     def test_moved_exception_cancellation_hides_all_copies_of_that_instance(self):
         self.hidden([event(instance='07EA0A14', lifecycle_status='unsupported'),
                      event(instance='07EA0A14', hours=26, lifecycle_status='canceled')])

@@ -217,17 +217,20 @@ required before current calendar lifecycle or completeness can be claimed.
 When the two length-prefixed time-zone strings and all seven text fields can
 be read in order, the decoder uses the two subject slots to confirm the title.
 Short and Unicode titles are kept, and two empty subject slots yield a null
-title. A remaining attendee block must parse through the end of the object.
-Revisions with other field layouts still use the repeated-text search.
+title. Conflicting subject slots leave the entry undecoded. A remaining attendee
+block must parse through the end of the object. Revisions with other field
+layouts still use the repeated-text search.
 
 An object whose NUL-terminated fields run to its end, with no attendee count,
 decodes with no attendees. The 2026-10-21 TEST-account study pair showed such an
 appointment added one GOID/start identity and, before this, no decoded candidate.
 
 Intake stores opaque candidate hashes and provisional schedule timestamps in its
-private state. Separately it publishes the next fourteen days of meetings that
-name the configured account in every stored copy as a display snapshot (board
-`calendar-agenda`) for the morning brief, with no notes or bodies.
+private state. Separately it publishes the next fourteen days of meetings as a
+display snapshot (board `calendar-agenda`) for the morning brief, with no notes
+or bodies. Each retained copy must name the configured account. For the same
+Global Object ID and start, a copy that names the account supersedes copies
+with no participant addresses for display.
 
 Observed on the 2026-10-21 study copies (Joe's shared profile, not yet the TEST
 account): each recurring occurrence is a separate object whose Global Object ID

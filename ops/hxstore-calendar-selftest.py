@@ -24,7 +24,8 @@ STORE = runpy.run_path(str(ROOT / 'ops/hxstore-observe-selftest.py'))['store']
 def candidate(attendees=(), start=1_793_000_000, metadata=0, response=0, *,
               subject='Synthetic Calendar Review', first_subject=None, duration=3600,
               zones=('America/Chicago', 'US/Central'), instance='00000000',
-              organizer='ada@example.test', omit_attendee_count=False, trailer=b''):
+              organizer='ada@example.test', notes='Synthetic notes',
+              omit_attendee_count=False, trailer=b''):
     obj = bytearray(574)
     struct.pack_into('<H', obj, 0, 0x006b)
     obj[100] = metadata
@@ -38,7 +39,7 @@ def candidate(attendees=(), start=1_793_000_000, metadata=0, response=0, *,
         raw = text.encode('utf-16le')
         obj.extend(bytes([len(raw)]) + raw)
     for text in (subject if first_subject is None else first_subject, 'Example Room', 'Ada Example',
-                 organizer, 'Owner Example', 'Synthetic notes', subject):
+                 organizer, 'Owner Example', notes, subject):
         obj.extend((text + '\0').encode('utf-16le'))
     if not omit_attendee_count:
         obj.extend(struct.pack('<I', len(attendees)))
@@ -124,6 +125,29 @@ class CalendarExportTests(unittest.TestCase):
         snapshot, counts = self.project(candidate(subject='会議', first_subject='Cancelled: 会議'))
         self.assertEqual(counts['calendar_agenda_undecoded'], 0)
         self.assertEqual(counts['calendar_agenda_canceled'], 1)
+        self.assertEqual(snapshot['items'], [])
+
+    def test_address_free_duplicate_keeps_the_account_copy(self):
+        original = candidate(subject='Plan')
+        duplicate = candidate(subject='会議 📅', organizer='')
+        snapshot, counts = self.project(original, duplicate)
+        self.assertEqual(counts['calendar_agenda_undecoded'], 0)
+        self.assertEqual(counts['calendar_agenda_other_accounts'], 0)
+        self.assertEqual([item['title'] for item in snapshot['items']], ['Plan'])
+
+    def test_foreign_duplicate_still_blocks_the_account_copy(self):
+        snapshot, counts = self.project(
+            candidate(), candidate(subject='会議 📅', organizer='bo@example.test'))
+        self.assertEqual(counts['calendar_agenda_undecoded'], 0)
+        self.assertEqual(counts['calendar_agenda_other_accounts'], 1)
+        self.assertEqual(snapshot['items'], [])
+
+    def test_conflicting_subject_slots_count_as_undecoded(self):
+        snapshot, counts = self.project(candidate(
+            [('Ada Example', 'ada@example.test')], first_subject='Planning',
+            subject='Review', notes='Example Room'))
+        self.assertEqual(counts['calendar_agenda_undecoded'], 1)
+        self.assertIn({'code': 'undecoded', 'count': 1}, snapshot['warnings'])
         self.assertEqual(snapshot['items'], [])
 
     def test_warning_counts_only_unreadable_identities_before_date_filter(self):

@@ -31,7 +31,8 @@
 //!
 //! When both time-zone strings and all seven text slots can be read in order,
 //! the paired subject slots establish the title, even when it is blank.
-//! Other revisions use the repeated subject and adjacent organizer fields.
+//! Conflicting subject slots stay undecoded. Other layouts use the repeated
+//! subject and adjacent organizer fields.
 //!
 //! Global Object ID plus start groups observed schedule candidates. It cannot
 //! distinguish a moved occurrence from a recurring exception. Cancellation,
@@ -220,13 +221,9 @@ fn ends_at_repeated_subject(obj: &[u8], g: usize) -> bool {
 fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
     let g = memchr::memmem::find(obj, &GOID_PREFIX.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<u8>>())?;
     let after_goid = &obj[g + goid.len() * 2..];
-    let fields = if let Some((mut fields, remaining)) = ordered_fields(after_goid) {
-        if !remaining.is_empty() {
-            fields.attendees = attendees_at(remaining, 0)?;
-        }
-        fields
-    } else {
-        repeated_fields(obj, g)?
+    let fields = match ordered_fields(after_goid) {
+        Some((fields, remaining)) => ordered_event(fields, remaining)?,
+        None => repeated_fields(obj, g)?,
     };
     Some(Event {
         goid,
@@ -237,7 +234,7 @@ fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
     })
 }
 
-fn ordered_fields(after_goid: &[u8]) -> Option<(Event, &[u8])> {
+fn ordered_fields(after_goid: &[u8]) -> Option<([String; 7], &[u8])> {
     let mut bytes = after_goid.strip_prefix(&[0, 0])?;
     for _ in 0..2 {
         let (&len, rest) = bytes.split_first()?;
@@ -253,22 +250,27 @@ fn ordered_fields(after_goid: &[u8]) -> Option<(Event, &[u8])> {
         *field = String::from_utf16(&utf16(&bytes[..end])).ok()?;
         bytes = &bytes[end + 2..];
     }
+    Some((fields, bytes))
+}
+
+fn ordered_event(fields: [String; 7], remaining: &[u8]) -> Option<Event> {
     let [first_subject, location, organizer_name, organizer_email, _, body, subject] = fields;
     let canceled = CANCELED.iter().any(|prefix| first_subject.strip_prefix(prefix) == Some(subject.as_str()));
     if first_subject != subject && !canceled {
         return None;
     }
     let present = |s: String| (!s.is_empty()).then_some(s);
-    let fields = Event {
+    let attendees = if remaining.is_empty() { Vec::new() } else { attendees_at(remaining, 0)? };
+    Some(Event {
         subject: present(subject),
         location: present(location),
         organizer_name: present(organizer_name),
         organizer_email: is_email(&organizer_email).then_some(organizer_email),
         body: (body.contains("\r\n") || body.chars().count() > 60).then_some(body),
+        attendees,
         canceled,
         ..Event::default()
-    };
-    Some((fields, bytes))
+    })
 }
 
 fn repeated_fields(obj: &[u8], g: usize) -> Option<Event> {
@@ -547,12 +549,12 @@ mod tests {
     }
 
     #[test]
-    fn a_prefix_on_another_subject_is_not_a_cancellation() {
+    fn a_prefix_on_another_subject_leaves_the_identity_undecoded() {
         let obj = object_with(true, "Canceled: Something Else Quarterly Site Review", &[]);
         let mut idx = Index::default();
         idx.observe(&envelope(&obj));
-        let ev = idx.events.values().next().expect("decoded");
-        assert!(!ev.canceled, "only the exact prefixed copy of the subject counts");
+        assert_eq!(idx.identities.len(), 1);
+        assert!(idx.events.is_empty());
     }
 
     #[test]

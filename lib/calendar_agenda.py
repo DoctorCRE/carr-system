@@ -34,13 +34,21 @@ def _series(goid: str) -> str:
     return goid[:32] + '00000000' + goid[40:] if len(goid) >= 40 else goid
 
 
+def _participant_emails(event: dict) -> set[str]:
+    emails = {email.lower() for _, email in event['attendees'] if email}
+    if organizer := event['organizer_email']:
+        emails.add(organizer.lower())
+    return emails
+
+
 def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datetime) -> tuple[dict, dict]:
     """The display snapshot of today's and upcoming meetings, plus recent outcome review proposals.
 
-    Joe is the configured account. A meeting shows only when every stored copy
-    names him as organizer or attendee, so TEST-account, personal and other
-    partners' items never show; an invite sent only to a group he belongs to is
-    left out and the snapshot says so. Copies are collapsed by Global Object ID.
+    A meeting shows only when each retained copy names the configured account
+    as organizer or attendee. For the same Global Object ID and start, a copy
+    that names the account supersedes copies with no participant addresses for
+    display. An invite sent only to a group is left out and the snapshot says so.
+    Copies are collapsed by Global Object ID.
     Outlook writes each recurring occurrence under its own ID (the instance date
     sits in bytes 16-19), so the series master is skipped once occurrences exist.
     Revision order is not decoded: an ID seen at more than one start is one row
@@ -67,13 +75,16 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
     for goid, group in by_goid.items():
         if _instance(goid) == '00000000' and goid in with_occurrences:
             continue
-        current = [e for e in group if e['start_unix'] < hi
+        observed = [(e, _participant_emails(e)) for e in group]
+        account_starts = {e['start_unix'] for e, emails in observed if account in emails}
+        copies = [(e, emails) for e, emails in observed if emails or e['start_unix'] not in account_starts]
+        candidates = [e for e, _ in copies]
+        current = [e for e in candidates if e['start_unix'] < hi
                    and (e['end_unix'] > lo or e['start_unix'] == e['end_unix'] == lo)]
-        recent = [e for e in group if review_lo < e['end_unix'] <= review_hi]
+        recent = [e for e in candidates if review_lo < e['end_unix'] <= review_hi]
         if not current and not recent:
             continue
-        if not all(account in {(e['organizer_email'] or '').lower(), *((m or '').lower() for _, m in e['attendees'])}
-                   for e in group):
+        if not all(account in emails for _, emails in copies):
             counts['calendar_agenda_other_accounts'] += 1
             continue
         if any(e.get('lifecycle_status') == 'canceled' or CANCELED.match(e['subject'] or '') for e in group):
@@ -82,7 +93,7 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
         shown = max(current or recent, key=lambda e: (len(e['attendees']), len(e['subject'] or ''), e['end_unix']))
         starts = sorted({e['start_unix'] for e in group})
         conflict = len({json.dumps([e['subject'], e['location'], e['end_unix'] - e['start_unix'],
-                                    sorted((n or '', m or '') for n, m in e['attendees'])]) for e in group}) > 1
+                                    sorted((n or '', m or '') for n, m in e['attendees'])]) for e in candidates}) > 1
         recurring = _instance(goid) != '00000000'
         start, end = shown['start_unix'], shown['end_unix']
         local = datetime.fromtimestamp(start, tz)
