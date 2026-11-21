@@ -43,11 +43,16 @@ vars to the fixed cutover instant in UTC, using `YYYY-MM-DDTHH:mm:ss.sssZ`.
 Deploy that configuration before switching the app to engine sign-in. Keep the
 same value in subsequent releases and during rollback.
 
-The cutoff applies to `DOCTORCRE_APP_HOST` when configured and `APP_HOST`
-otherwise. App browser sessions and pending sign-in or reauthentication issued
-before the instant are refused, including records that have no issuance time.
-An invalid configured value blocks app browser sessions and callbacks. A new
-CARR browser sign-in can complete at or after the cutoff.
+The cutoff applies to `DOCTORCRE_APP_HOST` when configured. When that variable
+is unset, it applies to `APP_HOST`. App browser sessions and pending sign-in or
+reauthentication issued before the instant are refused, including records that
+have no issuance time. A new CARR browser sign-in can complete at or after the
+cutoff.
+
+A blank or invalid cutoff returns `503 invalid_app_browser_session_cutoff` on
+the app's browser sign-in and session routes. When the cutoff is configured and
+`DOCTORCRE_APP_HOST` is invalid, browser sign-in and session routes return
+`503 invalid_doctorcre_app_host`.
 
 ## Consumers checked for checkout safety
 

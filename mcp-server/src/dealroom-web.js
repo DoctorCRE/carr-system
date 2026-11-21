@@ -208,22 +208,17 @@ function dealroomOriginForRequest(request, env) {
   return null;
 }
 
-function envForDealroomOrigin(env, origin) {
+function envForDealroomOrigin(env, origin, browserSessionCutoff) {
   const scoped = Object.create(env || null);
   scoped.PRIMARY_APP_HOST = env?.APP_HOST || env?.DEALROOM_HOST;
   scoped.APP_HOST = new URL(origin).hostname;
-  const appOrigin = doctorcreAppOrigin(env) ?? (env?.APP_HOST ? dealroomOrigin(env) : null);
-  scoped.APP_BROWSER_SESSION_CUTOFF = origin === appOrigin ? env.APP_BROWSER_SESSION_CUTOFF : undefined;
+  scoped.browserSessionCutoff = browserSessionCutoff;
   return scoped;
 }
 
 function meetsAppBrowserCutoff(env, issuedAt) {
-  const configured = env.APP_BROWSER_SESSION_CUTOFF;
-  if (configured === undefined || configured === "") return true;
-  if (typeof configured !== "string") return false;
-  const cutoff = Date.parse(configured);
-  if (!Number.isFinite(cutoff) || new Date(cutoff).toISOString() !== configured) return false;
-  return Number.isFinite(issuedAt) && issuedAt >= cutoff;
+  const cutoff = env.browserSessionCutoff;
+  return cutoff === undefined || (Number.isFinite(issuedAt) && issuedAt >= cutoff);
 }
 
 function legacyDealroomOrigin(env) {
@@ -1131,10 +1126,26 @@ async function handleRequest(request, env, ctx, dependencies) {
       }
       const origin = dealroomOriginForRequest(request, env);
       if (!origin) return json({ error: "not_found" }, 404);
-      env = envForDealroomOrigin(env, origin);
       const url = new URL(request.url);
       const publicResponse = await publicShellAsset(env, request, url.pathname);
       if (publicResponse) return publicResponse;
+      const configuredCutoff = env.APP_BROWSER_SESSION_CUTOFF;
+      let browserSessionCutoff;
+      if (configuredCutoff !== undefined) {
+        const dedicatedOrigin = doctorcreAppOrigin(env);
+        if (env.DOCTORCRE_APP_HOST !== undefined && !dedicatedOrigin) {
+          return json({ error: "invalid_doctorcre_app_host" }, 503);
+        }
+        const appOrigin = dedicatedOrigin ?? (env.APP_HOST ? primaryOrigin : null);
+        if (origin === appOrigin) {
+          browserSessionCutoff = typeof configuredCutoff === "string" ? Date.parse(configuredCutoff) : NaN;
+          if (!Number.isFinite(browserSessionCutoff) ||
+              new Date(browserSessionCutoff).toISOString() !== configuredCutoff) {
+            return json({ error: "invalid_app_browser_session_cutoff" }, 503);
+          }
+        }
+      }
+      env = envForDealroomOrigin(env, origin, browserSessionCutoff);
       if (url.pathname === "/auth/e2e-session") return e2eSession(request, env, dependencies);
       if (url.pathname === "/auth/login" && request.method === "GET") return startLogin(request, env, dependencies);
       if (url.pathname === "/auth/callback" && request.method === "GET") return completeLogin(request, env, dependencies);

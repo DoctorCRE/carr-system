@@ -118,6 +118,31 @@ test("app session cutoff ends old cookies and allows fresh sign-in during rollba
   assert.equal((await read(oldCookie)).status, 401);
 });
 
+for (const cutoff of ["", "not a timestamp"]) {
+  test(`app sign-in refuses the configured cutoff ${JSON.stringify(cutoff)}`, async () => {
+    const environment = { ...env(APP_HOST), APP_HOST, APP_BROWSER_SESSION_CUTOFF: cutoff };
+    const request = new Request(`https://${APP_HOST}/auth/login`);
+    const response = await identityHandler(TEST_PARTNER_EMAIL).fetch(request, environment, {});
+
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), { error: "invalid_app_browser_session_cutoff" });
+  });
+}
+
+test("an invalid dedicated app host reports a configuration error on browser routes", async () => {
+  const environment = {
+    ...env(STAGING_HOST),
+    APP_HOST: STAGING_HOST,
+    DOCTORCRE_APP_HOST: DOCTORCRE_STAGING_HOST.toUpperCase(),
+    APP_BROWSER_SESSION_CUTOFF: "2027-01-15T08:00:00.000Z",
+  };
+  const request = new Request(`https://${STAGING_HOST}/auth/session`);
+  const response = await identityHandler(TEST_PARTNER_EMAIL).fetch(request, environment, {});
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: "invalid_doctorcre_app_host" });
+});
+
 test("late app login and reauth callbacks clear pending state without exchanging a Google code", async () => {
   const clock = { now: 1_800_000_000_000 };
   const environment = { ...env(APP_HOST), APP_HOST };
@@ -170,6 +195,8 @@ test("the staging app cutoff leaves the other browser host's session and pending
   const read = (host, cookie) => handler.fetch(new Request(`https://${host}/auth/session`, {
     headers: { cookie },
   }), environment, {});
+  assert.equal((await read(DOCTORCRE_STAGING_HOST, appCookie)).status, 200);
+  assert.equal((await read(STAGING_HOST, otherCookie)).status, 200);
 
   clock.now += 1;
   environment.APP_BROWSER_SESSION_CUTOFF = new Date(clock.now).toISOString();
