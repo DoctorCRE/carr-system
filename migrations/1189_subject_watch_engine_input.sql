@@ -138,7 +138,7 @@ begin
         ), receipts as (
           select * from material where delta<>'[]'
           union all
-          select distinct 'engine-reply:'||reply_id::uuid,'reply_arrived',null,null,p_now,'[]',reply_id::uuid
+          select distinct 'engine-reply:'||reply_id::uuid,'reply_arrived',null::text,null::text,p_now,'[]'::jsonb,reply_id::uuid
           from jsonb_array_elements_text(item.reply_activity_ids) as replies(reply_id) where w.replies
         )
         select * from receipts r where not exists(
