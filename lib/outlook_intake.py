@@ -149,7 +149,7 @@ DECODER_HEALTH_FLOORS = {'block_verification': 0.95, 'sender': 0.5,
 DECODER_HEALTH_DROP = 0.20
 DECODER_HEALTH_MIN_SAMPLE = 20
 AGENDA_BOARD = 'calendar-agenda'
-CALENDAR_POLICY = 4
+CALENDAR_POLICY = 5
 
 
 def resolve_store(home: Path, settings: OutlookSettings | None = None) -> Path:

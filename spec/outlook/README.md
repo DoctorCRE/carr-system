@@ -9,6 +9,27 @@ The research atlas generator is retired. Saved inventories and findings remain b
 
 See [the per-Mac settings and helper signing steps](studio-settings-migration.md) for intake installation.
 
+## Calendar agenda snapshot
+
+The agenda contains full rows for eligible meetings in the 14-day window
+starting at midnight in the mailbox time zone (Central time on the Studio).
+Meetings that have already ended stay in the agenda if they overlap that
+window. A zero-duration meeting at the opening midnight is included.
+For a meeting with several stored copies, both endpoints come from the selected
+copy, and alternate start times remain visible. Follow-up reviews still use their
+own 24-hour window and eligibility rules.
+
+The snapshot is capped at 200,000 bytes. If it is too large, intake removes
+full rows for ended meetings in order of earliest end time. It then removes
+the oldest follow-up reviews and, if necessary, the latest upcoming rows.
+The snapshot reports how many ended meetings, follow-up reviews and later
+meetings it removed.
+
+For the Studio, run `bin/install-outlook-intake.sh` from the updated canonical
+checkout after merge to update the installed `outlook-repo` checkout.
+The next normal intake run republishes the agenda even if the Outlook store
+hasn't changed.
+
 ## Catch up a mailbox from a start date
 
 On the mailbox's Mac, use a local terminal with Full Disk Access. Open the

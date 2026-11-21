@@ -24,6 +24,7 @@ const WARNINGS = {
   recurring_unverified: () => "Recurring meetings show only the occurrences Outlook stored; some may be missing.",
   canceled_hidden: n => `${n} cancelled ${plural(n, "meeting was", "meetings were")} left out.`,
   follow_up_trimmed: n => `${n} meeting outcome ${plural(n, "review was", "reviews were")} left out to keep the brief small.`,
+  ended_trimmed: n => `${n} ${plural(n, "meeting that had ended was", "meetings that had ended were")} left out to keep the brief small.`,
   trimmed: n => `${n} later ${plural(n, "meeting was", "meetings were")} left out to keep the brief small.`,
 };
 
