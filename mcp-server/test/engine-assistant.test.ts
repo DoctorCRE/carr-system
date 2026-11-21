@@ -318,6 +318,23 @@ test("the Doc profile saves a deal step as the signed-in partner and reuses its 
   }
 });
 
+test("the Doc profile refuses a Work Request link before saving a deal step through the engine", async (t) => {
+  const upstream = engine(t, () => Response.json({ next_step_id: savedId }, { status: 201 }));
+  const actor: unknown = worker(t);
+  const env = { ...upstream.env, DATABASE_URL_WRITER: "postgres://fixture@synthetic.invalid/fixture" };
+  await assert.rejects(
+    callTool(
+      env,
+      actor,
+      "set-next-step",
+      { idempotency_key: key, deal, text: "Send sample measurements", base_version: 7, work_request: "WR-901" },
+      "doc",
+    ),
+    { payload: { error: "engine_assistant_step_guard_unsupported" } },
+  );
+  assert.equal(upstream.calls.length, 0);
+});
+
 test("untimed deal calls, meetings and notes let the engine assign the first save time", async (t) => {
   let attempts = 0;
   const upstream = engine(t, () =>
