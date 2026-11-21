@@ -208,11 +208,17 @@ function dealroomOriginForRequest(request, env) {
   return null;
 }
 
-function envForDealroomOrigin(env, origin) {
+function envForDealroomOrigin(env, origin, browserSessionCutoff) {
   const scoped = Object.create(env || null);
   scoped.PRIMARY_APP_HOST = env?.APP_HOST || env?.DEALROOM_HOST;
   scoped.APP_HOST = new URL(origin).hostname;
+  scoped.browserSessionCutoff = browserSessionCutoff;
   return scoped;
+}
+
+function meetsAppBrowserCutoff(env, issuedAt) {
+  const cutoff = env.browserSessionCutoff;
+  return cutoff === undefined || (Number.isFinite(issuedAt) && issuedAt >= cutoff);
 }
 
 function legacyDealroomOrigin(env) {
@@ -314,7 +320,7 @@ async function refusal(env, request) {
     { status: 403, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }
 
-async function startLogin(request, env, pending = {}) {
+async function startLogin(request, env, dependencies, pending = {}) {
   if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET || !env.OAUTH_KV) {
     return new Response("Sign-in is not configured.", { status: 503, headers: { "cache-control": "no-store" } });
   }
@@ -326,6 +332,7 @@ async function startLogin(request, env, pending = {}) {
   await env.OAUTH_KV.put(PENDING_PREFIX + state, JSON.stringify({
     verifier,
     returnTo: safeReturnTo(url.searchParams.get("return_to"), origin),
+    createdAt: dependencies.now(),
     ...pending,
   }), { expirationTtl: PENDING_TTL });
   const google = await googleAuthorizationUrl({ clientId: env.GOOGLE_CLIENT_ID,
@@ -353,7 +360,7 @@ async function completeLogin(request, env, dependencies) {
   const pendingKey = PENDING_PREFIX + state;
   const pending = await env.OAUTH_KV.get(pendingKey, { type: "json" });
   await env.OAUTH_KV.delete(pendingKey);
-  if (!pending?.verifier) {
+  if (!pending?.verifier || !meetsAppBrowserCutoff(env, pending.createdAt)) {
     return finish(new Response("That sign-in request is invalid or expired.",
       { status: 400, headers: { "cache-control": "no-store" } }));
   }
@@ -436,7 +443,7 @@ async function sessionFor(request, env, dependencies) {
   if (!opaque || !env.OAUTH_KV) return null;
   const key = SESSION_PREFIX + await sha256(opaque);
   const session = await env.OAUTH_KV.get(key, { type: "json" });
-  if (!session) return null;
+  if (!session || !meetsAppBrowserCutoff(env, session.createdAt)) return null;
   if (session.e2ePrincipal && (session.e2ePrincipal !== E2E_PRINCIPAL || !isStagingBrowserEnvironment(env))) return null;
   const now = dependencies.now();
   let actor = dependencies.actorFromPropsFn(session.props);
@@ -794,7 +801,7 @@ async function startReauth(request, env, dependencies) {
   if (!origin) return json({ error: "not_found" }, 404);
   const session = await sessionFor(request, env, dependencies);
   if (!session) return redirect(`${origin}/auth/login?return_to=${encodeURIComponent(safeReturnTo(new URL(request.url).searchParams.get("return_to"), origin))}`);
-  const response = await startLogin(request, env, { purpose: "reauth", sessionKey: session.key });
+  const response = await startLogin(request, env, dependencies, { purpose: "reauth", sessionKey: session.key });
   return attachRefresh(response, session.refreshCookie);
 }
 
@@ -1119,12 +1126,28 @@ async function handleRequest(request, env, ctx, dependencies) {
       }
       const origin = dealroomOriginForRequest(request, env);
       if (!origin) return json({ error: "not_found" }, 404);
-      env = envForDealroomOrigin(env, origin);
       const url = new URL(request.url);
       const publicResponse = await publicShellAsset(env, request, url.pathname);
       if (publicResponse) return publicResponse;
+      const configuredCutoff = env.APP_BROWSER_SESSION_CUTOFF;
+      let browserSessionCutoff;
+      if (configuredCutoff !== undefined) {
+        const dedicatedOrigin = doctorcreAppOrigin(env);
+        if (env.DOCTORCRE_APP_HOST !== undefined && !dedicatedOrigin) {
+          return json({ error: "invalid_doctorcre_app_host" }, 503);
+        }
+        const appOrigin = dedicatedOrigin ?? (env.APP_HOST ? primaryOrigin : null);
+        if (origin === appOrigin) {
+          browserSessionCutoff = typeof configuredCutoff === "string" ? Date.parse(configuredCutoff) : NaN;
+          if (!Number.isFinite(browserSessionCutoff) ||
+              new Date(browserSessionCutoff).toISOString() !== configuredCutoff) {
+            return json({ error: "invalid_app_browser_session_cutoff" }, 503);
+          }
+        }
+      }
+      env = envForDealroomOrigin(env, origin, browserSessionCutoff);
       if (url.pathname === "/auth/e2e-session") return e2eSession(request, env, dependencies);
-      if (url.pathname === "/auth/login" && request.method === "GET") return startLogin(request, env);
+      if (url.pathname === "/auth/login" && request.method === "GET") return startLogin(request, env, dependencies);
       if (url.pathname === "/auth/callback" && request.method === "GET") return completeLogin(request, env, dependencies);
       if (url.pathname === "/auth/reauth" && request.method === "GET") return startReauth(request, env, dependencies);
       // The first prototype's workspace API was intentionally retired. Keep
