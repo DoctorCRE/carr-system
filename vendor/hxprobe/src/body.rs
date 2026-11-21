@@ -53,36 +53,12 @@ impl Sidecars {
     }
 }
 
-/// Strip tags and decode entities, yielding readable text.
+/// Tags whose open or close starts a new line. `<br>` always adds one, so it is handled apart.
+const BLOCKS: &[&str] = &["p", "div", "tr", "li", "td", "h1", "h2", "h3", "blockquote", "hr"];
+
+/// Strip tags and decode entities, yielding readable text that keeps the message's line breaks.
 pub fn html_to_text(html: &str) -> String {
-    let mut out = String::with_capacity(html.len() / 2);
-    let mut rest = html;
-    let mut skip = 0usize;
-    while let Some(c) = rest.chars().next() {
-        if c == '<' {
-            let Some(e) = rest.find('>') else { break };
-            let name: String = rest[1..e]
-                .chars()
-                .take_while(|c| c.is_ascii_alphanumeric() || *c == '/')
-                .collect::<String>()
-                .to_ascii_lowercase();
-            match name.as_str() {
-                "script" | "style" | "head" => skip += 1,
-                "/script" | "/style" | "/head" => skip = skip.saturating_sub(1),
-                // Block-level closes become a space so words either side of a
-                // tag do not run together.
-                "br" | "/p" | "/div" | "/tr" | "/li" | "/h1" | "/h2" | "/h3" | "/td" if skip == 0 => out.push(' '),
-                _ => {}
-            }
-            rest = &rest[e + 1..];
-            continue;
-        }
-        if skip == 0 {
-            out.push(c);
-        }
-        rest = &rest[c.len_utf8()..];
-    }
-    let out = out
+    let text = strip_tags(html)
         .replace("&nbsp;", " ")
         .replace("&amp;", "&")
         .replace("&lt;", "<")
@@ -92,23 +68,68 @@ pub fn html_to_text(html: &str) -> String {
         .replace("&apos;", "'")
         .replace("&mdash;", "-")
         .replace("&ndash;", "-");
-    let mut text = String::with_capacity(out.len());
-    let mut last_ws = false;
-    for c in out.chars() {
-        if c.is_control() && c != '\n' {
+    fold_lines(&text)
+}
+
+/// Tags become line breaks; whitespace in the HTML source, newlines included, is only a space.
+fn strip_tags(html: &str) -> String {
+    let mut out = String::with_capacity(html.len() / 2);
+    let mut rest = html;
+    let mut skip = 0usize;
+    let mut line_start = true;
+    while let Some(c) = rest.chars().next() {
+        if c == '<' {
+            let Some(e) = rest.find('>') else { break };
+            let tag = &rest[1..e];
+            let close = tag.starts_with('/');
+            let name = tag.trim_start_matches('/')
+                .split(|c: char| !c.is_ascii_alphanumeric()).next().unwrap_or_default()
+                .to_ascii_lowercase();
+            match name.as_str() {
+                "script" | "style" | "head" if close => skip = skip.saturating_sub(1),
+                "script" | "style" | "head" => skip += 1,
+                "br" if skip == 0 => { out.push('\n'); line_start = true; }
+                n if skip == 0 && !line_start && BLOCKS.contains(&n) => { out.push('\n'); line_start = true; }
+                _ => {}
+            }
+            rest = &rest[e + 1..];
             continue;
         }
-        if c.is_whitespace() {
-            if !last_ws {
-                text.push(' ');
+        if skip == 0 {
+            if c.is_ascii_whitespace() {
+                out.push(' ');
+            } else if !c.is_control() {
+                out.push(c);
+                line_start = false;
             }
-            last_ws = true;
-        } else {
-            text.push(c);
-            last_ws = false;
         }
+        rest = &rest[c.len_utf8()..];
     }
-    text.trim().to_string()
+    out
+}
+
+/// Every whitespace run, newlines included, becomes one space; the ends are trimmed.
+pub fn fold_spaces(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Fold each line's whitespace and keep at most one blank line in a row.
+fn fold_lines(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut blank = false;
+    for line in text.split('\n') {
+        let line = fold_spaces(line);
+        if line.is_empty() {
+            blank = !out.is_empty();
+            continue;
+        }
+        if !out.is_empty() {
+            out.push_str(if blank { "\n\n" } else { "\n" });
+        }
+        out.push_str(&line);
+        blank = false;
+    }
+    out
 }
 
 #[cfg(test)]
@@ -152,7 +173,46 @@ mod tests {
     #[test]
     fn html_becomes_text_without_markup_and_keeps_unicode() {
         let html = "<html><head><style>p{}</style></head><body><p>Caf\u{e9} &amp; tour</p><div>Thursday \u{2013} ten</div></body></html>";
-        assert_eq!(html_to_text(html), "Caf\u{e9} & tour Thursday \u{2013} ten");
+        assert_eq!(html_to_text(html), "Caf\u{e9} & tour\nThursday \u{2013} ten");
+    }
+
+    #[test]
+    fn paragraphs_and_breaks_keep_their_lines() {
+        let html = "<p>Hi Sam,</p><p>Call <b>Pat</b> at <a href=\"x\">the office</a>.<br/>Bring\r\n the keys.   </p>";
+        assert_eq!(html_to_text(html), "Hi Sam,\nCall Pat at the office.\nBring the keys.");
+    }
+
+    #[test]
+    fn blank_lines_fold_to_one() {
+        let outlook = "<p class=MsoNormal>Thanks,<o:p></o:p></p>\r\n<p class=MsoNormal><o:p>&nbsp;</o:p></p>\r\n\
+                       <p class=MsoNormal>\u{a0}</p><p class=MsoNormal>Pat\r\nExample</p>";
+        assert_eq!(html_to_text(outlook), "Thanks,\n\nPat Example");
+        assert_eq!(html_to_text("<div><div>a</div></div><br><br><br><div>b</div>"), "a\n\nb");
+    }
+
+    #[test]
+    fn table_signature_puts_each_cell_on_its_own_line() {
+        let html = "<p>Best,</p><table><tr><td>Pat Example</td></tr>\n<tr><td>Broker | Example Realty</td></tr>\
+                    <tr><td>555-0100</td><td>pat@example.com</td></tr></table>";
+        assert_eq!(html_to_text(html), "Best,\nPat Example\nBroker | Example Realty\n555-0100\npat@example.com");
+    }
+
+    #[test]
+    fn outlook_reply_header_starts_on_its_own_lines() {
+        let html = "<div>See you then.</div><hr style=\"display:inline-block;width:98%\"><div id=\"divRplyFwdMsg\">\
+                    <font face=\"Calibri\"><b>From:</b> Sam Example &lt;sam@example.com&gt;<br><b>Sent:</b> Monday, \
+                    November 2, 2026 9:00 AM<br><b>To:</b> Pat Example<br><b>Subject:</b> Tour</font><div>&nbsp;</div>\
+                    </div><div>Does Thursday work?</div>";
+        assert_eq!(html_to_text(html), "See you then.\nFrom: Sam Example <sam@example.com>\n\
+            Sent: Monday, November 2, 2026 9:00 AM\nTo: Pat Example\nSubject: Tour\n\nDoes Thursday work?");
+    }
+
+    #[test]
+    fn nested_quotes_keep_their_lines() {
+        let html = "<div dir=\"ltr\">Sounds good.</div><br><div class=\"gmail_quote\"><div>On Mon, Nov 2, 2026 \
+                    Sam wrote:<br></div><blockquote><div>Can we meet?<br><br>Sam</div><blockquote><div>Original \
+                    note</div></blockquote></blockquote></div>";
+        assert_eq!(html_to_text(html), "Sounds good.\n\nOn Mon, Nov 2, 2026 Sam wrote:\nCan we meet?\n\nSam\nOriginal note");
     }
 
     #[test]

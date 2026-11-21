@@ -776,7 +776,8 @@ impl<'a> Row<'a> {
             (Completeness::Unknown, reason)
         } else if m.body_rejected > 0 {
             (Completeness::Unknown, "body_rejected")
-        } else if html.is_some() && !body.is_empty() && m.preview.as_deref() != Some(body.as_str()) {
+        } else if html.is_some() && !body.is_empty()
+            && m.preview.as_deref() != Some(body::fold_spaces(&body).as_str()) {
             (Completeness::Complete, "complete")
         } else if m.preview.as_ref().is_some_and(|p| !p.is_empty()) {
             (Completeness::Preview, "preview")
@@ -811,6 +812,7 @@ mod completeness_tests {
     fn preview_equality_and_unverified_format_do_not_establish_completeness() {
         for (html, preview, expected) in [
             ("<p>Same text</p>", "Same text", Completeness::Preview),
+            ("<p>Same</p><p>text</p>", "Same text", Completeness::Preview),
             ("decoded gzip payload", "Preview", Completeness::Unknown),
             ("<p> </p>", "Preview", Completeness::Preview),
         ] {
