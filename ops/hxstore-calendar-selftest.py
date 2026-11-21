@@ -40,7 +40,7 @@ def candidate(attendees=(), start=1_793_000_000, metadata=0, response=0, *,
         obj.extend(bytes([len(raw)]) + raw)
     for text in (subject if first_subject is None else first_subject, 'Example Room', 'Ada Example',
                  organizer, 'Owner Example', notes, subject):
-        obj.extend((text + '\0').encode('utf-16le'))
+        obj.extend((text + '\0').encode('utf-16le', errors='surrogatepass'))
     if not omit_attendee_count:
         obj.extend(struct.pack('<I', len(attendees)))
     for name, email in attendees:
@@ -127,6 +127,14 @@ class CalendarExportTests(unittest.TestCase):
         self.assertEqual(counts['calendar_agenda_canceled'], 1)
         self.assertEqual(snapshot['items'], [])
 
+    def test_address_free_cancellation_hides_an_undecoded_account_copy(self):
+        snapshot, counts = self.project(
+            candidate(first_subject='Planning', subject='Review'),
+            candidate(subject='会議', first_subject='Cancelled: 会議', organizer=''))
+        self.assertEqual(counts['calendar_agenda_undecoded'], 1)
+        self.assertEqual(counts['calendar_agenda_canceled'], 1)
+        self.assertEqual(snapshot['items'], [])
+
     def test_address_free_duplicate_keeps_the_account_copy(self):
         original = candidate(subject='Plan')
         duplicate = candidate(subject='会議 📅', organizer='')
@@ -142,13 +150,41 @@ class CalendarExportTests(unittest.TestCase):
         self.assertEqual(counts['calendar_agenda_other_accounts'], 1)
         self.assertEqual(snapshot['items'], [])
 
+    def test_foreign_duplicate_blocks_even_when_its_subject_is_undecoded(self):
+        original = candidate(subject='Plan')
+        for first_subject in ('Planning', '\ud800'):
+            for evidence in ({'organizer': 'bo@example.test'},
+                             {'organizer': '', 'attendees': [('Bo Example', 'bo@example.test')]}):
+                with self.subTest(first_subject=first_subject, evidence=evidence):
+                    snapshot, counts = self.project(
+                        original, candidate(first_subject=first_subject, subject='Review', **evidence))
+                    self.assertEqual(snapshot['items'], [])
+                    self.assertEqual(counts['calendar_agenda_other_accounts'], 1)
+                    self.assertIn({'code': 'undecoded', 'count': 1}, snapshot['warnings'])
+
+    def test_address_free_undecoded_duplicate_keeps_the_account_title(self):
+        snapshot, counts = self.project(
+            candidate(subject='Plan'),
+            candidate(first_subject='Planning', subject='Review', organizer=''))
+        self.assertEqual(counts['calendar_agenda_undecoded'], 1)
+        self.assertEqual([item['title'] for item in snapshot['items']], ['Plan'])
+
+    def test_undecoded_winning_copy_keeps_its_own_title_state(self):
+        snapshot, counts = self.project(
+            candidate(subject='A readable title'),
+            candidate([('Bo Example', 'bo@example.test')], first_subject='Planning', subject='Review'))
+        self.assertEqual(counts['calendar_agenda_undecoded'], 1)
+        [item] = snapshot['items']
+        self.assertEqual(item['title'], 'Meeting title unreadable')
+        self.assertEqual(item['attendee_count'], 1)
+
     def test_conflicting_subject_slots_count_as_undecoded(self):
         snapshot, counts = self.project(candidate(
             [('Ada Example', 'ada@example.test')], first_subject='Planning',
             subject='Review', notes='Example Room'))
         self.assertEqual(counts['calendar_agenda_undecoded'], 1)
         self.assertIn({'code': 'undecoded', 'count': 1}, snapshot['warnings'])
-        self.assertEqual(snapshot['items'], [])
+        self.assertEqual([item['title'] for item in snapshot['items']], ['Meeting title unreadable'])
 
     def test_warning_counts_only_unreadable_identities_before_date_filter(self):
         snapshot, counts = self.project(

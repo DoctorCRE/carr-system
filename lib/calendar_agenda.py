@@ -90,9 +90,10 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
         if any(e.get('lifecycle_status') == 'canceled' or CANCELED.match(e['subject'] or '') for e in group):
             counts['calendar_agenda_canceled'] += 1
             continue
-        shown = max(current or recent, key=lambda e: (len(e['attendees']), len(e['subject'] or ''), e['end_unix']))
+        shown = max(current or recent, key=lambda e: (len(e['attendees']), e['end_unix']))
         starts = sorted({e['start_unix'] for e in group})
-        conflict = len({json.dumps([e['subject'], e['location'], e['end_unix'] - e['start_unix'],
+        conflict = len({json.dumps([e['subject'], bool(e.get('subject_undecoded')), e['location'],
+                                    e['end_unix'] - e['start_unix'],
                                     sorted((n or '', m or '') for n, m in e['attendees'])]) for e in candidates}) > 1
         recurring = _instance(goid) != '00000000'
         start, end = shown['start_unix'], shown['end_unix']
@@ -102,9 +103,10 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
         counts['calendar_agenda_time_changed'] += len(starts) > 1
         counts['calendar_agenda_recurring'] += recurring
         attendees = [{'name': name or None, 'email': (email or '').lower() or None} for name, email in shown['attendees']]
+        title = 'Meeting title unreadable' if shown.get('subject_undecoded') else shown['subject'] or 'Meeting'
         item = {'key': _hash(goid)[:16], 'start': _iso(start), 'end': _iso(end),
                       'all_day': local.time() == local_end.time() == time() and local_end.date() > local.date(),
-                      'title': shown['subject'] or 'Meeting', 'location': shown['location'] or None,
+                      'title': title, 'location': shown['location'] or None,
                       'organizer': {'name': shown['organizer_name'] or None,
                                     'email': (shown['organizer_email'] or '').lower() or None},
                       'attendees': attendees[:AGENDA_ATTENDEES], 'attendee_count': len(attendees),
@@ -122,7 +124,9 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
     items.sort(key=lambda i: (i['start'], i['title'], i['key']))
     counts['calendar_follow_up_trimmed'] = max(0, len(reviews) - 100)
     del reviews[100:]
-    undecoded = max(0, (meta.get('event_identities') or 0) - len({(e['goid'], e['start_unix']) for e in events}))
+    identities = {(e['goid'], e['start_unix']) for e in events}
+    unreadable_titles = {(e['goid'], e['start_unix']) for e in events if e.get('subject_undecoded')}
+    undecoded = max(0, (meta.get('event_identities') or 0) - len(identities)) + len(unreadable_titles)
     warnings: list[dict] = [{'code': 'responses_unverified'}, {'code': 'group_invites_not_shown'}]
     if undecoded:
         warnings.append({'code': 'undecoded', 'count': undecoded})

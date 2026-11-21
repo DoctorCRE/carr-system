@@ -31,8 +31,8 @@
 //!
 //! When both time-zone strings and all seven text slots can be read in order,
 //! the paired subject slots establish the title, even when it is blank.
-//! Conflicting subject slots stay undecoded. Other layouts use the repeated
-//! subject and adjacent organizer fields.
+//! Conflicting subject slots leave the title undecoded and keep participant
+//! evidence. Other layouts use the repeated subject and adjacent organizer fields.
 //!
 //! Global Object ID plus start groups observed schedule candidates. It cannot
 //! distinguish a moved occurrence from a recurring exception. Cancellation,
@@ -85,6 +85,7 @@ pub struct Event {
     pub goid: String,
     pub start_unix: i64,
     pub end_unix: i64,
+    /// None is unreadable. An empty string is a confirmed blank subject.
     pub subject: Option<String>,
     pub location: Option<String>,
     pub organizer_name: Option<String>,
@@ -234,7 +235,7 @@ fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
     })
 }
 
-fn ordered_fields(after_goid: &[u8]) -> Option<([String; 7], &[u8])> {
+fn ordered_fields(after_goid: &[u8]) -> Option<([&[u8]; 7], &[u8])> {
     let mut bytes = after_goid.strip_prefix(&[0, 0])?;
     for _ in 0..2 {
         let (&len, rest) = bytes.split_first()?;
@@ -244,29 +245,32 @@ fn ordered_fields(after_goid: &[u8]) -> Option<([String; 7], &[u8])> {
         }
         bytes = remaining;
     }
-    let mut fields: [String; 7] = Default::default();
+    let mut fields = [&[][..]; 7];
     for field in &mut fields {
         let end = bytes.chunks_exact(2).position(|pair| pair == [0, 0])? * 2;
-        *field = String::from_utf16(&utf16(&bytes[..end])).ok()?;
+        *field = &bytes[..end];
         bytes = &bytes[end + 2..];
     }
     Some((fields, bytes))
 }
 
-fn ordered_event(fields: [String; 7], remaining: &[u8]) -> Option<Event> {
-    let [first_subject, location, organizer_name, organizer_email, _, body, subject] = fields;
-    let canceled = CANCELED.iter().any(|prefix| first_subject.strip_prefix(prefix) == Some(subject.as_str()));
-    if first_subject != subject && !canceled {
-        return None;
-    }
-    let present = |s: String| (!s.is_empty()).then_some(s);
+fn ordered_event(fields: [&[u8]; 7], remaining: &[u8]) -> Option<Event> {
+    let [first, location, organizer_name, organizer_email, _, body, subject] = fields;
     let attendees = if remaining.is_empty() { Vec::new() } else { attendees_at(remaining, 0)? };
+    let text = |field: &[u8]| String::from_utf16(&utf16(field)).ok();
+    let (subject, canceled) = match (text(first), text(subject)) {
+        (Some(first), Some(subject)) if first == subject => (Some(subject), false),
+        (Some(first), Some(subject)) if CANCELED.iter().any(|prefix| first.strip_prefix(prefix) == Some(&subject)) => {
+            (Some(subject), true)
+        }
+        _ => (None, false),
+    };
     Some(Event {
-        subject: present(subject),
-        location: present(location),
-        organizer_name: present(organizer_name),
-        organizer_email: is_email(&organizer_email).then_some(organizer_email),
-        body: (body.contains("\r\n") || body.chars().count() > 60).then_some(body),
+        subject,
+        location: text(location).filter(|s| !s.is_empty()),
+        organizer_name: text(organizer_name).filter(|s| !s.is_empty()),
+        organizer_email: text(organizer_email).filter(|s| is_email(s)),
+        body: text(body).filter(|s| s.contains("\r\n") || s.chars().count() > 60),
         attendees,
         canceled,
         ..Event::default()
@@ -314,26 +318,27 @@ fn repeated_fields(obj: &[u8], g: usize) -> Option<Event> {
             }
         }
     }
-    let (subject_at, subject) = subject?;
-
     let (mut organizer_name, mut organizer_email, mut location) = (None, None, None);
     if let Some(i) = parts.iter().position(|x| is_email(x)) {
         organizer_email = Some(parts[i].clone());
         organizer_name = i.checked_sub(1).map(|k| parts[k].clone()).filter(|s| !s.is_empty());
-        if i >= 3 && subject_at == i - 3 {
+        if i >= 3 && subject.is_some_and(|(at, _)| at == i - 3) {
             location = Some(parts[i - 2].clone()).filter(|s| !s.is_empty());
         }
     }
+    let subject = subject.map(|(_, subject)| subject);
     let body = parts
         .iter()
-        .filter(|x| x.as_str() != subject && (x.contains("\r\n") || width(x) > 60))
+        .filter(|x| Some(x.as_str()) != subject && (x.contains("\r\n") || width(x) > 60))
         .max_by_key(|x| width(x))
         .cloned();
 
     // The first copy's run can start with the tail of the time-zone tables.
-    let canceled = raw.iter().any(|r| CANCELED.iter().any(|p| r.ends_with(&format!("{p}{subject}"))));
+    let canceled = subject.is_some_and(|subject| {
+        raw.iter().any(|r| CANCELED.iter().any(|p| r.ends_with(&format!("{p}{subject}"))))
+    });
     Some(Event {
-        subject: Some(subject.to_string()),
+        subject: subject.map(str::to_owned),
         location,
         organizer_name,
         organizer_email,
@@ -549,12 +554,14 @@ mod tests {
     }
 
     #[test]
-    fn a_prefix_on_another_subject_leaves_the_identity_undecoded() {
+    fn a_prefix_on_another_subject_leaves_the_title_undecoded() {
         let obj = object_with(true, "Canceled: Something Else Quarterly Site Review", &[]);
         let mut idx = Index::default();
         idx.observe(&envelope(&obj));
-        assert_eq!(idx.identities.len(), 1);
-        assert!(idx.events.is_empty());
+        let ev = idx.events.values().next().expect("participant evidence");
+        assert_eq!(ev.subject, None);
+        assert!(!ev.canceled);
+        assert_eq!(ev.organizer_email.as_deref(), Some("ada@example.test"));
     }
 
     #[test]
