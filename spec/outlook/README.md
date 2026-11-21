@@ -45,6 +45,33 @@ Emails waiting for a full body can file in a later scheduled run.
 A real run uses the configured filing route and the existing request keys.
 Scheduled intake handles retries outside the catch-up window.
 
+## Lead-source notices
+
+With `engine_mail` enabled, live intake reads `GET /jobs/leads/sources` once
+per processing run. The engine registers each source by exact sender address
+or domain. Exact addresses take precedence. A source can set its own field
+labels for name, request, email, phone, street address and city. The defaults
+are Name, Request, Email, Phone, Street Address and City. A label and its colon
+may start a line or follow a space. Its value runs to the line end, the next
+label or a ` · ` separator. Each ` · ` part after the value that is an email
+address or a phone number adds that fact, and a dash adds none.
+
+A complete notice from a registered external sender needs a name, a request
+when the source labels one, and at least one contact fact from the body. That may be an email address
+distinct from the sender, a phone number, or both a street address and a city.
+Intake sends the full decoded message, its normalized Message-ID and a
+verbatim excerpt to `POST /jobs/leads/email-intake` before filing review.
+A preview from a known source waits for the full body within the normal body
+wait. Incomplete and refused notices follow the regular mail path. A failed
+source lookup leaves new mail on the regular path and holds any already
+submitted lead intake for a retry with the same payload and key. Engine
+deduplicates lead intake by Message-ID across mailboxes.
+
+Accepted notices create or join a lead's correspondence. With `engine_router`
+enabled, the router skips filing for a message linked to a lead by intake.
+Any separate follow-up or reply draft still uses the regular review path.
+Direct inquiries continue through regular mail review.
+
 ## Data contract
 
 `outlook-surface-atlas/v1` contains these fields.

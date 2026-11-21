@@ -1,4 +1,4 @@
-"""Mail intake's Engine client for emails, attachments, lead suggestions and agendas.
+"""Mail intake's Engine client for emails, attachments, lead intake, suggestions and agendas.
 
 The doors are fixed in the engine repository's docs/new-database.md, "Doors the old
 system calls". Intake calls them only when outlook.json sets engine_mail; otherwise
@@ -46,6 +46,8 @@ JOB = 'mail_capture'
 CREDENTIALS = ('ENGINE_URL', 'ENGINE_ACCESS_CLIENT_ID', 'ENGINE_ACCESS_CLIENT_SECRET')
 CALLER = frozenset({'unauthorized', 'unknown_job', 'actor_not_provisioned'})
 SLUG = re.compile(r'[a-z][a-z0-9_]{0,63}')
+DEFAULT_LEAD_FIELDS = {'name': 'Name', 'email': 'Email', 'phone': 'Phone',
+                       'street_address': 'Street Address', 'city': 'City', 'request': 'Request'}
 
 
 @dataclass(frozen=True)
@@ -180,6 +182,40 @@ class Mailbox:
         return entry.setdefault('lead_identity', {
             field: email[field] for field in ('message_id', 'conversation_id') if field in email})
 
+    def lead_sources(self) -> dict[str, dict[str, str]] | None:
+        reply = self.door('GET', '/jobs/leads/sources', None)
+        senders = reply.body.get('senders')
+        if verdict(reply) != 'done' or not isinstance(senders, list):
+            self.count('engine_lead_sources_unavailable')
+            return None
+        sources: dict[str, dict[str, str]] = {}
+        for source in senders:
+            if not isinstance(source, dict):
+                continue
+            address, domain = source.get('address'), source.get('domain')
+            key = address or domain
+            if bool(address) == bool(domain) or not isinstance(key, str):
+                continue
+            fields = source.get('fields')
+            if fields is None:
+                sources[key.lower()] = DEFAULT_LEAD_FIELDS
+            elif isinstance(fields, dict) and 'name' in fields and all(
+                field in DEFAULT_LEAD_FIELDS and isinstance(label, str) and label.strip()
+                for field, label in fields.items()
+            ):
+                sources[key.lower()] = fields
+        return sources
+
+    def waits_for_body(self, message_id: str) -> bool:
+        entry = self.emails.get(message_id)
+        return entry is not None and 'request' not in entry
+
+    def lead_intake_state(self, message_id: str | None) -> str | None:
+        entry = self.emails.get(message_id or '', {})
+        if entry.get('request', {}).get('kind') == 'lead_source':
+            return 'settled' if 'outcome' in entry else 'pending'
+        return None
+
     def _stage_emails(self) -> None:
         for message_id, (ready, _, sent, inbound, activity) in self.offers.items():
             entry = self.emails.setdefault(message_id, {'sent': sent, 'seen': self.at})
@@ -188,11 +224,14 @@ class Mailbox:
             if not ready and self.at - entry['seen'] < FULL_TEXT_WAIT.total_seconds():
                 self.count('engine_emails_waiting')
                 continue
-            if identity := entry.pop('lead_identity', None):
+            identity = entry.pop('lead_identity', None)
+            lead_notice = activity['kind'] == 'lead_source'
+            if identity and not lead_notice:
                 email = dict(activity['email'])
                 email.pop('conversation_id', None)
                 activity = {**activity, 'email': {**email, **identity}}
-            entry.update(inbound=inbound, request={'idempotency_key': self.key(message_id, 'activity'), **activity})
+            step = 'lead-intake' if lead_notice else 'activity'
+            entry.update(inbound=inbound, request={'idempotency_key': self.key(message_id, step), **activity})
 
     def email_requests(self, since: int | None) -> dict[str, dict]:
         self._stage_emails()
@@ -201,11 +240,23 @@ class Mailbox:
                 and (since is None or (mid in self.offers
                      and datetime.fromisoformat(entry['request']['happened_at']).timestamp() >= since))}
 
-    def send_emails(self, since: int | None = None) -> None:
+    def send_emails(self, since: int | None = None, *, lead_sources_available: bool = True) -> None:
         requests = self.email_requests(since)
         self.save()
         for mid, request in requests.items():
-            self.answer(self.emails[mid], self.post('/jobs/activities', request), 'emails')
+            entry = self.emails[mid]
+            if request['kind'] == 'lead_source':
+                if not lead_sources_available:
+                    continue
+                reply = self.post('/jobs/leads/email-intake', request)
+                if verdict(reply) != 'settled' or reply.error == 'key_reuse':
+                    self.answer(entry, reply, 'emails')
+                    continue
+                self.count('engine_lead_intake_' + reply.error)
+                request = {'idempotency_key': self.key(mid, 'activity'), 'kind': 'email',
+                           'happened_at': request['happened_at'], 'email': request['email']}
+                entry['request'] = request
+            self.answer(entry, self.post('/jobs/activities', request), 'emails')
         self.save()
 
     def upload(self, source: str, data: bytes, name: str, message_id: str | None, deal_id: str) -> str:
