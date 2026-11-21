@@ -214,13 +214,15 @@ Synthetic tests prove candidate separation and fail-closed labeling only.
 Native decoder validation and controlled test-account format research are still
 required before current calendar lifecycle or completeness can be claimed.
 
-When the two length-prefixed time-zone strings and all seven text fields can
-be read in order, the decoder uses the two subject slots to confirm the title.
-Short and Unicode titles are kept, and two empty subject slots yield a null
-title. Conflicting or unreadable subject slots set `events.subject_undecoded`
-and keep the copy's organizer and attendees. A remaining attendee block must
-parse through the end of the object. Revisions with other field layouts still
-use the repeated-text search.
+The legacy decoder still supplies the schedule, organizer, attendees and
+cancellation for each copy it can read. The title is kept when the two subject
+slots agree and their text differs from the other fields. A disagreeing,
+unreadable or ambiguous title sets `events.subject_undecoded` on the same copy.
+
+Copies the legacy decoder cannot read can still export from the seven-field
+layout. It supports short and Unicode titles and confirms a blank title when
+both subject slots are empty. An attendee block, if present in this layout,
+must parse through the end of the object.
 
 An object whose NUL-terminated fields run to its end, with no attendee count,
 decodes with no attendees. The 2026-10-21 TEST-account study pair showed such an

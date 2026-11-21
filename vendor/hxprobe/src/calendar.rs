@@ -29,10 +29,8 @@
 //! The same class also serializes working-hours blocks. Those carry no Global
 //! Object ID, which is what separates them from meetings.
 //!
-//! When both time-zone strings and all seven text slots can be read in order,
-//! the paired subject slots establish the title, even when it is blank.
-//! Conflicting subject slots leave the title undecoded and keep participant
-//! evidence. Other layouts use the repeated subject and adjacent organizer fields.
+//! Copies the legacy decoder reads keep that decoder's schedule and participant
+//! evidence. A title needs matching subject slots and cannot repeat another field.
 //!
 //! Global Object ID plus start groups observed schedule candidates. It cannot
 //! distinguish a moved occurrence from a recurring exception. Cancellation,
@@ -221,63 +219,72 @@ fn ends_at_repeated_subject(obj: &[u8], g: usize) -> bool {
 
 fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
     let g = memchr::memmem::find(obj, &GOID_PREFIX.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<u8>>())?;
-    let after_goid = &obj[g + goid.len() * 2..];
-    let fields = match ordered_fields(after_goid) {
-        Some((fields, remaining)) => ordered_event(fields, remaining)?,
-        None => repeated_fields(obj, g)?,
+    let text_at = |text_end| {
+        let bytes = obj.get(g + goid.len() * 2..text_end)?.strip_prefix(&[0, 0])?;
+        Some(skip_zones(bytes).unwrap_or(bytes))
     };
+    if let Some((mut copy, text_end)) = legacy_copy(obj, g, &goid, start, end) {
+        let title = text_at(text_end).and_then(|bytes| {
+            let words = utf16(bytes);
+            let slots: Vec<_> = words.strip_suffix(&[0])?.split(|unit| *unit == 0).collect();
+            confirmed_subject(&slots).0
+        });
+        copy.subject = copy.subject.filter(|subject| title.as_ref() == Some(subject));
+        return Some(copy);
+    }
+
+    let bytes = text_at(obj.len())?;
+    let words = utf16(bytes);
+    let fields: Vec<_> = words.split(|unit| *unit == 0).take(7).collect();
+    let &[_, location, name, email, _, notes, _] = fields.as_slice() else { return None };
+    let text_len = fields.iter().map(|field| (field.len() + 1) * 2).sum::<usize>();
+    let tail = bytes.get(text_len..)?;
+    let attendees = if tail.is_empty() { Vec::new() } else { attendees_at(tail, 0)? };
+    let (subject, canceled) = confirmed_subject(&fields);
+    let text = |field| String::from_utf16(field).ok().filter(|s| !s.is_empty());
     Some(Event {
         goid,
         start_unix: start,
         end_unix: end,
+        subject,
+        location: text(location),
+        organizer_name: text(name),
+        organizer_email: text(email).filter(|s| is_email(s)),
+        body: text(notes).filter(|s| s.contains("\r\n") || s.chars().count() > 60),
+        attendees,
+        canceled,
         occurrence: obj[OCCURRENCE..OCCURRENCE + 8] == obj[START..START + 8],
-        ..fields
     })
 }
 
-fn ordered_fields(after_goid: &[u8]) -> Option<([&[u8]; 7], &[u8])> {
-    let mut bytes = after_goid.strip_prefix(&[0, 0])?;
+fn skip_zones(mut bytes: &[u8]) -> Option<&[u8]> {
     for _ in 0..2 {
         let (&len, rest) = bytes.split_first()?;
         let (zone, remaining) = rest.split_at_checked(usize::from(len))?;
-        if len % 2 != 0 || String::from_utf16(&utf16(zone)).is_err() {
+        let zone = utf16(zone);
+        if len % 2 != 0 || zone.contains(&0) || String::from_utf16(&zone).is_err() {
             return None;
         }
         bytes = remaining;
     }
-    let mut fields = [&[][..]; 7];
-    for field in &mut fields {
-        let end = bytes.chunks_exact(2).position(|pair| pair == [0, 0])? * 2;
-        *field = &bytes[..end];
-        bytes = &bytes[end + 2..];
+    Some(bytes)
+}
+
+fn confirmed_subject(fields: &[&[u16]]) -> (Option<String>, bool) {
+    let [first, middle @ .., last] = fields else { return (None, false) };
+    if middle.len() < 4 {
+        return (None, false);
     }
-    Some((fields, bytes))
-}
-
-fn ordered_event(fields: [&[u8]; 7], remaining: &[u8]) -> Option<Event> {
-    let [first, location, organizer_name, organizer_email, _, body, subject] = fields;
-    let attendees = if remaining.is_empty() { Vec::new() } else { attendees_at(remaining, 0)? };
-    let text = |field: &[u8]| String::from_utf16(&utf16(field)).ok();
-    let (subject, canceled) = match (text(first), text(subject)) {
-        (Some(first), Some(subject)) if first == subject => (Some(subject), false),
-        (Some(first), Some(subject)) if CANCELED.iter().any(|prefix| first.strip_prefix(prefix) == Some(&subject)) => {
-            (Some(subject), true)
-        }
-        _ => (None, false),
+    let (Ok(first), Ok(last_text)) = (String::from_utf16(first), String::from_utf16(last)) else {
+        return (None, false);
     };
-    Some(Event {
-        subject,
-        location: text(location).filter(|s| !s.is_empty()),
-        organizer_name: text(organizer_name).filter(|s| !s.is_empty()),
-        organizer_email: text(organizer_email).filter(|s| is_email(s)),
-        body: text(body).filter(|s| s.contains("\r\n") || s.chars().count() > 60),
-        attendees,
-        canceled,
-        ..Event::default()
-    })
+    let canceled = CANCELED.iter().any(|prefix| first.strip_prefix(prefix) == Some(&last_text));
+    let ambiguous = !last.is_empty() && middle.contains(last);
+    let title = (!ambiguous && (first == last_text || canceled)).then_some(last_text);
+    (title, canceled)
 }
 
-fn repeated_fields(obj: &[u8], g: usize) -> Option<Event> {
+fn legacy_copy(obj: &[u8], g: usize, goid: &str, start: i64, end: i64) -> Option<(Event, usize)> {
     // The earliest block that parses to the end. Scanning from the end instead
     // stops at the trailing status bytes, which read as a count of zero.
     // An item with no attendees (an own appointment, a block of time) carries
@@ -318,35 +325,38 @@ fn repeated_fields(obj: &[u8], g: usize) -> Option<Event> {
             }
         }
     }
+    let (subject_at, subject) = subject?;
+
     let (mut organizer_name, mut organizer_email, mut location) = (None, None, None);
     if let Some(i) = parts.iter().position(|x| is_email(x)) {
         organizer_email = Some(parts[i].clone());
         organizer_name = i.checked_sub(1).map(|k| parts[k].clone()).filter(|s| !s.is_empty());
-        if i >= 3 && subject.is_some_and(|(at, _)| at == i - 3) {
+        if i >= 3 && subject_at == i - 3 {
             location = Some(parts[i - 2].clone()).filter(|s| !s.is_empty());
         }
     }
-    let subject = subject.map(|(_, subject)| subject);
     let body = parts
         .iter()
-        .filter(|x| Some(x.as_str()) != subject && (x.contains("\r\n") || width(x) > 60))
+        .filter(|x| x.as_str() != subject && (x.contains("\r\n") || width(x) > 60))
         .max_by_key(|x| width(x))
         .cloned();
 
     // The first copy's run can start with the tail of the time-zone tables.
-    let canceled = subject.is_some_and(|subject| {
-        raw.iter().any(|r| CANCELED.iter().any(|p| r.ends_with(&format!("{p}{subject}"))))
-    });
-    Some(Event {
-        subject: subject.map(str::to_owned),
+    let canceled = raw.iter().any(|r| CANCELED.iter().any(|p| r.ends_with(&format!("{p}{subject}"))));
+    let occurrence = obj.get(OCCURRENCE..OCCURRENCE + 8) == obj.get(START..START + 8);
+    Some((Event {
+        goid: goid.to_owned(),
+        start_unix: start,
+        end_unix: end,
+        subject: Some(subject.to_string()),
         location,
         organizer_name,
         organizer_email,
         body,
         attendees,
         canceled,
-        ..Event::default()
-    })
+        occurrence,
+    }, ap))
 }
 
 #[cfg(test)]
