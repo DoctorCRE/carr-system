@@ -283,20 +283,22 @@ async function saveAssistantVerb(client, actor, verb, args, env) {
   if (verb === 'confirm-email-next-step') throw new ToolError({ error: 'engine_assistant_email_step_on_home' });
   const partner = partnerAuthoritySlugForActor(actor);
   const activity = verb === 'log-activity' && isEngineActivity(args);
-  const step = verb === 'set-next-action';
+  const docStep = verb === 'set-next-step';
   const completion = verb === 'complete-action';
   const dealNote = verb === 'add-deal-note';
-  const stepWrite = step || completion;
+  const stepSave = docStep || verb === 'set-next-action';
+  const stepWrite = stepSave || completion;
   if (!stepWrite && (!partner || (!activity && !dealNote))) return;
 
-  const guardedStep = step && (Object.hasOwn(args, 'expected_action') || Boolean(args.work_request));
-  const subject = stepWrite
+  const guardedStep = stepSave && (Boolean(args.work_request) || (!docStep && Object.hasOwn(args, 'expected_action')));
+  const dealOnly = docStep || dealNote;
+  const subject = stepWrite && !docStep
     ? await resolveAssistantStepSubject(client, args.ref)
-    : await resolveSubject(client, dealNote ? args.deal : args.ref);
-  if (dealNote && subject.type !== 'deal') throw new ToolError({ error: "not_a_deal", resolved: subject });
+    : await resolveSubject(client, dealOnly ? args.deal : args.ref);
+  if (dealOnly && subject.type !== 'deal') throw new ToolError({ error: "not_a_deal", resolved: subject });
   const oldRole = stepWrite ? assistantOldRole(subject.type, subject.id) : null;
-  if (oldRole && !partner) throw new ToolError({ error: 'human_approval_required' });
-  if (oldRole && guardedStep) throw new ToolError({ error: 'engine_assistant_step_guard_unsupported' });
+  if ((oldRole || docStep) && !partner) throw new ToolError({ error: 'human_approval_required' });
+  if ((oldRole || docStep) && guardedStep) throw new ToolError({ error: 'engine_assistant_step_guard_unsupported' });
   if (!partner || guardedStep) return;
   if (subject.type !== 'deal' && !oldRole && !(completion && subject.type === 'party')) return;
 
@@ -345,22 +347,27 @@ async function saveAssistantVerb(client, actor, verb, args, env) {
     return { ok: true, activity_id: id, subject, ...(replayed && { replayed }) };
   }
 
-  const owner = args.owner === undefined || args.owner === null || args.owner === ''
-    ? partner : String(args.owner).trim().toLowerCase();
+  const requestedOwner = docStep ? undefined : args.owner;
+  const owner = requestedOwner === undefined || requestedOwner === null || requestedOwner === ''
+    ? partner : String(requestedOwner).trim().toLowerCase();
   if (!isKnownPartner(owner)) {
     if (oldRole) throw new ToolError({ error: 'owner_not_permitted' });
     return;
   }
 
-  assertDealRoomField('next_date', args.due_on || null, ToolError);
+  const what = docStep ? args.text.trim() : args.description;
+  if (docStep && !what) throw new ToolError({ error: 'text_required' });
+  const dueOn = docStep ? args.next_date ?? null : args.due_on || null;
+  assertDealRoomField('next_date', dueOn, ToolError);
   const { id, replayed } = await saveAssistantChange(env, partner, {
     path: '/jobs/next-steps', id: 'next_step_id', body: {
-      idempotency_key, what: args.description,
+      idempotency_key, what,
       replaces: 'current', ...(oldRole ? { old_role: oldRole } : { deal_id: subject.id }),
-      ...(args.due_on && { due_on: args.due_on }),
+      ...(dueOn && { due_on: dueOn }),
       ...(owner !== partner && { owner }),
     },
   });
+  if (docStep) return { ok: true, deal_id: subject.id, next_step_id: id, next_action_id: id, ...(replayed && { replayed }) };
   return { ok: true, next_action_id: id, subject, owner, ...(replayed && { replayed }) };
 }
 
@@ -9594,7 +9601,7 @@ registerTools({
 
   "set-next-step": {
     write: true,
-    description: "Replace the current next step and date using base_version from a fresh get-deal-room read. Conflicts require rereading and human review; retries retain the original key and version. The prior step remains attributed history.",
+    description: "Replace the current next step and date. Supply base_version from a fresh get-deal-room read. The engine atomically replaces the partner's current step. The legacy save checks base_version, and conflicts require rereading and human review. Retries retain the original key and version. The prior step remains attributed history.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, deal: { type: "string" }, text: { type: "string" },
       base_version: { type: "integer" },

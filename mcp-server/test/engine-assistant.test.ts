@@ -274,6 +274,67 @@ test("call-verb uses the partner grant and lets the engine default the owner", a
   });
 });
 
+test("the Doc profile saves a deal step as the signed-in partner and reuses its key on retry", async (t) => {
+  let attempts = 0;
+  const upstream = engine(t, () =>
+    ++attempts === 1
+      ? Response.json({ error: "database_unavailable" }, { status: 503 })
+      : Response.json({ next_step_id: savedId, replayed: true }, { status: 201 }),
+  );
+  const actor: unknown = worker(t);
+  const env = { ...upstream.env, DATABASE_URL_WRITER: "postgres://fixture@synthetic.invalid/fixture" };
+  const result = await callTool(
+    env,
+    actor,
+    "set-next-step",
+    {
+      idempotency_key: key,
+      deal,
+      text: "  Send sample measurements  ",
+      base_version: 7,
+      next_date: "2026-10-20",
+    },
+    "doc",
+  );
+  assert.deepEqual(result, {
+    ok: true,
+    deal_id: deal,
+    next_step_id: savedId,
+    next_action_id: savedId,
+    replayed: true,
+  });
+  assert.equal(upstream.calls.length, 2);
+  for (const request of upstream.calls) {
+    assert.equal(request.path, "/jobs/next-steps");
+    assert.equal(request.headers.get("Engine-Job"), "agent");
+    assert.equal(request.headers.get("Engine-For-User"), "dell");
+    assert.deepEqual(request.body, {
+      idempotency_key: key,
+      deal_id: deal,
+      what: "Send sample measurements",
+      replaces: "current",
+      due_on: "2026-10-20",
+    });
+  }
+});
+
+test("the Doc profile refuses a Work Request link before saving a deal step through the engine", async (t) => {
+  const upstream = engine(t, () => Response.json({ next_step_id: savedId }, { status: 201 }));
+  const actor: unknown = worker(t);
+  const env = { ...upstream.env, DATABASE_URL_WRITER: "postgres://fixture@synthetic.invalid/fixture" };
+  await assert.rejects(
+    callTool(
+      env,
+      actor,
+      "set-next-step",
+      { idempotency_key: key, deal, text: "Send sample measurements", base_version: 7, work_request: "WR-901" },
+      "doc",
+    ),
+    { payload: { error: "engine_assistant_step_guard_unsupported" } },
+  );
+  assert.equal(upstream.calls.length, 0);
+});
+
 test("untimed deal calls, meetings and notes let the engine assign the first save time", async (t) => {
   let attempts = 0;
   const upstream = engine(t, () =>
