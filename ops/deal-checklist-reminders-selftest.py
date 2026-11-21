@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
 # Test the deal checklist reminder sweep.
 import contextlib
+from datetime import datetime, timezone
 import importlib.util
 import io
 import json
 from pathlib import Path
 import sys
 import subprocess
+from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from lib.engine_mail import Reply
 from lib.record_call import OK, REFUSED, TRANSIENT, VerbResult
+from ops.outlook_test_support import write_settings
 
 SPEC = importlib.util.spec_from_file_location('checklist_reminders', ROOT / 'tools/deal-checklist-reminders.py')
 assert SPEC is not None and SPEC.loader is not None
@@ -20,6 +25,75 @@ reminders = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(reminders)
 
 DEAL = '10000000-0000-4000-8000-000000000001'
+
+
+class NightlyTests(unittest.TestCase):
+    def setUp(self):
+        self.home = Path(self.enterContext(TemporaryDirectory())).resolve()
+        self.credentials = self.home / 'engine.env'
+        self.enterContext(patch('lib.outlook_settings.Path.home', return_value=self.home))
+        self.connect = self.enterContext(patch('lib.engine_mail.connect'))
+        self.engine = self.connect.return_value
+
+    def run_nightly(self):
+        output, errors = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            rc = reminders.main(['--nightly'], call=lambda *_: self.fail('legacy call'))
+        return rc, output.getvalue(), errors.getvalue()
+
+    def enable_switch(self):
+        write_settings(self.home, self.home / 'repo', engine_checklist_reminders=True,
+                       engine_credentials=str(self.credentials))
+
+    def test_missing_and_disabled_switch_skip_without_calls_or_output(self):
+        self.assertEqual(reminders.main(['--check-nightly-switch']), 78)
+        self.assertEqual(self.run_nightly(), (78, '', ''))
+        write_settings(self.home, self.home / 'repo', engine_checklist_reminders=False)
+        self.assertEqual(reminders.main(['--check-nightly-switch']), 78)
+        self.assertEqual(self.run_nightly(), (78, '', ''))
+        self.connect.assert_not_called()
+
+    def test_nightly_requests_engine_sweep_for_central_date_and_logs_counts(self):
+        self.enable_switch()
+        self.assertEqual(reminders.main(['--check-nightly-switch']), 0)
+        self.engine.return_value = Reply(200, {'queued': 3, 'already_queued': 2})
+        now = datetime(2026, 1, 9, 5, 30, tzinfo=timezone.utc)
+        with patch.object(reminders, 'datetime', create=True) as clock:
+            clock.now.side_effect = now.astimezone
+            rc, output, errors = self.run_nightly()
+        self.assertEqual((rc, errors), (0, ''))
+        self.assertEqual(json.loads(output), {'queued': 3, 'already_queued': 2})
+        self.connect.assert_called_once_with(self.credentials, job='nightly_checklist')
+        self.engine.assert_called_once()
+        method, path, body = self.engine.call_args.args
+        self.assertEqual((method, path), ('POST', '/jobs/deals/checklist-reminders'))
+        request = json.loads(body)
+        self.assertEqual(request.pop('run_date'), '2026-01-08')
+        key = uuid.UUID(request['idempotency_key'])
+        self.assertEqual(key.version, 4)
+        self.assertEqual(request, {'idempotency_key': str(key)})
+
+    def test_engine_failures_log_once_without_retry_or_legacy_call(self):
+        self.enable_switch()
+        for reply in (Reply(503, {'error': 'private synthetic detail'}), Reply(0, {}),
+                      Reply(200, {'queued': True, 'already_queued': 0})):
+            with self.subTest(status=reply.status):
+                self.engine.reset_mock(return_value=True)
+                self.engine.return_value = reply
+                rc, output, errors = self.run_nightly()
+                self.assertEqual((rc, output), (1, ''))
+                self.assertEqual(len(errors.splitlines()), 1)
+                self.assertIn('checklist reminders', errors)
+                self.assertNotIn('private synthetic detail', errors)
+                self.engine.assert_called_once()
+
+    def test_enabled_switch_with_invalid_setup_logs_once_in_scheduled_step(self):
+        write_settings(self.home, self.home / 'repo', engine_checklist_reminders=True)
+        self.assertEqual(reminders.main(['--check-nightly-switch']), 0)
+        rc, output, errors = self.run_nightly()
+        self.assertEqual((rc, output), (1, ''))
+        self.assertEqual(len(errors.splitlines()), 1)
+        self.connect.assert_not_called()
 
 
 class SweepTests(unittest.TestCase):
