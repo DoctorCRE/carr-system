@@ -10,6 +10,7 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+mod parse_budget;
 mod split;
 pub use split::split_html;
 

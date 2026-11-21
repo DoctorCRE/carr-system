@@ -1,11 +1,7 @@
-use std::{cell::RefCell, collections::HashMap};
+use ego_tree::iter::Edge;
+use scraper::{node::Element, Html, Node};
 
-use html5ever::tokenizer::{
-    states::RawKind, BufferQueue, Tag, TagKind, Token, TokenSink, TokenSinkResult, Tokenizer,
-};
-use html5ever::LocalName;
-
-use super::{fold_lines, fold_spaces, BLOCKS};
+use super::{fold_lines, fold_spaces, parse_budget, BLOCKS};
 
 const QUOTE_MARKERS: &[&str] = &[
     "gmail_quote",
@@ -33,38 +29,53 @@ pub struct BodySplit {
     pub history: String,
 }
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
-enum Part {
-    #[default]
-    Authored,
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Scope {
+    Visible,
     History,
     Hidden,
 }
 
-pub fn split_html(html: &str) -> BodySplit {
-    let input = BufferQueue::default();
-    input.push_back(html.into());
-    let tokenizer = Tokenizer::new(Sink::default(), Default::default());
-    let _ = tokenizer.feed(&input);
-    tokenizer.end();
-    let mut split = tokenizer.sink.0.into_inner();
+pub fn split_html(html: &str) -> Option<BodySplit> {
+    if let Err(limit) = parse_budget::check(html.as_bytes()) {
+        eprintln!("hxprobe: skipped HTML body split ({limit}); kept full text");
+        return None;
+    }
+
+    let document = Html::parse_document(html);
+    let mut split = Split::default();
+    let mut scopes = vec![Scope::Visible];
+    for edge in document.root_element().traverse() {
+        match edge {
+            Edge::Open(node) => {
+                let parent = *scopes.last().expect("root scope");
+                match node.value() {
+                    Node::Element(element) => {
+                        split.separate(element.name(), parent, true);
+                        scopes.push(split.classify(element, parent));
+                    }
+                    Node::Text(text) => split.text(text, parent),
+                    _ => {}
+                }
+            }
+            Edge::Close(node) => {
+                if let Node::Element(element) = node.value() {
+                    let part = scopes.pop().expect("open element");
+                    split.separate(element.name(), part, false);
+                }
+            }
+        }
+    }
+
     split.break_line();
-    BodySplit {
+    Some(BodySplit {
         authored: fold_lines(&split.authored),
         history: fold_lines(&split.history),
-    }
-}
-
-struct OpenTag {
-    name: LocalName,
-    previous: Option<usize>,
-    part: Part,
+    })
 }
 
 #[derive(Default)]
 struct Split {
-    open: Vec<OpenTag>,
-    last_open: HashMap<LocalName, usize>,
     awaiting_quote: bool,
     authored_line: String,
     history_line: String,
@@ -73,129 +84,42 @@ struct Split {
     after_caution: bool,
 }
 
-#[derive(Default)]
-struct Sink(RefCell<Split>);
-
-impl TokenSink for Sink {
-    type Handle = ();
-
-    fn process_token(&self, token: Token, _: u64) -> TokenSinkResult<()> {
-        let mut split = self.0.borrow_mut();
-        match token {
-            Token::TagToken(tag) => return split.tag(tag),
-            Token::CharacterTokens(text) => split.text(&text),
-            _ => {}
-        }
-        TokenSinkResult::Continue
-    }
-}
-
 impl Split {
-    fn scope(&self) -> Part {
-        self.open.last().map_or(Part::Authored, |tag| tag.part)
-    }
-
-    fn tag(&mut self, tag: Tag) -> TokenSinkResult<()> {
-        let name = tag.name.as_ref();
-        if self.scope() != Part::Hidden {
-            if name == "br" {
-                self.break_line();
-            } else if is_block(name) && !self.line_is_empty() {
-                self.break_line();
-            }
-        }
-        if tag.kind == TagKind::EndTag {
-            self.close(&tag.name);
-            return TokenSinkResult::Continue;
-        }
-        if name == "body" {
-            self.close(&LocalName::from("head"));
-        } else if self.scope() != Part::Hidden && is_block(name) {
-            self.close(&LocalName::from("p"));
-        }
-
-        if matches!(
-            name,
-            "area"
-                | "base"
-                | "br"
-                | "col"
-                | "embed"
-                | "hr"
-                | "img"
-                | "input"
-                | "link"
-                | "meta"
-                | "param"
-                | "source"
-                | "track"
-                | "wbr"
-        ) {
-            return TokenSinkResult::Continue;
-        }
-
-        let part = self.classify(&tag);
-        let raw = match name {
-            "script" => TokenSinkResult::RawData(RawKind::ScriptData),
-            "style" | "xmp" | "iframe" | "noembed" | "noframes" => {
-                TokenSinkResult::RawData(RawKind::Rawtext)
-            }
-            "title" | "textarea" => TokenSinkResult::RawData(RawKind::Rcdata),
-            "plaintext" => TokenSinkResult::Plaintext,
-            _ => TokenSinkResult::Continue,
-        };
-        if !tag.self_closing || raw != TokenSinkResult::Continue {
-            let previous = self.last_open.insert(tag.name.clone(), self.open.len());
-            self.open.push(OpenTag {
-                name: tag.name,
-                previous,
-                part,
-            });
-        }
-        raw
-    }
-
-    fn classify(&mut self, tag: &Tag) -> Part {
-        let name = tag.name.as_ref();
-        if matches!(name, "head" | "script" | "style" | "template" | "title") {
-            return Part::Hidden;
-        }
-        let inherited = self.scope();
-        if inherited != Part::Authored {
-            return inherited;
-        }
-        if name == "blockquote" || marked(tag, QUOTE_MARKERS) {
-            self.awaiting_quote = false;
-        } else if marked(tag, &["divrplyfwdmsg"]) {
-            self.awaiting_quote = true;
-        } else if name != "footer"
-            && !marked(tag, HISTORY_MARKERS)
-            && !tag.attrs.iter().any(|attr| {
-                &*attr.name.local == "data-smartmail" && attr.value.as_ref() == "gmail_signature"
-            })
+    fn separate(&mut self, name: &str, scope: Scope, opening: bool) {
+        if scope != Scope::Hidden
+            && ((opening && name == "br") || (is_block(name) && !self.line_is_empty()))
         {
-            return Part::Authored;
-        }
-        Part::History
-    }
-
-    fn close(&mut self, name: &LocalName) {
-        // Index closing tags so a stray end tag never scans all its ancestors.
-        if let Some(&index) = self.last_open.get(name) {
-            for tag in self.open.drain(index..).rev() {
-                if let Some(previous) = tag.previous {
-                    self.last_open.insert(tag.name, previous);
-                } else {
-                    self.last_open.remove(&tag.name);
-                }
-            }
+            self.break_line();
         }
     }
 
-    fn text(&mut self, text: &str) {
-        let line = match self.scope() {
-            Part::Hidden => return,
-            Part::Authored if !self.awaiting_quote => &mut self.authored_line,
+    fn classify(&mut self, element: &Element, parent: Scope) -> Scope {
+        let name = element.name();
+        if matches!(name, "head" | "script" | "style" | "template" | "title") {
+            return Scope::Hidden;
+        }
+        if parent != Scope::Visible {
+            return parent;
+        }
+        if name == "blockquote" || marked(element, QUOTE_MARKERS) {
+            self.awaiting_quote = false;
+        } else if marked(element, &["divrplyfwdmsg"]) {
+            // A bounded quote can end this history even inside the header wrapper.
+            self.awaiting_quote = true;
+            return Scope::Visible;
+        } else if name != "footer"
+            && !marked(element, HISTORY_MARKERS)
+            && element.attr("data-smartmail") != Some("gmail_signature")
+        {
+            return Scope::Visible;
+        }
+        Scope::History
+    }
+
+    fn text(&mut self, text: &str, scope: Scope) {
+        let line = match scope {
+            Scope::Hidden => return,
+            Scope::Visible if !self.awaiting_quote => &mut self.authored_line,
             _ => &mut self.history_line,
         };
         for c in text.chars() {
@@ -251,21 +175,17 @@ fn is_block(name: &str) -> bool {
         )
 }
 
-fn marked(tag: &Tag, markers: &[&str]) -> bool {
-    tag.attrs.iter().any(|attr| {
-        let value = attr.value.as_ref();
-        let matches_marker = |value: &str| {
+fn marked(element: &Element, markers: &[&str]) -> bool {
+    element
+        .id()
+        .into_iter()
+        .chain(element.classes())
+        .any(|value| {
             let value = value.strip_prefix("x_").unwrap_or(value);
             markers
                 .iter()
                 .any(|marker| value.eq_ignore_ascii_case(marker))
-        };
-        match attr.name.local.as_ref() {
-            "id" => matches_marker(value),
-            "class" => value.split_ascii_whitespace().any(matches_marker),
-            _ => false,
-        }
-    })
+        })
 }
 
 fn is_external_banner(line: &str, after_caution: &mut bool) -> bool {
@@ -305,7 +225,7 @@ mod tests {
     use super::split_html;
 
     fn assert_split(html: &str, authored: &str, history: &str) {
-        let split = split_html(html);
+        let split = split_html(html).expect("HTML within parse budget");
         assert_eq!(split.authored, authored, "authored");
         assert_eq!(split.history, history, "history");
     }
@@ -329,6 +249,25 @@ mod tests {
                 "From: Sam Example\nOld note.",
             );
         }
+    }
+
+    #[test]
+    fn postscript_inside_outlook_header_follows_its_bounded_quote() {
+        assert_split(
+            "<p>New note.</p><div id=divRplyFwdMsg>From: Sam Example\
+             <blockquote>Old note.</blockquote><p>P.S. New instruction.</p></div>",
+            "New note.\nP.S. New instruction.",
+            "From: Sam Example\nOld note.",
+        );
+    }
+
+    #[test]
+    fn an_implicitly_closed_signature_cell_leaves_the_next_cell_authored() {
+        assert_split(
+            "<table><tr><td class=signature>Sam Example<td>Please send the plan.</table>",
+            "Please send the plan.",
+            "Sam Example",
+        );
     }
 
     #[test]
@@ -381,18 +320,30 @@ mod tests {
     }
 
     #[test]
-    fn deeply_nested_body_finishes_within_the_time_bound() {
-        use std::time::{Duration, Instant};
-
+    fn deeply_nested_body_uses_the_plain_text_fallback() {
         let html = format!(
             "<div class=gmail_quote>{}Old note.{}</div><p>New note.</p>",
             "<div>".repeat(20_000),
             "</div>".repeat(20_000),
         );
-        let start = Instant::now();
-        assert_split(&html, "New note.", "Old note.");
-        let elapsed = start.elapsed();
-        assert!(elapsed < Duration::from_secs(2), "split took {elapsed:?}");
+        assert!(split_html(&html).is_none());
+    }
+
+    #[test]
+    fn too_many_attributes_use_the_plain_text_fallback() {
+        let attrs: String = (0..20_000).map(|n| format!(" a{n}=b")).collect();
+        assert!(split_html(&format!("<div{attrs}>New note.</div>")).is_none());
+    }
+
+    #[test]
+    fn attributes_on_repeated_body_tags_share_the_budget() {
+        let html: String = (0..100).map(|n| format!("<body data-tag{n}=x>")).collect();
+        assert!(split_html(&html).is_none());
+    }
+
+    #[test]
+    fn oversized_body_uses_the_plain_text_fallback() {
+        assert!(split_html(&"x".repeat(super::parse_budget::MAX_BYTES + 1)).is_none());
     }
 
     #[test]

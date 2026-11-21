@@ -8,7 +8,7 @@ import gzip
 import json
 import stat
 import time
-from contextlib import redirect_stderr
+from contextlib import closing, redirect_stderr
 from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -119,7 +119,7 @@ def view_row(key, sender='pat@example.test', subject='Synthetic ghost subject', 
     return envelope(0x0430, obj)
 
 
-def decode(*objects, files=None):
+def decode(*objects, files=None, expected_stderr=None):
     """Decode `objects` with the real binary; the database lives until the process exits."""
     tmp = Path(tempfile.mkdtemp())
     atexit.register(shutil.rmtree, tmp, True)
@@ -128,6 +128,8 @@ def decode(*objects, files=None):
     args = [str(test_binary()), 'db', str(source), str(target)] + ([str(files)] if files else [])
     result = subprocess.run(args, capture_output=True, timeout=30)
     assert result.returncode == 0, result.stderr
+    if expected_stderr is not None:
+        assert result.stderr == expected_stderr, result.stderr
     return target
 
 
@@ -376,6 +378,16 @@ class LocalKeyExportTests(unittest.TestCase):
             with self.subTest(name=name):
                 rows, _ = self.export(message(100), body(100, html=html), columns='body, authored, history')
                 self.assertEqual(rows, [(full, authored, history)])
+
+    def test_over_budget_html_keeps_the_full_body_and_exports_no_split(self):
+        html = '<div>' * 300 + 'Synthetic full body.' + '</div>' * 300
+        target = decode(
+            folder(50, 'Inbox'), message(100), body(100, html=html),
+            expected_stderr=b'hxprobe: skipped HTML body split (source nesting depth); kept full text\n',
+        )
+        with closing(sqlite3.connect(target)) as db:
+            self.assertEqual(db.execute('SELECT body, authored, history FROM messages').fetchall(),
+                             [('Synthetic full body.', None, None)])
 
     def test_incomplete_bodies_export_no_split(self):
         preview = 'Synthetic preview'

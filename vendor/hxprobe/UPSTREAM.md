@@ -48,12 +48,15 @@ WHAT CARR ADDS to `hxprobe db <file> [out.db] [files-dir]`:
   accepted only when its text contains the record's own preview opening.
 - Authored and earlier text for complete HTML (`src/body/split.rs`). The
   `messages.authored` and `messages.history` columns contain two plain-text
-  strings, either of which may be empty. The html5ever tokenizer identifies
-  bounded quote, signature and footer markup and standalone banner lines.
-  An Outlook reply/forward header introduces the next bounded quote, or the
-  rest of the body when there is no bounded quote. Both columns are NULL
-  when the HTML is incomplete or undecodable.
-  `messages.body` still contains the full exported text.
+  strings, either of which may be empty. The HTML5 tree identifies bounded
+  quotes, signatures, footers and standalone banner lines. An Outlook
+  reply/forward header introduces the next bounded quote or the rest of
+  the body when there is no bounded quote. The decoder screens HTML before
+  parsing with a 2 MiB body limit, 128 levels of source nesting and 64
+  attributes per tag. It also declines ambiguous raw markup where those
+  limits cannot be checked. A refusal logs only the reason. Both split
+  columns are NULL on refusal or when HTML is incomplete or undecodable.
+  `messages.body` retains the full exported text for plain-text handling.
 - Copy collapse. Revisions of one message are joined by sender, normalized
   subject and preview opening within a day. A preview-only copy then joins the
   one full copy with the same sender and opening. The full body always wins,

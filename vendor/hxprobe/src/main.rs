@@ -451,7 +451,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                 .filter(|p| matches!(p.kind, message::TO | message::CC | message::BCC))
                 .map(|p| p.address.as_str())
                 .collect();
-            let split = r.html.as_deref().filter(|_| !r.lossy_html).map(body::split_html);
+            let split = r.html.as_deref().filter(|_| !r.lossy_html).and_then(body::split_html);
             ins.execute(rusqlite::params![
                 m.block as i64,
                 m.sender,
