@@ -48,9 +48,11 @@ WHAT CARR ADDS to `hxprobe db <file> [out.db] [files-dir]`:
   accepted only when its text contains the record's own preview opening.
 - Authored and earlier text for complete HTML (`src/body/split.rs`). The
   `messages.authored` and `messages.history` columns contain two plain-text
-  strings, either of which may be empty. The classifier uses Outlook
-  reply/forward sections and bounded quote, signature, footer and banner
-  markup. Both columns are NULL when the HTML is incomplete or undecodable.
+  strings, either of which may be empty. The html5ever tokenizer identifies
+  bounded quote, signature and footer markup and standalone banner lines.
+  An Outlook reply/forward header introduces the next bounded quote, or the
+  rest of the body when there is no bounded quote. Both columns are NULL
+  when the HTML is incomplete or undecodable.
   `messages.body` still contains the full exported text.
 - Copy collapse. Revisions of one message are joined by sender, normalized
   subject and preview opening within a day. A preview-only copy then joins the

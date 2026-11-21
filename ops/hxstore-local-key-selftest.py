@@ -364,8 +364,8 @@ class LocalKeyExportTests(unittest.TestCase):
             ('Outlook forward',
              '<div>For your review.</div><div><div id="divRplyFwdMsg">From: Pat Example<br>'
              'Subject: Keys</div><p>The keys are at the desk.</p></div><p>P.S. Open by ten.</p>',
-             'For your review.\nP.S. Open by ten.',
-             'From: Pat Example\nSubject: Keys\nThe keys are at the desk.',
+             'For your review.',
+             'From: Pat Example\nSubject: Keys\nThe keys are at the desk.\nP.S. Open by ten.',
              'For your review.\nFrom: Pat Example\nSubject: Keys\nThe keys are at the desk.\nP.S. Open by ten.'),
             ('no history', '<p>A &amp; B.</p><p>&nbsp;</p><p>Next paragraph.</p>',
              'A & B.\n\nNext paragraph.', '', 'A & B.\n\nNext paragraph.'),

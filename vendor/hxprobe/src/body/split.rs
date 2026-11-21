@@ -1,187 +1,407 @@
-use ego_tree::{iter::Edge, NodeRef};
-use scraper::{node::Element, Html, Node};
+use std::{cell::RefCell, collections::HashMap};
+
+use html5ever::tokenizer::{
+    states::RawKind, BufferQueue, Tag, TagKind, Token, TokenSink, TokenSinkResult, Tokenizer,
+};
+use html5ever::LocalName;
 
 use super::{fold_lines, fold_spaces, BLOCKS};
+
+const QUOTE_MARKERS: &[&str] = &[
+    "gmail_quote",
+    "gmail_quote_container",
+    "yahoo_quoted",
+    "protonmail_quote",
+];
+const HISTORY_MARKERS: &[&str] = &[
+    "gmail_attr",
+    "moz-cite-prefix",
+    "signature",
+    "gmail_signature",
+    "ms-outlook-mobile-signature",
+    "applemailsignature",
+    "moz-signature",
+    "protonmail_signature",
+    "footer",
+    "mail-footer",
+    "email-footer",
+    "disclaimer",
+];
 
 pub struct BodySplit {
     pub authored: String,
     pub history: String,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum Part {
+    #[default]
     Authored,
     History,
     Hidden,
 }
 
 pub fn split_html(html: &str) -> BodySplit {
-    let document = Html::parse_document(html);
-    let mut scopes = vec![Part::Authored];
-    let mut authored = Text::default();
-    let mut history = Text::default();
+    let input = BufferQueue::default();
+    input.push_back(html.into());
+    let tokenizer = Tokenizer::new(Sink::default(), Default::default());
+    let _ = tokenizer.feed(&input);
+    tokenizer.end();
+    let mut split = tokenizer.sink.0.into_inner();
+    split.break_line();
+    BodySplit {
+        authored: fold_lines(&split.authored),
+        history: fold_lines(&split.history),
+    }
+}
 
-    for edge in document.root_element().traverse() {
-        let parent = scopes.last_mut().expect("root scope");
-        let (part, block, line, text) = match edge {
-            Edge::Open(node) => match node.value() {
-                Node::Element(element) => {
-                    let name = element.name();
-                    let mut part = *parent;
-                    if matches!(name, "head" | "script" | "style" | "template") {
-                        part = Part::Hidden;
-                    } else if part == Part::Authored {
-                        // Outlook's header introduces the rest of its enclosing section.
-                        if element_matches(element, &["divrplyfwdmsg"]) {
-                            *parent = Part::History;
-                            part = Part::History;
-                        } else if is_history(node, element) {
-                            part = Part::History;
-                        }
-                        if part == Part::History && is_block(name) {
-                            authored.block_break();
-                        }
-                    }
-                    scopes.push(part);
-                    (part, is_block(name), name == "br", None)
-                }
-                Node::Text(text) => (*parent, false, false, Some(&**text)),
-                _ => continue,
-            },
-            Edge::Close(node) => {
-                let Node::Element(element) = node.value() else {
-                    continue;
-                };
-                let part = scopes.pop().expect("scope for open element");
-                (part, is_block(element.name()), false, None)
-            }
-        };
+struct OpenTag {
+    name: LocalName,
+    previous: Option<usize>,
+    part: Part,
+}
 
-        let output = match part {
-            Part::Authored => &mut authored,
-            Part::History => &mut history,
-            Part::Hidden => continue,
-        };
-        if line {
-            output.line_break();
-        } else if block {
-            output.block_break();
+#[derive(Default)]
+struct Split {
+    open: Vec<OpenTag>,
+    last_open: HashMap<LocalName, usize>,
+    awaiting_quote: bool,
+    authored_line: String,
+    history_line: String,
+    authored: String,
+    history: String,
+    after_caution: bool,
+}
+
+#[derive(Default)]
+struct Sink(RefCell<Split>);
+
+impl TokenSink for Sink {
+    type Handle = ();
+
+    fn process_token(&self, token: Token, _: u64) -> TokenSinkResult<()> {
+        let mut split = self.0.borrow_mut();
+        match token {
+            Token::TagToken(tag) => return split.tag(tag),
+            Token::CharacterTokens(text) => split.text(&text),
+            _ => {}
         }
-        if let Some(text) = text {
-            output.push(text);
+        TokenSinkResult::Continue
+    }
+}
+
+impl Split {
+    fn scope(&self) -> Part {
+        self.open.last().map_or(Part::Authored, |tag| tag.part)
+    }
+
+    fn tag(&mut self, tag: Tag) -> TokenSinkResult<()> {
+        let name = tag.name.as_ref();
+        if self.scope() != Part::Hidden {
+            if name == "br" {
+                self.break_line();
+            } else if is_block(name) && !self.line_is_empty() {
+                self.break_line();
+            }
+        }
+        if tag.kind == TagKind::EndTag {
+            self.close(&tag.name);
+            return TokenSinkResult::Continue;
+        }
+        if name == "body" {
+            self.close(&LocalName::from("head"));
+        } else if self.scope() != Part::Hidden && is_block(name) {
+            self.close(&LocalName::from("p"));
+        }
+
+        if matches!(
+            name,
+            "area"
+                | "base"
+                | "br"
+                | "col"
+                | "embed"
+                | "hr"
+                | "img"
+                | "input"
+                | "link"
+                | "meta"
+                | "param"
+                | "source"
+                | "track"
+                | "wbr"
+        ) {
+            return TokenSinkResult::Continue;
+        }
+
+        let part = self.classify(&tag);
+        let raw = match name {
+            "script" => TokenSinkResult::RawData(RawKind::ScriptData),
+            "style" | "xmp" | "iframe" | "noembed" | "noframes" => {
+                TokenSinkResult::RawData(RawKind::Rawtext)
+            }
+            "title" | "textarea" => TokenSinkResult::RawData(RawKind::Rcdata),
+            "plaintext" => TokenSinkResult::Plaintext,
+            _ => TokenSinkResult::Continue,
+        };
+        if !tag.self_closing || raw != TokenSinkResult::Continue {
+            let previous = self.last_open.insert(tag.name.clone(), self.open.len());
+            self.open.push(OpenTag {
+                name: tag.name,
+                previous,
+                part,
+            });
+        }
+        raw
+    }
+
+    fn classify(&mut self, tag: &Tag) -> Part {
+        let name = tag.name.as_ref();
+        if matches!(name, "head" | "script" | "style" | "template" | "title") {
+            return Part::Hidden;
+        }
+        let inherited = self.scope();
+        if inherited != Part::Authored {
+            return inherited;
+        }
+        if name == "blockquote" || marked(tag, QUOTE_MARKERS) {
+            self.awaiting_quote = false;
+        } else if marked(tag, &["divrplyfwdmsg"]) {
+            self.awaiting_quote = true;
+        } else if name != "footer"
+            && !marked(tag, HISTORY_MARKERS)
+            && !tag.attrs.iter().any(|attr| {
+                &*attr.name.local == "data-smartmail" && attr.value.as_ref() == "gmail_signature"
+            })
+        {
+            return Part::Authored;
+        }
+        Part::History
+    }
+
+    fn close(&mut self, name: &LocalName) {
+        // Index closing tags so a stray end tag never scans all its ancestors.
+        if let Some(&index) = self.last_open.get(name) {
+            for tag in self.open.drain(index..).rev() {
+                if let Some(previous) = tag.previous {
+                    self.last_open.insert(tag.name, previous);
+                } else {
+                    self.last_open.remove(&tag.name);
+                }
+            }
         }
     }
 
-    BodySplit {
-        authored: fold_lines(&authored.raw),
-        history: fold_lines(&history.raw),
+    fn text(&mut self, text: &str) {
+        let line = match self.scope() {
+            Part::Hidden => return,
+            Part::Authored if !self.awaiting_quote => &mut self.authored_line,
+            _ => &mut self.history_line,
+        };
+        for c in text.chars() {
+            if c.is_ascii_whitespace() {
+                if !line.is_empty() && !line.ends_with(' ') {
+                    line.push(' ');
+                }
+            } else if !c.is_control() {
+                line.push(c);
+            }
+        }
+    }
+
+    fn line_is_empty(&self) -> bool {
+        self.authored_line.is_empty() && self.history_line.is_empty()
+    }
+
+    fn break_line(&mut self) {
+        let authored = self.authored_line.trim_end();
+        let history = self.history_line.trim_end();
+        if authored.is_empty() && history.is_empty() {
+            self.authored.push('\n');
+            self.history.push('\n');
+            self.after_caution = false;
+        } else {
+            let banner =
+                history.is_empty() && is_external_banner(authored, &mut self.after_caution);
+            let target = if banner {
+                &mut self.history
+            } else {
+                &mut self.authored
+            };
+            if !authored.is_empty() {
+                target.push_str(authored);
+                target.push('\n');
+            }
+            if !history.is_empty() {
+                self.history.push_str(history);
+                self.history.push('\n');
+                self.after_caution = false;
+            }
+        }
+        self.authored_line.clear();
+        self.history_line.clear();
     }
 }
 
 fn is_block(name: &str) -> bool {
-    BLOCKS.contains(&name) || matches!(name, "footer" | "section" | "table" | "ul" | "ol" | "th")
-}
-
-fn element_matches(element: &Element, names: &[&str]) -> bool {
-    element
-        .id()
-        .into_iter()
-        .chain(element.classes())
-        .any(|value| {
-            let value = value.strip_prefix("x_").unwrap_or(value);
-            names.iter().any(|name| value.eq_ignore_ascii_case(name))
-        })
-}
-
-fn is_history(node: NodeRef<'_, Node>, element: &Element) -> bool {
-    matches!(element.name(), "blockquote" | "footer")
-        || element_matches(
-            element,
-            &[
-                "gmail_quote",
-                "gmail_quote_container",
-                "gmail_attr",
-                "yahoo_quoted",
-                "protonmail_quote",
-                "moz-cite-prefix",
-                "signature",
-                "gmail_signature",
-                "ms-outlook-mobile-signature",
-                "applemailsignature",
-                "moz-signature",
-                "protonmail_signature",
-                "footer",
-                "mail-footer",
-                "email-footer",
-                "disclaimer",
-                "external-sender-banner",
-            ],
+    BLOCKS.contains(&name)
+        || matches!(
+            name,
+            "h4" | "h5" | "h6" | "footer" | "section" | "table" | "ul" | "ol" | "th"
         )
-        || element.attr("data-smartmail") == Some("gmail_signature")
-        || is_external_banner(node, element.name())
 }
 
-fn is_external_banner(node: NodeRef<'_, Node>, name: &str) -> bool {
-    if !matches!(name, "div" | "p" | "td") {
+fn marked(tag: &Tag, markers: &[&str]) -> bool {
+    tag.attrs.iter().any(|attr| {
+        let value = attr.value.as_ref();
+        let matches_marker = |value: &str| {
+            let value = value.strip_prefix("x_").unwrap_or(value);
+            markers
+                .iter()
+                .any(|marker| value.eq_ignore_ascii_case(marker))
+        };
+        match attr.name.local.as_ref() {
+            "id" => matches_marker(value),
+            "class" => value.split_ascii_whitespace().any(matches_marker),
+            _ => false,
+        }
+    })
+}
+
+fn is_external_banner(line: &str, after_caution: &mut bool) -> bool {
+    const CAUTION: &str = "this email originated from outside of the organization.";
+    const WARNINGS: &[&str] = &[
+        "do not click links if unexpected.",
+        "do not click links if you do not recognize the sender.",
+        "do not click links or open attachments unless you recognize the sender and know the content is safe.",
+    ];
+    let continuation = std::mem::take(after_caution);
+    if line.len() > 1024 {
         return false;
     }
-    let mut text = String::new();
-    for child in node.descendants().skip(1) {
-        match child.value() {
-            Node::Element(element) if is_block(element.name()) => return false,
-            Node::Text(content) => {
-                if text.len() + content.len() > 1024 {
-                    return false;
-                }
-                text.push_str(content);
-            }
-            Node::Element(element) if element.name() == "br" => text.push(' '),
-            _ => {}
-        }
-    }
-    let text = fold_spaces(&text).to_ascii_lowercase();
-    let caution = text.strip_prefix("caution: ").unwrap_or(&text);
-    caution
-        .strip_prefix("this email originated from outside of the organization.")
-        .is_some_and(|rest| rest.is_empty() || rest.starts_with(" do not click links "))
+    let line = fold_spaces(line).to_ascii_lowercase();
+    let caution = line.strip_prefix("caution: ").unwrap_or(&line);
+    *after_caution = caution == CAUTION;
+    *after_caution
+        || (continuation && WARNINGS.contains(&line.as_str()))
+        || caution
+            .strip_prefix(CAUTION)
+            .and_then(|rest| rest.strip_prefix(' '))
+            .is_some_and(|warning| WARNINGS.contains(&warning))
         || ["you", "some people who received this message"]
             .iter()
-            .filter_map(|start| text.strip_prefix(start))
-            .filter_map(|rest| rest.strip_prefix(" don't often get email from "))
-            .any(|rest| {
-                rest.strip_suffix(" learn why this is important")
+            .any(|prefix| {
+                line.strip_prefix(prefix)
+                    .and_then(|rest| rest.strip_prefix(" don't often get email from "))
+                    .and_then(|rest| rest.strip_suffix(" learn why this is important"))
                     .is_some_and(|sender| {
                         sender == "this sender" || (sender.contains('@') && !sender.contains(' '))
                     })
             })
 }
 
-#[derive(Default)]
-struct Text {
-    raw: String,
-    line_has_text: bool,
-}
+#[cfg(test)]
+mod tests {
+    use super::split_html;
 
-impl Text {
-    fn push(&mut self, text: &str) {
-        for c in text.chars() {
-            if c.is_ascii_whitespace() {
-                self.raw.push(' ');
-            } else if !c.is_control() {
-                self.raw.push(c);
-                self.line_has_text = true;
-            }
+    fn assert_split(html: &str, authored: &str, history: &str) {
+        let split = split_html(html);
+        assert_eq!(split.authored, authored, "authored");
+        assert_eq!(split.history, history, "history");
+    }
+
+    #[test]
+    fn outlook_header_followed_by_bounded_quote_keeps_the_postscript() {
+        for (header, quote) in [
+            (
+                "<div id=divRplyFwdMsg>From: Sam Example</div>",
+                "<blockquote>Old note.</blockquote>",
+            ),
+            (
+                "<div><div id=divRplyFwdMsg>From: Sam Example</div></div>",
+                "<div class=gmail_quote><div>Old note.</div></div>",
+            ),
+        ] {
+            let html = format!("<p>New note.</p>{header}{quote}<p>P.S. New instruction.</p>");
+            assert_split(
+                &html,
+                "New note.\nP.S. New instruction.",
+                "From: Sam Example\nOld note.",
+            );
         }
     }
 
-    fn line_break(&mut self) {
-        self.raw.push('\n');
-        self.line_has_text = false;
+    #[test]
+    fn outlook_header_without_bounded_quote_extends_past_its_wrapper() {
+        assert_split(
+        "<p>New note.</p><div><div id=divRplyFwdMsg>From: Sam Example</div></div><p>Old note.</p>",
+        "New note.",
+        "From: Sam Example\nOld note.",
+    );
     }
 
-    fn block_break(&mut self) {
-        if self.line_has_text {
-            self.line_break();
-        }
+    #[test]
+    fn caution_banner_leaves_other_lines_in_the_same_block_authored() {
+        assert_split(
+        "<div>Caution: This email originated from outside of the organization.<br>\
+         Do not click links if unexpected.<br>Please send the plan.</div>",
+        "Please send the plan.",
+        "Caution: This email originated from outside of the organization.\nDo not click links if unexpected.",
+    );
+    }
+
+    #[test]
+    fn caution_banner_prefix_does_not_hide_a_sender_paragraph() {
+        let paragraph = "Caution: This email originated from outside of the organization. \
+                     Do not click links in the draft plan until we meet. Please send the plan.";
+        assert_split(&format!("<p>{paragraph}</p>"), paragraph, "");
+    }
+
+    #[test]
+    fn separated_signatures_keep_their_breaks() {
+        assert_split(
+        "<span class=gmail_signature>First</span><br><span class=signature>Second</span><p>New note.</p>",
+        "New note.",
+        "First\nSecond",
+    );
+        assert_split(
+        "<span class=gmail_signature>First</span><br><br><span class=signature>Second</span><p>New note.</p>",
+        "New note.",
+        "First\n\nSecond",
+    );
+    }
+
+    #[test]
+    fn adjacent_headings_keep_their_breaks() {
+        assert_split(
+            "<h4>First</h4><h4>Second</h4><h5>Third</h5><h6>Fourth</h6>",
+            "First\nSecond\nThird\nFourth",
+            "",
+        );
+    }
+
+    #[test]
+    fn deeply_nested_body_finishes_within_the_time_bound() {
+        use std::time::{Duration, Instant};
+
+        let html = format!(
+            "<div class=gmail_quote>{}Old note.{}</div><p>New note.</p>",
+            "<div>".repeat(20_000),
+            "</div>".repeat(20_000),
+        );
+        let start = Instant::now();
+        assert_split(&html, "New note.", "Old note.");
+        let elapsed = start.elapsed();
+        assert!(elapsed < Duration::from_secs(2), "split took {elapsed:?}");
+    }
+
+    #[test]
+    fn large_body_keeps_all_lines_in_order() {
+        let section = "<div>New note: Caf&eacute;.</div><blockquote>Old note.</blockquote>";
+        assert_split(
+            &section.repeat(25_000),
+            &"New note: Café.\n".repeat(25_000).trim_end(),
+            &"Old note.\n".repeat(25_000).trim_end(),
+        );
     }
 }
