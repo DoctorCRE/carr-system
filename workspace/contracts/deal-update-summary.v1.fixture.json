@@ -1,0 +1,91 @@
+{
+  "schema_version": "deal-update-summary.v1",
+  "deal_id": "00000000-0000-4000-8000-000000000002",
+  "source_revision": "<database-snapshot>",
+  "summary": {
+    "method": "extractive",
+    "text": "Recorded source statements, oldest first: [activity:00000000-0000-4000-8000-000000000003] Landlord offered $24. [event:00000000-0000-4000-8000-000000000005] phase: \"search\" → \"negotiation\" [note:00000000-0000-4000-8000-000000000003] Correction: $24 was rejected. $26 remains disputed.",
+    "citations": [
+      {
+        "at": "2026-01-01T00:00:00.000000Z",
+        "source": "activity",
+        "id": "00000000-0000-4000-8000-000000000003"
+      },
+      {
+        "at": "2026-01-02T00:00:00.000000Z",
+        "source": "event",
+        "id": "00000000-0000-4000-8000-000000000005"
+      },
+      {
+        "at": "2026-01-02T00:00:00.000000Z",
+        "source": "note",
+        "id": "00000000-0000-4000-8000-000000000003"
+      }
+    ]
+  },
+  "coverage": {
+    "complete": false,
+    "unsupported_events_present": true,
+    "covered_count": 3,
+    "read_count_lower_bound": 3,
+    "sources_read": [
+      "activity",
+      "note",
+      "event"
+    ],
+    "sources_missing": [],
+    "window": {
+      "oldest": "2026-01-01T00:00:00.000000Z",
+      "newest": "2026-01-02T00:00:00.000000Z"
+    }
+  },
+  "history": {
+    "entries": [
+      {
+        "source": "note",
+        "id": "00000000-0000-4000-8000-000000000003",
+        "at": "2026-01-02T00:00:00.000000Z",
+        "actor": "joe",
+        "text": "Correction: $24 was rejected. $26 remains disputed.",
+        "original": {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "text": "Correction: $24 was rejected. $26 remains disputed.",
+          "actor": "joe",
+          "created_at": "2026-01-01T18:00:00-06:00"
+        }
+      },
+      {
+        "source": "event",
+        "id": "00000000-0000-4000-8000-000000000005",
+        "at": "2026-01-02T00:00:00.000000Z",
+        "actor": "joe",
+        "text": "phase: \"search\" → \"negotiation\"",
+        "original": {
+          "id": "00000000-0000-4000-8000-000000000005",
+          "actor": "joe",
+          "field": "phase",
+          "new_value": "negotiation",
+          "old_value": "search",
+          "recorded_at": "2026-01-01T18:00:00-06:00"
+        }
+      },
+      {
+        "source": "activity",
+        "id": "00000000-0000-4000-8000-000000000003",
+        "at": "2026-01-01T00:00:00.000000Z",
+        "actor": "dell",
+        "text": "Landlord offered $24.",
+        "original": {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "actor": "dell",
+          "detail": "Original source detail.",
+          "summary": "Landlord offered $24.",
+          "occurred_at": "2025-12-31T18:00:00-06:00"
+        }
+      }
+    ],
+    "next_cursor": null,
+    "order": "at/source/id descending",
+    "revision": "<database-snapshot>"
+  }
+}
