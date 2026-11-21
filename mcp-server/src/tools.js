@@ -286,10 +286,11 @@ async function saveAssistantVerb(client, actor, verb, args, env) {
   const docStep = verb === 'set-next-step';
   const completion = verb === 'complete-action';
   const dealNote = verb === 'add-deal-note';
-  const stepWrite = docStep || completion || verb === 'set-next-action';
+  const stepSave = docStep || verb === 'set-next-action';
+  const stepWrite = stepSave || completion;
   if (!stepWrite && (!partner || (!activity && !dealNote))) return;
 
-  const guardedStep = verb === 'set-next-action' && (Object.hasOwn(args, 'expected_action') || Boolean(args.work_request));
+  const guardedStep = stepSave && (Boolean(args.work_request) || (!docStep && Object.hasOwn(args, 'expected_action')));
   const dealOnly = docStep || dealNote;
   const subject = stepWrite && !docStep
     ? await resolveAssistantStepSubject(client, args.ref)
@@ -297,7 +298,7 @@ async function saveAssistantVerb(client, actor, verb, args, env) {
   if (dealOnly && subject.type !== 'deal') throw new ToolError({ error: "not_a_deal", resolved: subject });
   const oldRole = stepWrite ? assistantOldRole(subject.type, subject.id) : null;
   if ((oldRole || docStep) && !partner) throw new ToolError({ error: 'human_approval_required' });
-  if (oldRole && guardedStep) throw new ToolError({ error: 'engine_assistant_step_guard_unsupported' });
+  if ((oldRole || docStep) && guardedStep) throw new ToolError({ error: 'engine_assistant_step_guard_unsupported' });
   if (!partner || guardedStep) return;
   if (subject.type !== 'deal' && !oldRole && !(completion && subject.type === 'party')) return;
 
