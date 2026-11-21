@@ -132,25 +132,9 @@ const writer = new URL(engineDsn);
 writer.searchParams.set('options', '-c role=carr_writer');
 
 test('engine intake stays off by default and retries an overlapping sweep without duplicate or paused receipts', async t => {
-  const c = new pg.Client({ connectionString: engineDsn });
-  await c.connect();
-  t.after(() => c.end());
-  const { id: joe } = (await c.query("select id from actor where slug='joe'")).rows[0];
-  const { id: party } = (await c.query(
-    "insert into party(kind,name,created_by,updated_by) values('person','Synthetic engine client',$1,$1) returning id", [joe],
-  )).rows[0];
-  await c.query("insert into client_status(slug,label) values('active','Active') on conflict do nothing");
-  const { id: client } = (await c.query(
-    "insert into client(party_id,status,created_by,updated_by) values($1,'active',$2,$2) returning id", [party, joe],
-  )).rows[0];
-  const { id: deal } = (await c.query(
-    "insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by) values($1,'Synthetic engine deal','purchase','research','joe',$2,$2) returning id", [client, joe],
-  )).rows[0];
-  await c.query(`
-    insert into ops.subject_watch_v2_subscription(actor_id,subject_type,subject_id,baseline,policy,state,subscribed_at)
-    select id,'deal',$1,'{}','{"change_kinds":["reply_arrived"],"include_self_changes":false}',
-      case slug when 'joe' then 'watching' else 'paused' end,'2027-02-01T11:50:00Z'
-    from actor where slug in ('joe','dell')`, [deal]);
+  const { db: c, addWatch, sweep } = await engineWatchFixture(t, { activate: false });
+  const { id, deal } = await addWatch('Synthetic engine deal');
+  await addWatch('Synthetic paused watch', { deal, subscriber: 'dell', state: 'paused' });
 
   const change = phaseMove(deal, '9007199254740993', 3, 'research', 'negotiation');
   const calls = [];
@@ -162,46 +146,41 @@ test('engine intake stays off by default and retries an overlapping sweep withou
     assert.equal(target.searchParams.get('subscriber'), 'joe');
     assert.equal(request.headers['Engine-Job'], 'agent');
     if (upstreamFails) return new Response(null, { status: 503 });
-    if (pauseDuringRead) await c.query("update ops.subject_watch_v2_subscription set state='paused',lifecycle_version=2 where actor_id=$1", [joe]);
+    if (pauseDuringRead) await c.query("update ops.subject_watch_v2_subscription set state='paused',lifecycle_version=2 where id=$1", [id]);
     return engineWatchResponse(deal, [
       ...change, ...change,
       ...phaseMove(deal, '9007199254740994', 4, 'negotiation', 'legal', 'joe'),
       ...phaseMove(deal, '9007199254740995', 12, 'legal', 'closed'),
     ]);
   });
-  const sweep = (minute, switched = {}) => sweepSubjectWatches({ scheduledTime: Date.UTC(2027, 1, 1, 12, minute) }, {
-    DATABASE_URL_WRITER: writer.href, ENGINE_URL: 'https://engine.example.test',
-    ENGINE_ACCESS_CLIENT_ID: 'test-client', ENGINE_ACCESS_CLIENT_SECRET: 'test-secret', ...switched,
-  }, pg.Pool);
-  const on = { ENGINE_DEAL_WATCH_CHANGES: 'true' };
   const cursor = async () => (await c.query('select scheduled_at, after_watch_id from ops.subject_watch_sweep')).rows[0];
   const receipts = async () => (await c.query(`
     select a.slug, semantic_key, changes, disposition from ops.subject_watch_change c join actor a on a.id=c.actor_id
     where c.subject_id=$1 order by semantic_key`, [deal])).rows;
 
-  await sweep(0);
+  await sweep(0, false);
   assert.deepEqual(calls, []);
   assert.deepEqual(await receipts(), []);
   const before = await cursor();
   assert.equal(before.scheduled_at.toISOString(), '2027-02-01T12:00:00.000Z');
 
-  await assert.rejects(sweep(5, on));
+  await assert.rejects(sweep(0));
   assert.deepEqual(await cursor(), before);
   assert.deepEqual(await receipts(), []);
   upstreamFails = false;
-  await sweep(5, on);
-  await sweep(10, on);
+  await sweep(5);
+  await sweep(10);
   assert.deepEqual(calls.map(value => new Date(value).toISOString()), [
-    '2027-02-01T11:50:00.000Z', '2027-02-01T11:50:00.000Z', '2027-02-01T12:00:00.000Z',
+    '2027-02-01T12:00:00.000Z', '2027-02-01T12:00:00.000Z', '2027-02-01T12:00:00.000Z',
   ]);
   const expected = [{
-    disposition: 'emitted', slug: 'joe', semantic_key: 'engine:9007199254740993:phase',
+    disposition: 'emitted', slug: 'joe', semantic_key: 'engine:9007199254740993',
     changes: [{ field: 'phase', before: 'research', after: 'negotiation', reason_code: 'value_changed' }],
   }];
   assert.deepEqual(await receipts(), expected);
   assert.equal((await cursor()).scheduled_at.toISOString(), '2027-02-01T12:10:00.000Z');
   pauseDuringRead = true;
-  await sweep(15, on);
+  await sweep(15);
   assert.deepEqual(await receipts(), expected);
   assert.equal(calls.length, 4);
 });
@@ -212,7 +191,7 @@ test('only the scheduler writer can execute the bounded engine watch functions',
   t.after(() => c.end());
   assert.deepEqual((await c.query("select ops.read_subject_watch_engine_batch('2027-01-01T00:00:00Z',4) result")).rows[0].result, []);
   await assert.rejects(c.query("select ops.read_subject_watch_engine_batch('2027-01-01T00:00:00Z',5)"), /watch_batch_limit/);
-  for (const table of ['subject_watch', 'subject_watch_v2_subscription', 'subject_watch_delivery', 'subject_watch_sweep', 'subject_watch_change']) {
+  for (const table of ['subject_watch', 'subject_watch_v2_subscription', 'subject_watch_delivery', 'subject_watch_sweep', 'subject_watch_change', 'subject_watch_engine_start']) {
     await assert.rejects(c.query('select * from ops.' + table), { code: '42501' });
   }
   await assert.rejects(c.query('select * from ops.subject_watch_engine_targets()'), { code: '42501' });
@@ -226,9 +205,10 @@ test('only the scheduler writer can execute the bounded engine watch functions',
   }
 });
 
-async function engineWatchFixture(t) {
+async function engineWatchFixture(t, { activate = true } = {}) {
   const db = new pg.Client({ connectionString: engineDsn });
   await db.connect();
+  await db.query('delete from ops.subject_watch_engine_start');
   const watchIds = [];
   t.after(async () => {
     try { await db.query("update ops.subject_watch_v2_subscription set state='paused' where id=any($1::uuid[])", [watchIds]); }
@@ -242,22 +222,26 @@ async function engineWatchFixture(t) {
   const { id: client } = (await db.query(
     "insert into client(party_id,status,created_by,updated_by) values($1,'active',$2,$2) returning id", [party, actor],
   )).rows[0];
-  const addWatch = async (name, subscribedAt = '2027-02-01T11:50:00Z') => {
+  const addWatch = async (name, {
+    deal, subscribedAt = '2027-02-01T11:50:00Z', subscriber = 'joe', state = 'watching',
+    changeKind = 'reply_arrived',
+  } = {}) => {
+    deal ??= (await db.query(`
+      insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by)
+      values($1,$2,'purchase','research','joe',$3,$3) returning id`, [client, name, actor])).rows[0].id;
     const { rows: [watch] } = await db.query(`
-      with d as (
-        insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by)
-        values($1,$2,'purchase','research','joe',$3,$3) returning id
-      )
       insert into ops.subject_watch_v2_subscription(actor_id,subject_type,subject_id,baseline,policy,state,subscribed_at)
-      select $3,'deal',id,'{}','{"change_kinds":["reply_arrived"],"include_self_changes":false}',
-        'watching',$4 from d returning id, subject_id as deal`, [client, name, actor, subscribedAt]);
+      select id,'deal',$1,'{}',jsonb_build_object('change_kinds',jsonb_build_array($5::text),'include_self_changes',false),
+        $4,$2 from actor where slug=$3 returning id, subject_id as deal`, [deal, subscribedAt, subscriber, state, changeKind]);
     watchIds.push(watch.id);
     return watch;
   };
-  const sweep = minute => sweepSubjectWatches({ scheduledTime: Date.UTC(2027, 1, 1, 12, minute) }, {
+  const sweep = (minute, on = true) => sweepSubjectWatches({ scheduledTime: Date.UTC(2027, 1, 1, 12, minute) }, {
     DATABASE_URL_WRITER: writer.href, ENGINE_URL: 'https://engine.example.test',
-    ENGINE_ACCESS_CLIENT_ID: 'test-client', ENGINE_ACCESS_CLIENT_SECRET: 'test-secret', ENGINE_DEAL_WATCH_CHANGES: 'true',
+    ENGINE_ACCESS_CLIENT_ID: 'test-client', ENGINE_ACCESS_CLIENT_SECRET: 'test-secret',
+    ...(on ? { ENGINE_DEAL_WATCH_CHANGES: 'true' } : {}),
   }, pg.Pool);
+  if (activate) await sweep(0);
   return { db, addWatch, sweep };
 }
 
@@ -324,7 +308,7 @@ test('missing and retryable deals do not stall another watch in the same sweep',
   assert.deepEqual((await receipts()).map(row => row.subject_id), [healthy.deal, retry.deal].sort());
   assert.equal(requests.filter(([deal]) => deal === missing.deal).length, 1);
   assert.deepEqual(requests.filter(([deal]) => deal === retry.deal).map(([, since]) => new Date(since).toISOString()), [
-    '2027-02-01T11:50:00.000Z', '2027-02-01T11:50:00.000Z', '2027-02-01T11:50:00.000Z',
+    '2027-02-01T12:00:00.000Z', '2027-02-01T12:00:00.000Z', '2027-02-01T12:00:00.000Z',
   ]);
   assert.equal((await db.query(
     "select count(*)::int as count from event where verb='subject-watch-engine-target-missing' and subject_id=$1", [missing.id],
@@ -354,7 +338,7 @@ test('engine phase inserts emit one transition per move across overlapping polls
 
 test('a watch created after an engine move sees a return to the copied phase', async t => {
   const { db, addWatch, sweep } = await engineWatchFixture(t);
-  const { id, deal } = await addWatch('Synthetic return to copied phase', '2027-02-01T12:02:00Z');
+  const { id, deal } = await addWatch('Synthetic return to copied phase', { subscribedAt: '2027-02-01T12:02:00Z' });
   const history = [
     ...phaseMove(deal, '1', 1, 'research', 'negotiation'),
     ...phaseMove(deal, '2', 3, 'negotiation', 'research'),
@@ -369,7 +353,7 @@ test('a watch created after an engine move sees a return to the copied phase', a
   assert.deepEqual((await db.query(
     'select semantic_key, changes from ops.subject_watch_change where watch_generation_id=$1', [id],
   )).rows, [{
-    semantic_key: 'engine:2:phase',
+    semantic_key: 'engine:2',
     changes: [{ field: 'phase', before: 'negotiation', after: 'research', reason_code: 'value_changed' }],
   }]);
 });
@@ -383,13 +367,13 @@ test('the first recorded engine phase emits a transition with no prior phase', a
   assert.deepEqual((await db.query(
     'select semantic_key, changes from ops.subject_watch_change where watch_generation_id=$1', [id],
   )).rows, [{
-    semantic_key: 'engine:1:phase',
+    semantic_key: 'engine:1',
     changes: [{ field: 'phase', before: null, after: 'negotiation', reason_code: 'unknown_to_known' }],
   }]);
 });
 
 test('first enabled sweep excludes previously recorded history and copied changes', async t => {
-  const { db, addWatch, sweep } = await engineWatchFixture(t);
+  const { db, addWatch, sweep } = await engineWatchFixture(t, { activate: false });
   const { id, deal } = await addWatch('Synthetic pre-cutover watch');
   const history = [
     ...phaseMove(deal, '1', 1, null, 'research', 'old_system'),
@@ -440,13 +424,23 @@ test('step completion with two engine fields counts as one update', async t => {
 test('engine-only replies reach the subscriber once without a legacy activity row', async t => {
   const { db, addWatch, sweep } = await engineWatchFixture(t);
   const { id, deal } = await addWatch('Synthetic engine reply');
+  const other = await addWatch('Synthetic other mailbox', { deal, subscriber: 'dell' });
+  const muted = await addWatch('Synthetic muted replies', { changeKind: 'listing_status_changed' });
   const replyId = '00000000-0000-4000-8000-000000000777';
-  t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(deal, [], [replyId, replyId]));
+  t.mock.method(globalThis, 'fetch', async target => engineWatchResponse(target.pathname.split('/').at(-1), [],
+    target.searchParams.get('subscriber') === 'joe' ? [replyId, replyId] : []));
   await sweep(5);
   await sweep(6);
   const { rows } = await db.query(
-    'select category, disposition, evidence_refs from ops.subject_watch_change where watch_generation_id=$1', [id],
+    'select watch_generation_id, category, disposition from ops.subject_watch_change where watch_generation_id=any($1)',
+    [[id, other.id, muted.id]],
   );
-  assert.deepEqual(rows.map(row => [row.category, row.disposition, row.evidence_refs[0].activity_id]),
-    [['reply_arrived', 'emitted', replyId]]);
+  assert.deepEqual(rows, [{ watch_generation_id: id, category: 'reply_arrived', disposition: 'emitted' }]);
+  await db.query('begin');
+  try {
+    await db.query("select set_config('carr.acting_actor_slug','joe',true),set_config('carr.verified_human_actor_slug','joe',true)");
+    await db.query('set local role carr_writer');
+    const { rows: [{ result }] } = await db.query("select ops.read_subject_watch_changes('deal',$1,$2,null,50) result", [deal, id]);
+    assert.deepEqual(result.changes.map(change => change.evidence_refs[0].activity_id), [replyId]);
+  } finally { await db.query('rollback'); }
 });
