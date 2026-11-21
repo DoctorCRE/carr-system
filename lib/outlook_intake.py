@@ -642,7 +642,8 @@ def _load(db: Path, account_id: int | None = None, account_address: str | None =
         signature_html = 'html AS signature_html' if 'html' in columns else 'NULL AS signature_html'
         context_columns = ', '.join(name if name in columns else f'NULL AS {name}'
                                     for name in ('message_id', 'conversation_id', 'cc', 'flag_status', 'flag_due_unix',
-                                                 'flag_completed_unix', 'folder_links_unresolved', 'body_completeness', 'body_outcome'))
+                                                 'flag_completed_unix', 'folder_links_unresolved', 'body_completeness',
+                                                 'body_outcome', 'authored', 'history'))
         mails = [dict(r) for r in con.execute(
             'SELECT id, sender, sender_name, recipients, subject, body, preview, body_kind, sent_unix, copy_key, '
             f'{local_keys}, {signature_html}, {context_columns} FROM messages')]
@@ -1467,13 +1468,15 @@ class Run:
             recipients = [{'address': address, 'kind': kind} for field, kind in (('recipients', 'to'), ('cc', 'cc'))
                           for address in dict.fromkeys(_addresses(m.get(field)))]
             lead = _lead_notice(m['body'], sender, fields) if fields and m['full'] else None
+            email = {**identity, 'sender': sender, 'recipients': recipients,
+                     'subject': m['subject'] or '', 'body': m['text'],
+                     **({'sender_name': m['sender_name']} if m.get('sender_name') else {})}
+            authored, history = m.get('authored'), m.get('history')
+            if m['full'] and isinstance(authored, str) and isinstance(history, str):
+                email.update(authored=authored, history=history)
             self.engine.offer(message_id, m['sent_unix'], m['full'] and bool(recipients or inbound),
                               (m['full'], len(m['text'])), inbound,
-                              {'kind': 'email', 'happened_at': _iso(m['sent_unix']),
-                               'email': {**identity, 'sender': sender, 'recipients': recipients,
-                                         'subject': m['subject'] or '', 'body': m['text'],
-                                         **({'sender_name': m['sender_name']} if m.get('sender_name') else {})},
-                               **(lead or {})})
+                              {'kind': 'email', 'happened_at': _iso(m['sent_unix']), 'email': email, **(lead or {})})
         if self.preview is None:
             self.engine.send_emails(self.catch_up_since, lead_sources_available=sources is not None)
             for mail, message_id, known_source in candidates:

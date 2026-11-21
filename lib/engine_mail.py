@@ -248,7 +248,10 @@ class Mailbox:
             if request['kind'] == 'lead_source':
                 if not lead_sources_available:
                     continue
-                reply = self.post('/jobs/leads/email-intake', request)
+                # The lead door rejects split fields; keep them for the activity fallback.
+                lead_email = {field: value for field, value in request['email'].items()
+                              if field not in ('authored', 'history')}
+                reply = self.post('/jobs/leads/email-intake', {**request, 'email': lead_email})
                 if verdict(reply) != 'settled' or reply.error == 'key_reuse':
                     self.answer(entry, reply, 'emails')
                     continue
