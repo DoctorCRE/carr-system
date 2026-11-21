@@ -6515,7 +6515,7 @@ class EngineMailTest(unittest.TestCase):
         self.assertEqual(request['email'], {
             'message_id': 'Lead@Example.test', 'conversation_id': 'notice-thread',
             'sender': notice['sender'], 'sender_name': 'Example Source',
-            'subject': notice['subject'], 'body': notice['body'],
+            'subject': notice['subject'], 'body': notice['body'].strip(),
             'recipients': [{'address': OWNER, 'kind': 'to'}]})
         self.assertEqual(request['prospect'], {
             'kind': 'person', 'name': 'Avery Example', 'email': 'avery@example.test'})
@@ -6527,6 +6527,19 @@ class EngineMailTest(unittest.TestCase):
         self.assertEqual([(method, path) for _, method, path, _ in self.engine.calls
                           if path.startswith('/jobs/leads/')], [
                               ('GET', '/jobs/leads/sources'), ('POST', '/jobs/leads/email-intake')])
+
+    def test_default_labels_never_match_inside_a_longer_label(self):
+        notice = self.lead_notice()
+        rows = [dict(notice, message_id=f'<{i}@example.test>', body=body, local_keys=str(i + 1))
+                for i, body in enumerate([
+                    'Company Name: Example Clinic LLC\nEmail: avery@example.test\nRequest: Clinic lease',
+                    'Name: Avery Example\nPractice Name: Example Clinic LLC\nOffice Phone: 555 010 0000\n'
+                    'Email: avery@example.test\nRequest: Clinic lease',
+                ])]
+        self.fake.intent_reply = read('new_matter', 'Needs review.')
+        self.assertEqual(self.run_intake(rows).state, 'succeeded')
+        self.assertEqual(self.engine.captured_leads, {
+            '1@example.test': {'kind': 'person', 'name': 'Avery Example', 'email': 'avery@example.test'}})
 
     def test_source_field_layout_prefers_exact_address_and_accepts_phone_or_address(self):
         notice = self.lead_notice()
@@ -6596,6 +6609,7 @@ class EngineMailTest(unittest.TestCase):
                 outcome = self.run_intake([notice])
                 self.assertEqual((outcome.state, outcome.counts['lead_proposed']), ('succeeded', 1))
                 self.assertEqual(len(self.engine.posts('/jobs/leads/email-intake')), i)
+                self.assertEqual(self.engine.posts('/jobs/activities')[-1]['email']['body'], notice['body'].strip())
                 self.assertEqual(self.engine.posts('/jobs/proposals/email-lead')[-1]['address'], notice['sender'])
 
     def test_known_source_preview_waits_for_full_body_before_review(self):

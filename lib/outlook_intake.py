@@ -426,9 +426,11 @@ def _lead_facts(body: str, fields: dict[str, str]) -> dict[str, tuple[str, int, 
     """Each field's value and quoted span; None when a field appears twice."""
     labels = {label.strip().casefold(): field for field, label in fields.items()}
     alternatives = '|'.join(map(re.escape, sorted(labels, key=len, reverse=True)))
-    found = list(re.finditer(rf'(?<!\S)({alternatives})[ \t]*:', body, re.IGNORECASE))
+    # Default labels count only at a line start ("Company Name:" is not "Name:"); a source's own may sit mid-line.
+    start = r'^[ \t]*' if fields == engine_mail.DEFAULT_LEAD_FIELDS else r'(?<!\S)'
+    found = list(re.finditer(rf'{start}({alternatives})[ \t]*:', body, re.IGNORECASE | re.MULTILINE))
     facts: dict[str, tuple[str, int, int]] = {}
-    for hit, stop in zip(found, [later.start() for later in found[1:]] + [len(body)]):
+    for hit, stop in zip(found, [later.start(1) for later in found[1:]] + [len(body)]):
         value = LEAD_VALUE.match(body, hit.end(), stop)
         assert value
         parts, end = [(labels[hit[1].casefold()], value[1])], value.end()
@@ -439,7 +441,7 @@ def _lead_facts(body: str, fields: dict[str, str]) -> dict[str, tuple[str, int, 
         for field, fact in parts:
             if field in facts:
                 return None
-            facts[field] = (fact, hit.start(), end)
+            facts[field] = (fact, hit.start(1), end)
     return facts
 
 
@@ -1469,7 +1471,7 @@ class Run:
                               (m['full'], len(m['text'])), inbound,
                               {'kind': 'email', 'happened_at': _iso(m['sent_unix']),
                                'email': {**identity, 'sender': sender, 'recipients': recipients,
-                                         'subject': m['subject'] or '', 'body': m['body'] if lead else m['text'],
+                                         'subject': m['subject'] or '', 'body': m['text'],
                                          **({'sender_name': m['sender_name']} if m.get('sender_name') else {})},
                                **(lead or {})})
         if self.preview is None:
