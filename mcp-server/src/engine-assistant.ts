@@ -204,7 +204,8 @@ export async function readEngineDealWatch(
   if (!response.ok) {
     if (response.status === 404) {
       const refusal = engineResult(await response.json().catch(() => null));
-      if (refusal?.error === "not_found") return { status: "missing" };
+      // The router's generic 404 also says not_found, without a correlation ID.
+      if (refusal?.error === "not_found" && isUuid(refusal.correlation_id)) return { status: "missing" };
     } else {
       await response.body?.cancel().catch(() => {});
     }

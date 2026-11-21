@@ -286,8 +286,13 @@ test('missing and retryable deals do not stall another watch in the same sweep',
   t.mock.method(globalThis, 'fetch', async target => {
     const deal = target.pathname.split('/').at(-1);
     requests.push([deal, target.searchParams.get('since')]);
-    if (deal === missing.deal) return Response.json({ error: 'not_found' }, { status: 404 });
-    if (deal === retry.deal && !recovered) return new Response(null, { status: 503 });
+    if (deal === missing.deal) {
+      return Response.json({
+        error: 'not_found', correlation_id: '00000000-0000-4000-8000-000000000001',
+        hint: 'The requested record was not found.',
+      }, { status: 404 });
+    }
+    if (deal === retry.deal && !recovered) return Response.json({ error: 'not_found' }, { status: 404 });
     return engineWatchResponse(deal, phaseMove(deal, '1', 3, 'negotiation'));
   });
 
