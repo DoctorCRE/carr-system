@@ -69,7 +69,7 @@ create function ops.sweep_subject_watches(p_now timestamptz,p_limit integer,p_en
 language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
 declare
   w record; item record; edit record; revision integer;
-  source_key text; delta jsonb; source_id uuid;
+  source_key text; delta jsonb; source_id uuid; delivery jsonb;
   prior_phase text; phase_change_id bigint; failures integer:=0;
 begin
   if jsonb_typeof(p_engine) is distinct from 'array' or jsonb_array_length(p_engine)>4 then
@@ -157,10 +157,15 @@ begin
       raise warning 'engine watch intake failed for % (%)',w.watch_id,sqlstate;
     end;
   end loop;
-  if failures>0 and failures=jsonb_array_length(p_engine) then
-    return jsonb_build_object('scanned',0,'emitted',0,'engine_failures',failures);
-  end if;
-  return ops.sweep_subject_watches(p_now,p_limit)||jsonb_build_object('engine_failures',failures);
+  begin
+    delivery:=ops.sweep_subject_watches(p_now,p_limit);
+    -- A total engine outage leaves the sweep cursor alone when there was no legacy work.
+    if failures>0 and failures=jsonb_array_length(p_engine) and delivery->>'scanned'='0' then
+      raise sqlstate 'P1189';
+    end if;
+  exception when sqlstate 'P1189' then null;
+  end;
+  return delivery||jsonb_build_object('engine_failures',failures);
 end $$;
 
 revoke all on function ops.read_subject_watch_engine_batch(timestamptz,integer,uuid[]),

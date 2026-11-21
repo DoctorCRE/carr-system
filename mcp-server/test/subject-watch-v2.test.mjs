@@ -307,13 +307,20 @@ test('missing and retryable deals do not stall another watch in the same sweep',
   assert.equal(await progress(retry), null);
   assert.deepEqual(await receipts(), [{ subject_id: healthy.deal, disposition: 'emitted' }]);
 
+  await db.query("update ops.subject_watch_delivery set next_evaluation_at='2027-02-01T12:05:00Z' where watch_id=$1", [healthy.id]);
+  await sweep(5);
+  assert.ok((await db.query(
+    "select next_evaluation_at>'2027-02-01T12:05:00Z' as rescheduled from ops.subject_watch_delivery where watch_id=$1", [healthy.id],
+  )).rows[0].rescheduled);
+  assert.equal(await progress(retry), null);
+
   recovered = true;
   await sweep(10);
   assert.equal((await progress(retry)).toISOString(), '2027-02-01T12:10:00.000Z');
   assert.deepEqual((await receipts()).map(row => row.subject_id), [healthy.deal, retry.deal].sort());
   assert.equal(requests.filter(([deal]) => deal === missing.deal).length, 1);
   assert.deepEqual(requests.filter(([deal]) => deal === retry.deal).map(([, since]) => new Date(since).toISOString()), [
-    '2027-02-01T11:50:00.000Z', '2027-02-01T11:50:00.000Z',
+    '2027-02-01T11:50:00.000Z', '2027-02-01T11:50:00.000Z', '2027-02-01T11:50:00.000Z',
   ]);
   assert.equal((await db.query(
     "select count(*)::int as count from event where verb='subject-watch-engine-target-missing' and subject_id=$1", [missing.id],

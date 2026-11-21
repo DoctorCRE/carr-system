@@ -89,7 +89,7 @@ export async function sweepSubjectWatches(controller: Controller, env: Environme
         const failures =
           "engine_failures" in result && typeof result.engine_failures === "number" ? result.engine_failures : 0;
         engineFailures += failures;
-        completedBatch ||= failures === 0 || failures < (engineChanges?.length ?? 0);
+        completedBatch ||= result.scanned > 0 || failures === 0 || failures < (engineChanges?.length ?? 0);
         if (result.scanned < 50 && (engineChanges?.length ?? 0) < engineBatchLimit) break;
       } catch (error) {
         await query("rollback");
