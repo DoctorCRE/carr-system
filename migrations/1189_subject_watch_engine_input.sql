@@ -8,9 +8,7 @@ alter table ops.subject_watch_delivery
   add column engine_checked_at timestamptz,
   add column engine_floor_at timestamptz,
   add column engine_attempted_at timestamptz,
-  add column engine_missing_at timestamptz,
-  add column engine_phase text,
-  add column engine_phase_change_id bigint;
+  add column engine_missing_at timestamptz;
 
 create function ops.subject_watch_engine_resume() returns trigger
 language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
@@ -26,11 +24,11 @@ execute function ops.subject_watch_engine_resume();
 create function ops.subject_watch_engine_targets()
 returns table(watch_id uuid,lifecycle_version integer,deal_id uuid,subscriber text,actor_id uuid,
   include_self boolean,since timestamptz,engine_checked_at timestamptz,engine_floor_at timestamptz,
-  engine_attempted_at timestamptz,engine_phase text,engine_phase_change_id bigint)
+  engine_attempted_at timestamptz)
 language sql stable set search_path=pg_catalog,pg_temp as $$
   select w.id as watch_id,w.lifecycle_version,w.subject_id as deal_id,a.slug as subscriber,w.actor_id,w.include_self,
     greatest(w.subscribed_at,q.engine_checked_at-interval '5 minutes') as since,q.engine_checked_at,q.engine_floor_at,
-    q.engine_attempted_at,q.engine_phase,q.engine_phase_change_id
+    q.engine_attempted_at
   from (
     select id,actor_id,subject_type,subject_id,subscribed_at,1 as lifecycle_version,true as include_self
     from ops.subject_watch
@@ -70,7 +68,7 @@ language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
 declare
   w record; item record; edit record; revision integer;
   source_key text; delta jsonb; source_id uuid; delivery jsonb;
-  prior_phase text; phase_change_id bigint; failures integer:=0;
+  failures integer:=0;
 begin
   if jsonb_typeof(p_engine) is distinct from 'array' or jsonb_array_length(p_engine)>4 then
     raise exception 'watch_batch_limit';
@@ -108,24 +106,16 @@ begin
         raise exception 'invalid_engine_watch_attempt';
       end if;
 
-      prior_phase:=w.engine_phase;
-      phase_change_id:=w.engine_phase_change_id;
       for edit in select * from jsonb_to_recordset(item.changes) as x(change_id bigint,table_name text,action text,field text,
         old_value jsonb,new_value jsonb,actor text,for_user text,changed_at timestamptz)
         where changed_at between w.since and p_now
           and (table_name<>'deal_phase_change' or (action='insert' and field='phase'))
         order by changed_at,change_id,field
       loop
-        -- Inserts have no old phase. Advance the baseline even for muted or paused moves.
-        if edit.table_name='deal_phase_change' then
-          if edit.change_id<=phase_change_id then continue; end if;
-          if jsonb_typeof(edit.new_value) is distinct from 'string' then raise exception 'invalid_engine_watch_phase'; end if;
-          if phase_change_id is null then
-            select btrim(phase) into prior_phase from public.deal where id=w.deal_id;
-          end if;
-          edit.old_value:=to_jsonb(prior_phase);
-          prior_phase:=edit.new_value#>>'{}';
-          phase_change_id:=edit.change_id;
+        if edit.table_name='deal_phase_change' and
+          (jsonb_typeof(edit.new_value) is distinct from 'string' or
+            (edit.old_value is not null and jsonb_typeof(edit.old_value)<>'string')) then
+          raise exception 'invalid_engine_watch_phase';
         end if;
         if edit.changed_at<w.engine_floor_at or
           (not w.include_self and (edit.actor is not distinct from w.subscriber or edit.for_user is not distinct from w.subscriber))
@@ -150,8 +140,7 @@ begin
           delta,jsonb_build_array(jsonb_build_object('event_id',source_id,'activity_id',null)),edit.changed_at,p_now)
         on conflict(watch_generation_id,semantic_key) do nothing;
       end loop;
-      update ops.subject_watch_delivery set engine_checked_at=p_now,engine_phase=prior_phase,
-        engine_phase_change_id=phase_change_id where watch_id=w.watch_id;
+      update ops.subject_watch_delivery set engine_checked_at=p_now where watch_id=w.watch_id;
     exception when sqlstate '57014' or others then
       failures:=failures+1;
       raise warning 'engine watch intake failed for % (%)',w.watch_id,sqlstate;
