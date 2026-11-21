@@ -6407,6 +6407,7 @@ class FakeEngine:
         self.refuse = []  # (path, status, error), each answered once, in order
         self.filed, self.notes = [], []
         self.agendas, self.leads = {}, {}
+        self.lead_sources, self.captured_leads = [], {}
         self.contact_addresses = None
 
     def door(self, user):
@@ -6415,6 +6416,8 @@ class FakeEngine:
             if self.refuse and path.startswith(self.refuse[0][0]):
                 _, status, error = self.refuse.pop(0)
                 return engine_mail.Reply(status, {'error': error, 'correlation_id': 'c-1', 'hint': ''})
+            if path == '/jobs/leads/sources':
+                return engine_mail.Reply(200, {'senders': self.lead_sources})
             if method == 'GET':
                 after = path.partition('after=')[2]
                 page = [m for m in self.filed if m['activity_id'] > after][:2]
@@ -6448,6 +6451,15 @@ class FakeEngine:
                 self.leads.setdefault(candidate, request)
                 reply = engine_mail.Reply(200 if existing else 201, {
                     'proposal_id': 'p-1', 'status': 'pending', **({'existing': True} if existing else {})})
+            elif path == '/jobs/leads/email-intake':
+                assert request['kind'] == 'lead_source'
+                email = request['email']
+                mid = email['message_id']
+                existing = mid in self.captured_leads
+                self.captured_leads.setdefault(mid, request['prospect'])
+                self.activities.setdefault(mid, request)
+                reply = engine_mail.Reply(200 if existing else 201, {
+                    'activity_id': 'a-' + mid, 'party_id': 'lead-1', 'created_lead': not existing})
             else:
                 reply = self.attach(request) if path == '/jobs/attachments' else self.store(request)
             if reply.status < 300:
@@ -6500,6 +6512,165 @@ class EngineMailTest(unittest.TestCase):
     def old_mail_writes(self):
         return [v for v, _ in self.fake.writes()
                 if v in ('log-activity', 'record-finding', 'attach-deal-file', 'record-deal-item')]
+
+    def lead_notice(self, **overrides):
+        sender = 'intake@source.example.test'
+        self.engine.lead_sources = [{'address': sender, 'domain': None, 'name': 'Example Source'}]
+        return {**mail(sender, -timedelta(hours=1), name='Example Source',
+                       body='\nName: Avery Example\nEmail: avery@example.test\nRequest: Help finding a clinic lease.\n',
+                       message_id=' < Lead@Example.test > '),
+                'conversation_id': 'notice-thread', **overrides}
+
+    def test_lead_source_notice_saves_exact_email_and_prospect(self):
+        notice = self.lead_notice()
+        self.fake.intent_reply = read('new_matter', 'Needs a lease.')
+        outcome = self.run_intake([notice])
+        self.assertEqual(outcome.state, 'succeeded')
+        [request] = self.engine.posts('/jobs/leads/email-intake')
+        self.assertEqual(request['email'], {
+            'message_id': 'Lead@Example.test', 'conversation_id': 'notice-thread',
+            'sender': notice['sender'], 'sender_name': 'Example Source',
+            'subject': notice['subject'], 'body': notice['body'].strip(),
+            'recipients': [{'address': OWNER, 'kind': 'to'}]})
+        self.assertEqual(request['prospect'], {
+            'kind': 'person', 'name': 'Avery Example', 'email': 'avery@example.test'})
+        self.assertEqual(request['evidence'], notice['body'].strip())
+        self.assertEqual(request['happened_at'], (NOW - timedelta(hours=1)).isoformat())
+        self.assertEqual(self.engine.posts('/jobs/activities'), [])
+        self.assertEqual(self.engine.posts('/jobs/proposals/email-lead'), [])
+        self.assertEqual(self.fake.intent_calls, [])
+        self.assertEqual([(method, path) for _, method, path, _ in self.engine.calls
+                          if path.startswith('/jobs/leads/')], [
+                              ('GET', '/jobs/leads/sources'), ('POST', '/jobs/leads/email-intake')])
+
+    def test_default_labels_never_match_inside_a_longer_label(self):
+        notice = self.lead_notice()
+        rows = [dict(notice, message_id=f'<{i}@example.test>', body=body, local_keys=str(i + 1))
+                for i, body in enumerate([
+                    'Company Name: Example Clinic LLC\nEmail: avery@example.test\nRequest: Clinic lease',
+                    'Name: Avery Example\nPractice Name: Example Clinic LLC\nOffice Phone: 555 010 0000\n'
+                    'Email: avery@example.test\nRequest: Clinic lease',
+                ])]
+        self.fake.intent_reply = read('new_matter', 'Needs review.')
+        self.assertEqual(self.run_intake(rows).state, 'succeeded')
+        self.assertEqual(self.engine.captured_leads, {
+            '1@example.test': {'kind': 'person', 'name': 'Avery Example', 'email': 'avery@example.test'}})
+
+    def test_source_field_layout_prefers_exact_address_and_accepts_phone_or_address(self):
+        notice = self.lead_notice()
+        self.engine.lead_sources = [
+            {'address': None, 'domain': 'source.example.test', 'name': 'Example Domain'},
+            {'address': notice['sender'], 'domain': None, 'name': 'Example Sender',
+             'fields': {'name': 'Contact', 'request': 'Needs Help With', 'phone': 'Telephone',
+                        'street_address': 'Street', 'city': 'City'}}]
+        rows = [dict(notice, message_id=f'<{i}@example.test>', body=body, local_keys=str(i + 1))
+                for i, body in enumerate([
+                    'Contact: Avery Example\nTelephone: +44 20 7946 0018\nNeeds Help With: New clinic lease',
+                    'Contact: Lee Example\nStreet: 12 Fixture Row\nCity: Example City\nNeeds Help With: Clinic lease',
+                ])]
+        self.assertEqual(self.run_intake(rows).state, 'succeeded')
+        self.assertEqual(self.engine.captured_leads, {
+            '0@example.test': {'kind': 'person', 'name': 'Avery Example', 'phone': '+442079460018'},
+            '1@example.test': {'kind': 'person', 'name': 'Lee Example',
+                               'street_address': '12 Fixture Row', 'city': 'Example City'}})
+
+    def test_flowing_notice_reads_contact_extras_without_a_request_label(self):
+        notice = self.lead_notice()
+        self.engine.lead_sources[0]['fields'] = {'name': 'Contact', 'street_address': 'Address'}
+        head = ('2 New Practice in Example State Nov 20, 2026 \u00b7 Example Report \u00b7 2 Needs Space '
+                'EXAMPLE CLINIC PLLCNEEDS SPACEOpening a second site. Dentistry \u00b7 EXAMPLE CITY, EX ')
+        tail = ' No Listing Identified: 2026-11-01 \u00b7 Score: 7/10 A short narrative.'
+        rows = [dict(notice, message_id=f'<{i}@example.test>', local_keys=str(i + 1), body=head + contact + tail)
+                for i, contact in enumerate([
+                    'Contact: AVERY EXAMPLE \u00b7 +44 20 7946 0018',
+                    'Contact: LEE EXAMPLE \u00b7 lee@example.test Address: 12 Fixture Row, EXAMPLE CITY, EX 00000',
+                    'Contact: SAM EXAMPLE \u00b7 \u2014 Address: 12 Fixture Row, EXAMPLE CITY, EX 00000',
+                ])]
+        self.fake.intent_reply = read('new_matter', 'Needs review.')
+        self.assertEqual(self.run_intake(rows).state, 'succeeded')
+        self.assertEqual(self.engine.captured_leads, {
+            '0@example.test': {'kind': 'person', 'name': 'AVERY EXAMPLE', 'phone': '+442079460018'},
+            '1@example.test': {'kind': 'person', 'name': 'LEE EXAMPLE', 'email': 'lee@example.test'}})
+        self.assertEqual({r['evidence'] for r in self.engine.posts('/jobs/leads/email-intake')}, {
+            'Contact: AVERY EXAMPLE \u00b7 +44 20 7946 0018', 'Contact: LEE EXAMPLE \u00b7 lee@example.test'})
+        self.assertEqual([p['address'] for p in self.engine.posts('/jobs/proposals/email-lead')], [notice['sender']])
+
+    def test_direct_internal_ordinary_and_incomplete_mail_keep_current_routing(self):
+        incomplete = self.lead_notice(body='Name: Avery Example\nRequest: Help finding a clinic lease.')
+        self.engine.lead_sources.append({'address': None, 'domain': OWNER.split('@')[1], 'name': 'Internal'})
+        rows = [incomplete,
+                dict(incomplete, sender=OWNER, recipients=CLIENT.email, message_id='<internal@example.test>', local_keys='2',
+                     body='Name: Avery Example\nEmail: avery@example.test\nRequest: Clinic lease'),
+                mail('direct@external.example.test', -timedelta(minutes=40), message_id='<direct@example.test>',
+                     name='Lee Example', body='I need help leasing space for my clinic.'),
+                mail(CLIENT.email, -timedelta(minutes=30), message_id='<ordinary@example.test>')]
+        self.fake.intent_reply = read('new_matter', 'Needs review.')
+        outcome = self.run_intake(rows)
+        self.assertEqual(outcome.state, 'succeeded')
+        self.assertEqual(self.engine.posts('/jobs/leads/email-intake'), [])
+        self.assertEqual(len(self.engine.posts('/jobs/activities')), len(rows))
+        self.assertEqual({p['address'] for p in self.engine.posts('/jobs/proposals/email-lead')},
+                         {incomplete['sender'], 'direct@external.example.test'})
+
+    def test_lead_source_lookup_failure_and_intake_decline_use_current_routing(self):
+        for i, path in enumerate(('/jobs/leads/sources', '/jobs/leads/email-intake')):
+            with self.subTest(path=path):
+                notice = self.lead_notice(sender=f'source{i}@source.example.test', message_id=f'<{i}@example.test>',
+                                          sent_unix=ts(-timedelta(minutes=30 - i)))
+                self.engine.lead_sources = [{'address': None, 'domain': 'source.example.test', 'name': 'Examples'}]
+                self.engine.refuse.append((path, 503 if i == 0 else 422,
+                                           'database_unavailable' if i == 0 else 'lead_email_not_eligible'))
+                self.fake.intent_reply = read('new_matter', 'Needs review.')
+                outcome = self.run_intake([notice])
+                self.assertEqual((outcome.state, outcome.counts['lead_proposed']), ('succeeded', 1))
+                self.assertEqual(len(self.engine.posts('/jobs/leads/email-intake')), i)
+                self.assertEqual(self.engine.posts('/jobs/activities')[-1]['email']['body'], notice['body'].strip())
+                self.assertEqual(self.engine.posts('/jobs/proposals/email-lead')[-1]['address'], notice['sender'])
+
+    def test_known_source_preview_waits_for_full_body_before_review(self):
+        notice = self.lead_notice()
+        self.fake.intent_reply = read('new_matter', 'Needs a lease.')
+        preview = dict(notice, body_kind='preview', body='Name: Avery Example')
+        self.assertEqual(self.run_intake([preview]).state, 'succeeded')
+        self.assertEqual(self.engine.posts('/jobs/leads/email-intake'), [])
+        self.assertEqual(self.fake.intent_calls, [])
+        self.assertEqual(self.run_intake([notice]).state, 'succeeded')
+        self.assertEqual(len(self.engine.captured_leads), 1)
+        self.assertEqual(self.engine.posts('/jobs/proposals/email-lead'), [])
+
+    def test_lead_source_retries_exact_request_after_lost_reply(self):
+        notice = self.lead_notice()
+        path = '/jobs/leads/email-intake'
+        door = self.engine.door('joe')
+
+        def lose_reply(method, url, body):
+            reply = door(method, url, body)
+            return engine_mail.Reply(0, {}) if url == path and not reply.body.get('replayed') else reply
+
+        self.fake.ports = lambda: replace(self.plain_ports(), engine=lose_reply)
+        self.fake.intent_reply = read('new_matter', 'Needs a lease.')
+        self.assertEqual(self.run_intake([notice]).reason, 'writes_failed')
+        self.assertEqual(self.run_intake([notice], touch=False).state, 'succeeded')
+        first, retry = self.engine.posts(path)
+        self.assertEqual(first, retry)
+        self.assertEqual(len(self.engine.captured_leads), 1)
+        self.assertEqual(self.engine.posts('/jobs/activities'), [])
+        self.assertEqual(self.engine.posts('/jobs/proposals/email-lead'), [])
+
+    def test_duplicate_lead_notice_in_second_mailbox_reuses_lead(self):
+        notice = self.lead_notice()
+        self.assertEqual(self.run_intake([notice]).state, 'succeeded')
+        work = intake.Run(replace(self.plain_ports(), engine=self.engine.door('dell')), {}, NOW, self.out(),
+                          replace(load_settings(self.home), owner='dell', account=PARTNER))
+        second_copy = dict(notice, message_id='<Lead@Example.test>', recipients=PARTNER,
+                           sent_unix=notice['sent_unix'], row_ids=[2], local_keys='2', body_completeness='complete')
+        work.engine_emails(intake._best_copies([second_copy]), intake.Matcher([], work.settings.internal_domain), 0)
+        work.leads(intake.Matcher([], work.settings.internal_domain))
+        first, duplicate = self.engine.posts('/jobs/leads/email-intake')
+        self.assertEqual(first['email']['message_id'], duplicate['email']['message_id'])
+        self.assertNotEqual(first['idempotency_key'], duplicate['idempotency_key'])
+        self.assertEqual(len(self.engine.captured_leads), 1)
+        self.assertEqual(self.engine.posts('/jobs/proposals/email-lead'), [])
 
     def test_switch_off_writes_the_record_layer_and_never_the_engine(self):
         self.fake.ports = self.plain_ports
@@ -7071,8 +7242,8 @@ class EngineMailTest(unittest.TestCase):
                           'name': 'Lease.pdf', 'sha256': hashlib.sha256(self.pdf).hexdigest()})
         self.assertEqual(self.uploads, {})
         self.assertEqual(self.old_mail_writes(), [])
-        self.assertEqual([c[1] for c in self.engine.calls if c[2] != '/jobs/calendar/agenda'],
-                         ['POST', 'PUT', 'POST', 'GET'], 'the email goes first')
+        self.assertEqual([c[1] for c in self.engine.calls if c[2] not in (
+            '/jobs/calendar/agenda', '/jobs/leads/sources')], ['POST', 'PUT', 'POST', 'GET'], 'the email goes first')
 
     def test_attachment_refused_until_the_email_is_stored_waits_for_the_next_run(self):
         self.engine.refuse.append(('/jobs/attachments', 409, 'email_not_stored'))

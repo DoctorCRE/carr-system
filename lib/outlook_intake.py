@@ -77,9 +77,11 @@ the engine's doors instead (lib/engine_mail.py): the engine links the email to i
 parties itself, and intake writes no activity, full-text note or deal file to the
 record layer for that email. The links note goes to the engine too, from its
 filed-emails read. Mail the record layer already holds is left to the copy, and its old
-email writes are not replayed. The partner's calendar agenda and new-matter
-lead proposals go to the engine too. Pending Engine lead requests stay in the ledger
-while the switch is off and resume with the same payload and key when it is on again.
+email writes are not replayed. Intake sends complete notices from known lead sources
+to the lead intake door before filing. The partner's calendar agenda and remaining
+new-matter lead proposals go to the engine too. Pending Engine lead requests stay in
+the ledger while the switch is off and resume with the same payload and key when it
+is on again.
 Signature contact findings, Outlook flag items and delivery-failure findings stay on
 the record layer.
 
@@ -413,6 +415,62 @@ def automated(address: str) -> bool:
 
 def proposable(address: str) -> bool:
     return bool(PROPOSABLE.match(address.strip().lower()))
+
+
+# A labeled value may trail " · " contact facts known by their shape; a dash says there is none.
+LEAD_EXTRA = re.compile(r'\s+·\s+(?:(?P<email>[^\s@·]+@[^\s@·]+)|(?P<phone>\+?[(\d][\d ().-]*\d)|[—–-])(?![^\s·])')
+LEAD_VALUE = re.compile(r'[ \t]*([^\r\n]*?)[ \t]*(?=\s+·\s|[\r\n]|\Z)')
+
+
+def _lead_facts(body: str, fields: dict[str, str]) -> dict[str, tuple[str, int, int]] | None:
+    """Each field's value and quoted span; None when a field appears twice."""
+    labels = {label.strip().casefold(): field for field, label in fields.items()}
+    alternatives = '|'.join(map(re.escape, sorted(labels, key=len, reverse=True)))
+    # Default labels count only at a line start ("Company Name:" is not "Name:"); a source's own may sit mid-line.
+    start = r'^[ \t]*' if fields == engine_mail.DEFAULT_LEAD_FIELDS else r'(?<!\S)'
+    found = list(re.finditer(rf'{start}({alternatives})[ \t]*:', body, re.IGNORECASE | re.MULTILINE))
+    facts: dict[str, tuple[str, int, int]] = {}
+    for hit, stop in zip(found, [later.start(1) for later in found[1:]] + [len(body)]):
+        value = LEAD_VALUE.match(body, hit.end(), stop)
+        assert value
+        parts, end = [(labels[hit[1].casefold()], value[1])], value.end()
+        while extra := LEAD_EXTRA.match(body, end, stop):
+            end = extra.end()
+            if extra.lastgroup:
+                parts.append((extra.lastgroup, extra[extra.lastgroup]))
+        for field, fact in parts:
+            if field in facts:
+                return None
+            facts[field] = (fact, hit.start(1), end)
+    return facts
+
+
+def _lead_notice(body: str, sender: str, fields: dict[str, str]) -> dict | None:
+    if (spans := _lead_facts(body, fields)) is None:
+        return None
+    facts = {field: fact for field, (fact, _, _) in spans.items() if fact}
+    if not facts.get('name') or ('request' in fields and not facts.get('request')):
+        return None
+    prospect = {'kind': 'person', 'name': facts['name']}
+    email = facts.get('email', '').lower()
+    if email != sender and proposable(email):
+        prospect['email'] = email
+    phone = facts.get('phone', '')
+    if re.fullmatch(r'\+?[0-9 ().-]+', phone):
+        phone = re.sub(r'[ ().-]', '', phone)
+        if re.fullmatch(r'[2-9][0-9]{2}[2-9][0-9]{6}', phone):
+            phone = '+1' + phone
+        elif re.fullmatch(r'1[2-9][0-9]{2}[2-9][0-9]{6}', phone):
+            phone = '+' + phone
+        if re.fullmatch(r'\+(?:1[2-9][0-9]{2}[2-9][0-9]{6}|[2-9][0-9]{6,14})', phone):
+            prospect['phone'] = phone
+    if facts.get('street_address') and facts.get('city'):
+        prospect.update(street_address=facts['street_address'], city=facts['city'])
+    if len(prospect) == 2:
+        return None
+    quoted = [span for field, span in spans.items() if field == 'request' or field in prospect]
+    return {'kind': 'lead_source', 'prospect': prospect,
+            'evidence': body[min(start for _, start, _ in quoted):max(end for _, _, end in quoted)].strip()}
 
 
 def _clean_name(name: str | None, subject: str | None) -> str | None:
@@ -1384,6 +1442,8 @@ class Run:
     def engine_emails(self, mails: list[dict], matcher: Matcher, since: int) -> None:
         assert self.engine
         leads = self.state.setdefault('engine_leads', {})
+        sources = self.engine.lead_sources() if self.preview is None else {}
+        candidates = []
         copied = {(json.loads(r['payload']).get('message_id') or '').strip().strip('<>')
                   for r in self.state.get('requests', {}).values()
                   if r['verb'] == 'log-activity' and r['acknowledged'] and r.get('disposition') != 'moved_to_engine'
@@ -1396,23 +1456,30 @@ class Run:
             if (m['metadata_incomplete'] or m['sent_unix'] > self.now.timestamp() + 300 or message_id in copied
                     or (m['sent_unix'] < since and not self.engine.holds(message_id) and m['ident'] not in self.file_idents)):
                 continue
-            inbound = not _internal(m['sender'], self.settings.internal_domain)
-            if inbound and matcher.classify(m['sender']) == 'missing' and proposable(m['sender']):
-                self.lead_candidates.append((m, leads.setdefault(m['ident'], {'sent': m['sent_unix']})))
+            sender = m['sender'].lower()
+            inbound = not _internal(sender, self.settings.internal_domain)
+            fields = sources.get(sender, sources.get(_domain(sender))) if sources and inbound else None
+            if inbound and matcher.classify(sender) == 'missing' and proposable(sender):
+                candidates.append((m, message_id, fields is not None))
             if not message_id:
                 self.engine.count('engine_message_id_missing')
                 continue
             recipients = [{'address': address, 'kind': kind} for field, kind in (('recipients', 'to'), ('cc', 'cc'))
                           for address in dict.fromkeys(_addresses(m.get(field)))]
+            lead = _lead_notice(m['body'], sender, fields) if fields and m['full'] else None
             self.engine.offer(message_id, m['sent_unix'], m['full'] and bool(recipients or inbound),
                               (m['full'], len(m['text'])), inbound,
                               {'kind': 'email', 'happened_at': _iso(m['sent_unix']),
-                               'email': {**identity, 'sender': m['sender'].lower(),
-                                         'recipients': recipients, 'subject': m['subject'] or '',
-                                         'body': m['text'],
-                                         **({'sender_name': m['sender_name']} if m.get('sender_name') else {})}})
+                               'email': {**identity, 'sender': sender, 'recipients': recipients,
+                                         'subject': m['subject'] or '', 'body': m['text'],
+                                         **({'sender_name': m['sender_name']} if m.get('sender_name') else {})},
+                               **(lead or {})})
         if self.preview is None:
-            self.engine.send_emails(self.catch_up_since)
+            self.engine.send_emails(self.catch_up_since, lead_sources_available=sources is not None)
+            for mail, message_id, known_source in candidates:
+                if known_source and self.engine.waits_for_body(message_id):
+                    continue
+                self.lead_candidates.append((mail, leads.setdefault(mail['ident'], {'sent': mail['sent_unix']})))
         else:
             for mid, request in self.engine.email_requests(since).items():
                 email = request['email']
@@ -1851,9 +1918,13 @@ class Run:
         if self.catch_up_since is None:
             self.state['reads_due'] = False
         if self.engine and self.catch_up_since is None:
-            for progress in self.state['engine_leads'].values():
-                if 'request' in progress:
-                    self.send_engine_lead(progress)
+            for ident, progress in self.state['engine_leads'].items():
+                if request := progress.get('request'):
+                    lead = self.engine.lead_intake_state(request.get('message_id') or self.message_ids.get(ident))
+                    if lead == 'settled':
+                        del progress['request']
+                    elif lead is None:
+                        self.send_engine_lead(progress)
         if self.ports.read_unresolved is None:
             return
         queued = {p['sender'] for table in ('mail_unresolved', 'engine_leads')
@@ -1861,6 +1932,8 @@ class Run:
         engine_leads = self.state.get('engine_leads', {})
         deals, failures = None, 0
         for m, progress in self.lead_candidates:
+            if self.engine and self.engine.lead_intake_state(self.message_ids.get(m['ident'])):
+                continue
             if not self.engine and 'request' in engine_leads.get(m['ident'], {}):
                 continue
             address = m['sender'].lower()

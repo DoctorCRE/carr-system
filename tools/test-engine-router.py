@@ -137,6 +137,22 @@ class SwitchOn(unittest.TestCase):
         self.assertEqual(engine.saved('/jobs/proposals')[0]['party_id'], CLIENT)
         self.assertNotIn('deal_id', engine.saved('/jobs/proposals')[0])
 
+    def test_captured_lead_only_skips_filing(self):
+        engine = Engine([mail('lead', ASK, deals=[], lead_source=True),
+                         mail('other', ASK, deals=[], lead_source=False)])
+        matched = []
+
+        def matching(email, *_):
+            matched.append(email['activity_id'])
+            return email_matching.MatchDecision('possible_new_deal', confidence=0.9)
+
+        counts = email_router.route(engine_router.verbs(engine, 'joe'), lambda *_: {'proposals': [STEP]},
+                                    engine_router.refusal_code, {}, NOW, lambda: NOW,
+                                    matching=matching, account=BROKER)
+        self.assertEqual((matched, counts['routed']), (['other'], 2))
+        self.assertEqual([(p['activity_id'], p['kind']) for p in engine.saved('/jobs/proposals')],
+                         [('lead', 'next_step'), ('other', 'possible_new_deal'), ('other', 'next_step')])
+
     def test_a_reply_with_no_conversation_id_inherits_by_subject_and_then_gets_its_next_step(self):
         prior = {'activity_id': 'e0', 'deal_id': DEAL, 'happened_at': '2026-11-19T14:00:00+00:00',
                  'subject': 'Clinic space', 'sender': SENDER}

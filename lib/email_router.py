@@ -256,7 +256,7 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
         # Filing first: matching and thread inheritance never wait on the next-step model below.
         # An email already on several deals stays there: no new link, and nothing is stored against one of them.
         deal = email.get('deal')
-        if not deal and not rechecking and not email.get('several_deals'):
+        if not deal and not rechecking and not email.get('several_deals') and not email.get('lead_source'):
             try:
                 decision = matching(email, queue['open_deals'], email.get('thread_history', []))
             except Exception as error:

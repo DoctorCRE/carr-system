@@ -94,7 +94,7 @@ def _email(mail: dict, owner: str) -> dict:
             'kind': 'email_out' if mail.get('outgoing') else 'email_in',
             'summary': mail.get('subject') or '', 'subject': mail.get('subject') or '', 'body': mail.get('body') or '',
             'conversation_id': mail.get('conversation_id'), 'sender': people[0], 'recipients': people[1:],
-            'mailbox_owner': mail.get('mailbox_user') or owner,
+            'mailbox_owner': mail.get('mailbox_user') or owner, 'lead_source': mail.get('lead_source') is True,
             'subject_id': party, 'subject_name': contact['name'] if contact else None,
             'deal': filed.get('deal_id'), 'deal_name': filed.get('name'), 'phase': filed.get('phase'),
             'deal_type': filed.get('kind'), 'several_deals': len(linked) > 1, 'suppressed_deals': mail.get('suppressed_deal_ids') or [],
