@@ -74,6 +74,7 @@ pub struct Recipient {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Body {
     Html(String),
+    LossyHtml(String),
     Sidecar(String),
 }
 
@@ -206,7 +207,10 @@ fn body(data: &[u8]) -> Option<(u64, Body)> {
     let body = if o.external(BODY_HTML) {
         Body::Sidecar(text(value).filter(|p| p.starts_with("~/Files/"))?)
     } else {
-        Body::Html(String::from_utf8_lossy(value).into_owned())
+        match String::from_utf8_lossy(value) {
+            std::borrow::Cow::Borrowed(html) => Body::Html(html.to_owned()),
+            std::borrow::Cow::Owned(html) => Body::LossyHtml(html),
+        }
     };
     Some((owner, body))
 }

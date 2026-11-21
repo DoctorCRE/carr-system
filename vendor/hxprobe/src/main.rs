@@ -201,7 +201,10 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              pinned       INTEGER,
              received_unix INTEGER,  -- delivery or save-to-folder time, slot +278
              -- 1 when the current folder reference names no catalogued folder of the account
-             folder_links_unresolved INTEGER NOT NULL
+             folder_links_unresolved INTEGER NOT NULL,
+             authored     TEXT,
+             history      TEXT,
+             CHECK ((authored IS NULL) = (history IS NULL))
          );
          CREATE TABLE message_folders (
              message_id INTEGER NOT NULL REFERENCES messages(id),
@@ -430,9 +433,9 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                     html,body_words,html_bytes,body_kind,body_completeness,body_outcome,sent_unix,sent_utc,
                     subject_inherited,preview,body_source,copies,copy_key,local_keys,
                     flag_status,flag_due_unix,flag_completed_unix,moved_to_other,pinned,received_unix,
-                    folder_links_unresolved)
+                    folder_links_unresolved,authored,history)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,
-                         datetime(?14,'unixepoch'),0,?15,?16,?17,NULL,?18,?19,?20,?21,?22,?23,?24,?25)",
+                         datetime(?14,'unixepoch'),0,?15,?16,?17,NULL,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27)",
             )
             .expect("prepare");
 
@@ -448,6 +451,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                 .filter(|p| matches!(p.kind, message::TO | message::CC | message::BCC))
                 .map(|p| p.address.as_str())
                 .collect();
+            let split = r.html.as_deref().filter(|_| !r.lossy_html).map(body::split_html);
             ins.execute(rusqlite::params![
                 m.block as i64,
                 m.sender,
@@ -474,6 +478,8 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                 d.and_then(|d| d.pinned),
                 m.received_unix,
                 r.folder.is_none() as i64,
+                split.as_ref().map(|s| s.authored.as_str()),
+                split.as_ref().map(|s| s.history.as_str()),
             ])
             .expect("insert");
             let message_id = tx.last_insert_rowid();
@@ -736,6 +742,7 @@ struct Row<'a> {
     key: u64,
     m: &'a message::Message,
     html: Option<String>,
+    lossy_html: bool,
     body: String,
     body_source: Option<&'static str>,
     completeness: Completeness,
@@ -747,9 +754,14 @@ impl<'a> Row<'a> {
     fn new(key: u64, m: &'a message::Message, sidecars: &mut body::Sidecars, folders: &folder::Index) -> Self {
         let mut candidates = std::collections::BTreeMap::new();
         let mut failure = None;
+        let mut lossy_html = false;
         for b in &m.bodies {
             let (decoded, source) = match b {
                 message::Body::Html(html) => (Ok(html.clone()), "inline"),
+                message::Body::LossyHtml(html) => {
+                    lossy_html = true;
+                    (Ok(html.clone()), "inline")
+                }
                 message::Body::Sidecar(path) => {
                     let decoded = sidecars.resolve(path);
                     if decoded.is_ok() { sidecars.linked += 1; } else { sidecars.rejected += 1; }
@@ -791,7 +803,7 @@ impl<'a> Row<'a> {
         }
         // The folder must be a catalogued folder of the message's own account.
         let folder = m.folder.filter(|f| folders.folders.get(f).is_some_and(|x| Some(x.account_id) == m.account));
-        Row { key, m, html, body, body_source, completeness, outcome, folder }
+        Row { key, m, html, lossy_html, body, body_source, completeness, outcome, folder }
     }
 }
 

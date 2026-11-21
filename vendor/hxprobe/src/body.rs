@@ -10,6 +10,9 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+mod split;
+pub use split::split_html;
+
 const MAX_SIDECAR: u64 = 32 << 20;
 
 #[derive(Default)]
