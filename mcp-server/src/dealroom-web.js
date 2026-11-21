@@ -212,7 +212,18 @@ function envForDealroomOrigin(env, origin) {
   const scoped = Object.create(env || null);
   scoped.PRIMARY_APP_HOST = env?.APP_HOST || env?.DEALROOM_HOST;
   scoped.APP_HOST = new URL(origin).hostname;
+  const appOrigin = doctorcreAppOrigin(env) ?? (env?.APP_HOST ? dealroomOrigin(env) : null);
+  scoped.APP_BROWSER_SESSION_CUTOFF = origin === appOrigin ? env.APP_BROWSER_SESSION_CUTOFF : undefined;
   return scoped;
+}
+
+function meetsAppBrowserCutoff(env, issuedAt) {
+  const configured = env.APP_BROWSER_SESSION_CUTOFF;
+  if (configured === undefined || configured === "") return true;
+  if (typeof configured !== "string") return false;
+  const cutoff = Date.parse(configured);
+  if (!Number.isFinite(cutoff) || new Date(cutoff).toISOString() !== configured) return false;
+  return Number.isFinite(issuedAt) && issuedAt >= cutoff;
 }
 
 function legacyDealroomOrigin(env) {
@@ -314,7 +325,7 @@ async function refusal(env, request) {
     { status: 403, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }
 
-async function startLogin(request, env, pending = {}) {
+async function startLogin(request, env, dependencies, pending = {}) {
   if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET || !env.OAUTH_KV) {
     return new Response("Sign-in is not configured.", { status: 503, headers: { "cache-control": "no-store" } });
   }
@@ -326,6 +337,7 @@ async function startLogin(request, env, pending = {}) {
   await env.OAUTH_KV.put(PENDING_PREFIX + state, JSON.stringify({
     verifier,
     returnTo: safeReturnTo(url.searchParams.get("return_to"), origin),
+    createdAt: dependencies.now(),
     ...pending,
   }), { expirationTtl: PENDING_TTL });
   const google = await googleAuthorizationUrl({ clientId: env.GOOGLE_CLIENT_ID,
@@ -353,7 +365,7 @@ async function completeLogin(request, env, dependencies) {
   const pendingKey = PENDING_PREFIX + state;
   const pending = await env.OAUTH_KV.get(pendingKey, { type: "json" });
   await env.OAUTH_KV.delete(pendingKey);
-  if (!pending?.verifier) {
+  if (!pending?.verifier || !meetsAppBrowserCutoff(env, pending.createdAt)) {
     return finish(new Response("That sign-in request is invalid or expired.",
       { status: 400, headers: { "cache-control": "no-store" } }));
   }
@@ -436,7 +448,7 @@ async function sessionFor(request, env, dependencies) {
   if (!opaque || !env.OAUTH_KV) return null;
   const key = SESSION_PREFIX + await sha256(opaque);
   const session = await env.OAUTH_KV.get(key, { type: "json" });
-  if (!session) return null;
+  if (!session || !meetsAppBrowserCutoff(env, session.createdAt)) return null;
   if (session.e2ePrincipal && (session.e2ePrincipal !== E2E_PRINCIPAL || !isStagingBrowserEnvironment(env))) return null;
   const now = dependencies.now();
   let actor = dependencies.actorFromPropsFn(session.props);
@@ -794,7 +806,7 @@ async function startReauth(request, env, dependencies) {
   if (!origin) return json({ error: "not_found" }, 404);
   const session = await sessionFor(request, env, dependencies);
   if (!session) return redirect(`${origin}/auth/login?return_to=${encodeURIComponent(safeReturnTo(new URL(request.url).searchParams.get("return_to"), origin))}`);
-  const response = await startLogin(request, env, { purpose: "reauth", sessionKey: session.key });
+  const response = await startLogin(request, env, dependencies, { purpose: "reauth", sessionKey: session.key });
   return attachRefresh(response, session.refreshCookie);
 }
 
@@ -1124,7 +1136,7 @@ async function handleRequest(request, env, ctx, dependencies) {
       const publicResponse = await publicShellAsset(env, request, url.pathname);
       if (publicResponse) return publicResponse;
       if (url.pathname === "/auth/e2e-session") return e2eSession(request, env, dependencies);
-      if (url.pathname === "/auth/login" && request.method === "GET") return startLogin(request, env);
+      if (url.pathname === "/auth/login" && request.method === "GET") return startLogin(request, env, dependencies);
       if (url.pathname === "/auth/callback" && request.method === "GET") return completeLogin(request, env, dependencies);
       if (url.pathname === "/auth/reauth" && request.method === "GET") return startReauth(request, env, dependencies);
       // The first prototype's workspace API was intentionally retired. Keep

@@ -64,13 +64,15 @@ async function login(handler, environment, email, { host = environment.DEALROOM_
   const google = new URL(start.headers.get("location"));
   assert.equal(google.hostname, "accounts.google.com");
   assert.equal(google.searchParams.get("redirect_uri"), `https://${host}/auth/callback`);
-  const state = google.searchParams.get("state");
-  const pendingCookie = namedCookie(start, "__Host-dealroom_oauth");
-  const callback = await handler.fetch(new Request(
-    `https://${host}/auth/callback?state=${state}&code=stub-code`,
-    { headers: { cookie: pendingCookie, "x-test-email": email } },
-  ), environment, {});
-  return callback;
+  return finishLogin(handler, environment, host, start, { "x-test-email": email });
+}
+
+function finishLogin(handler, environment, host, start, headers = {}) {
+  const state = new URL(start.headers.get("location")).searchParams.get("state");
+  const pending = namedCookie(start, "__Host-dealroom_oauth");
+  return handler.fetch(new Request(`https://${host}/auth/callback?state=${state}&code=stub-code`, {
+    headers: { ...headers, cookie: headers.cookie ? `${headers.cookie}; ${pending}` : pending },
+  }), environment, {});
 }
 
 function identityOverrides(email, clock) {
@@ -90,6 +92,91 @@ function identityOverrides(email, clock) {
 function identityHandler(email, clock) {
   return createDealroomHandler(identityOverrides(email, clock));
 }
+
+test("app session cutoff ends old cookies and allows fresh sign-in during rollback", async () => {
+  const clock = { now: 1_800_000_000_000 };
+  const environment = { ...env(APP_HOST), APP_HOST };
+  const handler = identityHandler(TEST_PARTNER_EMAIL, clock);
+  const signIn = async () =>
+    namedCookie(await login(handler, environment, TEST_PARTNER_EMAIL), "__Host-dealroom_session");
+  const read = cookie => handler.fetch(new Request(`https://${APP_HOST}/auth/session`, {
+    headers: { cookie },
+  }), environment, {});
+  const oldCookie = await signIn();
+  assert.equal((await read(oldCookie)).status, 200);
+
+  clock.now += 1;
+  environment.APP_BROWSER_SESSION_CUTOFF = new Date(clock.now).toISOString();
+  assert.equal((await read(oldCookie)).status, 401);
+
+  const boundaryCookie = await signIn();
+  clock.now += 1;
+  const freshCookie = await signIn();
+  for (const cookie of [boundaryCookie, freshCookie]) {
+    assert.equal((await read(cookie)).status, 200);
+  }
+  assert.equal((await read(oldCookie)).status, 401);
+});
+
+test("late app login and reauth callbacks clear pending state without exchanging a Google code", async () => {
+  const clock = { now: 1_800_000_000_000 };
+  const environment = { ...env(APP_HOST), APP_HOST };
+  let exchanges = 0;
+  const overrides = identityOverrides(TEST_PARTNER_EMAIL, clock);
+  const handler = createDealroomHandler({
+    ...overrides,
+    exchangeGoogleCodeFn: async () => {
+      exchanges++;
+      return overrides.exchangeGoogleCodeFn();
+    },
+  });
+  const session = namedCookie(await login(handler, environment, TEST_PARTNER_EMAIL), "__Host-dealroom_session");
+  const start = (path, headers) => handler.fetch(new Request(`https://${APP_HOST}/auth/${path}`, { headers }),
+    environment, {});
+  const loginStart = await start("login");
+  const legacyStart = await start("login");
+  const reauthStart = await start("reauth", { cookie: session });
+  for (const response of [loginStart, legacyStart, reauthStart]) {
+    assert.equal(response.status, 302);
+    assert.equal(new URL(response.headers.get("location")).hostname, "accounts.google.com");
+  }
+  const legacyState = new URL(legacyStart.headers.get("location")).searchParams.get("state");
+  const key = `dealroom_pending:${legacyState}`;
+  const stored = await environment.OAUTH_KV.get(key, { type: "json" });
+  delete stored.createdAt;
+  await environment.OAUTH_KV.put(key, JSON.stringify(stored));
+
+  clock.now += 1;
+  environment.APP_BROWSER_SESSION_CUTOFF = new Date(clock.now).toISOString();
+  for (const flow of [loginStart, legacyStart, reauthStart]) {
+    const response = await finishLogin(handler, environment, APP_HOST, flow, { cookie: session });
+    assert.equal(response.status, 400);
+    assert.equal(setCookies(response).length, 1);
+    assert.match(setCookies(response)[0], /^__Host-dealroom_oauth=;.*Max-Age=0/);
+  }
+  assert.equal(exchanges, 1);
+});
+
+test("the staging app cutoff leaves the other browser host's session and pending login usable", async () => {
+  const clock = { now: 1_800_000_000_000 };
+  const environment = { ...env(STAGING_HOST), APP_HOST: STAGING_HOST, DOCTORCRE_APP_HOST: DOCTORCRE_STAGING_HOST };
+  const handler = identityHandler(TEST_PARTNER_EMAIL, clock);
+  const session = async host =>
+    namedCookie(await login(handler, environment, TEST_PARTNER_EMAIL, { host }), "__Host-dealroom_session");
+  const appCookie = await session(DOCTORCRE_STAGING_HOST);
+  const otherCookie = await session(STAGING_HOST);
+  const pending = await handler.fetch(new Request(`https://${STAGING_HOST}/auth/login`), environment, {});
+  assert.equal(pending.status, 302);
+  const read = (host, cookie) => handler.fetch(new Request(`https://${host}/auth/session`, {
+    headers: { cookie },
+  }), environment, {});
+
+  clock.now += 1;
+  environment.APP_BROWSER_SESSION_CUTOFF = new Date(clock.now).toISOString();
+  assert.equal((await read(DOCTORCRE_STAGING_HOST, appCookie)).status, 401);
+  assert.equal((await read(STAGING_HOST, otherCookie)).status, 200);
+  assert.equal((await finishLogin(handler, environment, STAGING_HOST, pending)).status, 302);
+});
 
 test("signout fences its authenticated push session and preserves login when revocation fails", async () => {
   const environment = env();

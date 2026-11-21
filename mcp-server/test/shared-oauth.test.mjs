@@ -103,7 +103,7 @@ async function signedIdentity(email = "partner@example.invalid") {
   return { id_token: `${message}.${Buffer.from(signature).toString("base64url")}`,
     jwks: { keys: [{ ...await crypto.subtle.exportKey("jwk", pair.publicKey), kid: "synthetic" }] } };
 }
-async function consentFixture(email, clientName = "Synthetic Client", redirectUri = REDIRECT) {
+async function consentFixture(email, clientName = "Synthetic Client", redirectUri = REDIRECT, callbackEnv = {}) {
   const f = await fixture();
   await f.env.OAUTH_PROVIDER.updateClient(f.client.clientId, { clientName, redirectUris: [redirectUri] });
   const start = await f.provider.fetch(await authorization(f.client, { redirect_uri: redirectUri }), f.env, ctx());
@@ -111,6 +111,7 @@ async function consentFixture(email, clientName = "Synthetic Client", redirectUr
   const cookie = start.headers.get("set-cookie")?.split(";")[0] || "";
   const identity = await signedIdentity(email);
   await f.env.OAUTH_KV.put("google_jwks_cache", JSON.stringify(identity.jwks));
+  Object.assign(f.env, callbackEnv);
   const original = globalThis.fetch;
   globalThis.fetch = async url => {
     assert.equal(url, "https://oauth2.googleapis.com/token");
@@ -145,6 +146,22 @@ test("verified identity reaches client-specific consent before any grant and app
   assert.equal((await access(f, tokens.access_token, "/mcp")).status, 200);
   assert.equal((await approve(f)).status, 400);
 });
+
+test("the app browser cutoff leaves a pending MCP connector authorization usable", async () => {
+  const f = await consentFixture(undefined, undefined, REDIRECT, {
+    APP_HOST: new URL(ORIGIN).hostname,
+    APP_BROWSER_SESSION_CUTOFF: new Date(NOW + 1).toISOString(),
+  });
+  assert.equal(f.response.status, 200);
+  const consent = await approve(f);
+  assert.equal(consent.status, 200);
+  const code = (await handoffUrl(consent)).searchParams.get("code");
+  const tokenResponse = await exchange(f, { grant_type: "authorization_code", code, code_verifier: VERIFIER });
+  assert.equal(tokenResponse.status, 200);
+  const { access_token: token } = await tokenResponse.json();
+  assert.equal((await access(f, token, "/mcp")).status, 200);
+});
+
 test("consent page lets the browser send its Origin on the approval POST", async () => {
   // Fetch standard: a form POST from a no-referrer page carries `Origin: null`,
   // which the Origin check refuses. Chrome confirmed 2026-10-06 (Dell's reconnect).
