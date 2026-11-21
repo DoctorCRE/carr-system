@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -6,7 +6,6 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync, execFileSync } from 'node:child_process';
 import pg from 'pg';
-import { snapshotDatabase } from './helpers/postgres-database.mjs';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import { sweepSubjectWatches } from '../src/subject-watch-scheduler.ts';
 import { Validator } from '@cfworker/json-schema';
@@ -126,7 +125,9 @@ test('release containment accepts descendants and rejects older and unrelated co
  }
 });
 
-const engineDsn = await snapshotDatabase('subject-watch-engine-');
+const engineFixture = await acquireDisposablePostgres({ prefix: 'subject-watch-engine-', snapshot: true });
+after(() => engineFixture.close());
+const engineDsn = engineFixture.dsn;
 const writer = new URL(engineDsn);
 writer.searchParams.set('options', '-c role=carr_writer');
 
@@ -226,13 +227,13 @@ test('only the scheduler writer can execute the bounded engine watch functions',
 });
 
 async function engineWatchFixture(t) {
-  const fixture = await acquireDisposablePostgres({ prefix: 'subject-watch-regression-', snapshot: true });
-  const db = new pg.Client({ connectionString: fixture.dsn });
-  t.after(async () => {
-    try { await db.end(); }
-    finally { await fixture.close(); }
-  });
+  const db = new pg.Client({ connectionString: engineDsn });
   await db.connect();
+  const watchIds = [];
+  t.after(async () => {
+    try { await db.query("update ops.subject_watch_v2_subscription set state='paused' where id=any($1::uuid[])", [watchIds]); }
+    finally { await db.end(); }
+  });
   const { id: actor } = (await db.query("select id from actor where slug='joe'")).rows[0];
   const { id: party } = (await db.query(
     "insert into party(kind,name,created_by,updated_by) values('person','Synthetic watch client',$1,$1) returning id", [actor],
@@ -241,16 +242,18 @@ async function engineWatchFixture(t) {
   const { id: client } = (await db.query(
     "insert into client(party_id,status,created_by,updated_by) values($1,'active',$2,$2) returning id", [party, actor],
   )).rows[0];
-  const addWatch = async name => (await db.query(`
-    with d as (
-      insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by)
-      values($1,$2,'purchase','research','joe',$3,$3) returning id
-    )
-    insert into ops.subject_watch_v2_subscription(actor_id,subject_type,subject_id,baseline,policy,state,subscribed_at)
-    select $3,'deal',id,'{}','{"change_kinds":["reply_arrived"],"include_self_changes":false}',
-      'watching','2027-02-01T11:50:00Z' from d returning id, subject_id as deal`, [client, name, actor])).rows[0];
-  const writer = new URL(fixture.dsn);
-  writer.searchParams.set('options', '-c role=carr_writer');
+  const addWatch = async name => {
+    const { rows: [watch] } = await db.query(`
+      with d as (
+        insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by)
+        values($1,$2,'purchase','research','joe',$3,$3) returning id
+      )
+      insert into ops.subject_watch_v2_subscription(actor_id,subject_type,subject_id,baseline,policy,state,subscribed_at)
+      select $3,'deal',id,'{}','{"change_kinds":["reply_arrived"],"include_self_changes":false}',
+        'watching','2027-02-01T11:50:00Z' from d returning id, subject_id as deal`, [client, name, actor]);
+    watchIds.push(watch.id);
+    return watch;
+  };
   const sweep = minute => sweepSubjectWatches({ scheduledTime: Date.UTC(2027, 1, 1, 12, minute) }, {
     DATABASE_URL_WRITER: writer.href, ENGINE_URL: 'https://engine.example.test',
     ENGINE_ACCESS_CLIENT_ID: 'test-client', ENGINE_ACCESS_CLIENT_SECRET: 'test-secret', ENGINE_DEAL_WATCH_CHANGES: 'true',
@@ -301,7 +304,8 @@ test('missing and retryable deals do not stall another watch in the same sweep',
     'select engine_checked_at from ops.subject_watch_delivery where watch_id=$1', [id],
   )).rows[0].engine_checked_at;
   const receipts = async () => (await db.query(
-    'select subject_id, disposition from ops.subject_watch_change order by subject_id',
+    'select subject_id, disposition from ops.subject_watch_change where watch_generation_id=any($1::uuid[]) order by subject_id',
+    [[missing.id, retry.id, healthy.id]],
   )).rows;
   assert.equal((await progress(healthy)).toISOString(), '2027-02-01T12:05:00.000Z');
   assert.equal(await progress(retry), null);
