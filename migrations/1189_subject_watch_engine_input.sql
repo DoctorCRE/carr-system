@@ -1,4 +1,4 @@
--- rollback: switch off engine intake, then retire the two entry points, resume trigger, view and progress columns in a forward migration.
+-- rollback: switch off engine intake, then retire the two entry points, resume trigger, target function and progress columns in a forward migration.
 -- expand-contract: add nullable scheduler progress and dedicated entry points. The two-argument sweep stays in place.
 -- lock-review: nullable columns need a short metadata lock on the small watch delivery table; no rewrite.
 set local lock_timeout='5s';
@@ -19,7 +19,10 @@ create trigger subject_watch_engine_resume after update on ops.subject_watch_v2_
 for each row when (old.state='paused' and new.state='watching' and old.id=new.id)
 execute function ops.subject_watch_engine_resume();
 
-create view ops.subject_watch_engine_targets as
+create function ops.subject_watch_engine_targets()
+returns table(watch_id uuid,lifecycle_version integer,deal_id uuid,subscriber text,actor_id uuid,
+  include_self boolean,since timestamptz,engine_checked_at timestamptz)
+language sql stable set search_path=pg_catalog,pg_temp as $$
   select w.id as watch_id,w.lifecycle_version,w.subject_id as deal_id,a.slug as subscriber,w.actor_id,w.include_self,
     greatest(w.subscribed_at,q.engine_floor_at,q.engine_checked_at-interval '5 minutes') as since,q.engine_checked_at
   from (
@@ -32,8 +35,9 @@ create view ops.subject_watch_engine_targets as
   ) w
   join public.actor a on a.id=w.actor_id and a.active and a.kind='human' and a.slug in ('joe','dell')
   join ops.subject_watch_delivery q on q.watch_id=w.id and q.failure_count<2
-  where w.subject_type='deal';
-revoke all on ops.subject_watch_engine_targets from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader;
+  where w.subject_type='deal'
+$$;
+revoke all on function ops.subject_watch_engine_targets() from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader;
 
 create function ops.read_subject_watch_engine_batch(p_now timestamptz,p_limit integer) returns jsonb
 language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
@@ -44,7 +48,7 @@ begin
   select coalesce(jsonb_agg(to_jsonb(w)-'engine_checked_at' order by w.engine_checked_at nulls first,w.watch_id),'[]') into batch
   from (
     select watch_id,lifecycle_version,deal_id,subscriber,since,engine_checked_at
-    from ops.subject_watch_engine_targets
+    from ops.subject_watch_engine_targets()
     where since<=p_now and (engine_checked_at is null or engine_checked_at<p_now)
       and ops.subject_watch_target('deal',deal_id) is not null
     order by engine_checked_at nulls first,watch_id limit p_limit
@@ -55,7 +59,7 @@ end $$;
 create function ops.sweep_subject_watches(p_now timestamptz,p_limit integer,p_engine jsonb) returns jsonb
 language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
 declare
-  w ops.subject_watch_engine_targets; item record; edit record; revision integer;
+  w record; item record; edit record; revision integer;
   source_key text; delta jsonb; source_id uuid;
 begin
   if jsonb_typeof(p_engine) is distinct from 'array' or jsonb_array_length(p_engine)>4 then
@@ -66,9 +70,9 @@ begin
   end if;
   for item in select * from jsonb_to_recordset(p_engine) as x(watch_id uuid,lifecycle_version integer,changes jsonb)
   loop
-    select * into w from ops.subject_watch_engine_targets where watch_id=item.watch_id;
+    select * into w from ops.subject_watch_engine_targets() where watch_id=item.watch_id;
     if not found or not pg_try_advisory_xact_lock(hashtextextended(w.actor_id::text||':deal:'||w.deal_id::text,0)) then continue; end if;
-    select * into w from ops.subject_watch_engine_targets where watch_id=item.watch_id;
+    select * into w from ops.subject_watch_engine_targets() where watch_id=item.watch_id;
     if not found or w.lifecycle_version is distinct from item.lifecycle_version
       or w.since>p_now or w.engine_checked_at>=p_now then continue; end if;
     revision:=(ops.subject_watch_target('deal',w.deal_id)->>'version')::integer;

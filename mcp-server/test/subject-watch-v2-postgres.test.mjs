@@ -1029,9 +1029,10 @@ test('only the scheduler writer can execute the bounded engine watch functions',
   t.after(() => c.end());
   assert.deepEqual((await c.query("select ops.read_subject_watch_engine_batch('2027-01-01T00:00:00Z',4) result")).rows[0].result, []);
   await assert.rejects(c.query("select ops.read_subject_watch_engine_batch('2027-01-01T00:00:00Z',5)"), /watch_batch_limit/);
-  for (const table of ['subject_watch', 'subject_watch_v2_subscription', 'subject_watch_delivery', 'subject_watch_sweep', 'subject_watch_change', 'subject_watch_engine_targets']) {
+  for (const table of ['subject_watch', 'subject_watch_v2_subscription', 'subject_watch_delivery', 'subject_watch_sweep', 'subject_watch_change']) {
     await assert.rejects(c.query('select * from ops.' + table), { code: '42501' });
   }
+  await assert.rejects(c.query('select * from ops.subject_watch_engine_targets()'), { code: '42501' });
   for (const name of ['read_subject_watch_engine_batch', 'sweep_subject_watches']) {
     const { rows } = await c.query(`
       select coalesce(r.rolname,'public') as role
