@@ -34,9 +34,19 @@ registerHooks({ resolve: (specifier, context, next) => specifier === 'cloudflare
 // Neon's SQL-over-HTTP protocol (raw text output, array mode) answered by pg.
 const textTypes = { getTypeParser: () => value => value };
 const pools = new Map();
+const clientClosures = new Set();
 const poolFor = dsn => {
-  if (!pools.has(dsn)) pools.set(dsn, new pg.Pool({ connectionString: dsn, max: 4, types: textTypes }));
-  return pools.get(dsn);
+  let pool = pools.get(dsn);
+  if (!pool) {
+    pool = new pg.Pool({ connectionString: dsn, max: 4, types: textTypes });
+    pool.on('connect', client => {
+      const closed = new Promise(resolve => client.once('end', resolve));
+      clientClosures.add(closed);
+      void closed.then(() => clientClosures.delete(closed));
+    });
+    pools.set(dsn, pool);
+  }
+  return pool;
 };
 const shaped = result => ({ command: result.command, rowCount: result.rowCount,
   fields: result.fields.map(({ name, dataTypeID }) => ({ name, dataTypeID })), rows: result.rows });
@@ -244,6 +254,8 @@ export async function startLocalCarr({ port = 0, assets = async () => new Respon
       for (const root of roots) rmSync(root, { recursive: true, force: true });
       await new Promise(resolve => server.close(resolve));
       await Promise.allSettled([...pools.values()].map(pool => pool.end()));
+      // Pool.end() can resolve while idle clients are still closing their sockets.
+      await Promise.all(clientClosures);
       pools.clear();
       await admin.end();
       await database.close();
