@@ -1,0 +1,20 @@
+stateDiagram-v2
+    [*] --> validation: Partner asks about client promises
+    validation --> needs_input: Exact client or paging input is invalid
+    validation --> unauthorized: Verified partner authority is absent
+    validation --> reading: Joe or Dell supplies valid input
+    reading --> needs_input: Exact client is unknown
+    reading --> unavailable: Source fails or acceptance contract is unavailable
+    reading --> empty: Available source has no eligible promises
+    reading --> ready: Explicit acceptance and current actions are available
+    ready --> validation: Partner requests the next page
+    state "Check request" as validation
+    state "Name the client or correct input" as needs_input
+    state "Sign in with authorized access" as unauthorized
+    state "Read current accepted promises" as reading
+    state "Show source unavailable and its gap" as unavailable
+    state "Show no recorded promises in available sources" as empty
+    state "Show promises with owners, dates and evidence" as ready
+    %% Intended behavior only. No runtime implementation or passing transition claim.
+    %% Never infer acceptance from generic action creation or prose alone.
+    %% Never complete an action or send an introduction while reading.
