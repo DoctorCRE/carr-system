@@ -8,7 +8,7 @@ import gzip
 import json
 import stat
 import time
-from contextlib import redirect_stderr
+from contextlib import closing, redirect_stderr
 from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -119,7 +119,7 @@ def view_row(key, sender='pat@example.test', subject='Synthetic ghost subject', 
     return envelope(0x0430, obj)
 
 
-def decode(*objects, files=None):
+def decode(*objects, files=None, expected_stderr=None):
     """Decode `objects` with the real binary; the database lives until the process exits."""
     tmp = Path(tempfile.mkdtemp())
     atexit.register(shutil.rmtree, tmp, True)
@@ -128,6 +128,8 @@ def decode(*objects, files=None):
     args = [str(test_binary()), 'db', str(source), str(target)] + ([str(files)] if files else [])
     result = subprocess.run(args, capture_output=True, timeout=30)
     assert result.returncode == 0, result.stderr
+    if expected_stderr is not None:
+        assert result.stderr == expected_stderr, result.stderr
     return target
 
 
@@ -309,13 +311,101 @@ class LocalKeyExportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as files:
             efm = Path(files) / 'S0' / '3' / 'EFMData'
             efm.mkdir(parents=True)
-            (efm / '1.dat').write_bytes(gzip.compress(b'<html><body>Synthetic sidecar body text.</body></html>'))
+            (efm / '1.dat').write_bytes(gzip.compress(
+                b'<html><body><p>Synthetic sidecar body text.</p><blockquote>Prior note.</blockquote></body></html>'))
             rows, meta = self.export(message(0x1001), body(0x1001, sidecar='~/Files/S0/3/EFMData/1.dat'),
                                      message(0x2002), body(0x2002, html='<p>Synthetic inline body text.</p>'),
-                                     columns='local_keys, body_kind, body_source, body', files=files)
-        self.assertEqual(rows, [(str(0x1001), 'full', 'efm', 'Synthetic sidecar body text.'),
-                                (str(0x2002), 'full', 'inline', 'Synthetic inline body text.')])
+                                     columns='local_keys, body_kind, body_source, body, authored, history', files=files)
+        self.assertEqual(rows, [(str(0x1001), 'full', 'efm', 'Synthetic sidecar body text.\nPrior note.',
+                                 'Synthetic sidecar body text.', 'Prior note.'),
+                                (str(0x2002), 'full', 'inline', 'Synthetic inline body text.',
+                                 'Synthetic inline body text.', '')])
         self.assertEqual((meta['sidecar_linked'], meta['sidecar_rejected']), (1, 0))
+
+    def test_complete_html_exports_authored_and_history_alongside_the_full_body(self):
+        cases = [
+            ('Outlook reply',
+             '<div>Yes, Sam.</div><hr><DIV ID=divRplyFwdMsg>From: Sam Example<br>Subject: Tour</DIV>'
+             '<div>Can we meet?<br><br>Let me know.</div>'
+             '<div id=divRplyFwdMsg>From: Pat Example<br>Subject: Tour</div><p>Earlier plans.</p>',
+             'Yes, Sam.',
+             'From: Sam Example\nSubject: Tour\nCan we meet?\n\nLet me know.\n'
+             'From: Pat Example\nSubject: Tour\nEarlier plans.',
+             'Yes, Sam.\nFrom: Sam Example\nSubject: Tour\nCan we meet?\n\nLet me know.\n'
+             'From: Pat Example\nSubject: Tour\nEarlier plans.'),
+            ('quote container',
+             '<p>Sounds good.</p><div class="quote gmail_quote"><div>Sam wrote:</div>'
+             '<blockquote><p>Can we meet?</p><blockquote>Older note.</blockquote></blockquote></div>',
+             'Sounds good.', 'Sam wrote:\nCan we meet?\nOlder note.',
+             'Sounds good.\nSam wrote:\nCan we meet?\nOlder note.'),
+            ('inline answers',
+             '<div>Hi Sam.</div><blockquote>First question?</blockquote><p>First answer.<br>Details.</p>'
+             '<blockquote>Second question?</blockquote><p>Second answer.</p>',
+             'Hi Sam.\nFirst answer.\nDetails.\nSecond answer.', 'First question?\nSecond question?',
+             'Hi Sam.\nFirst question?\nFirst answer.\nDetails.\nSecond question?\nSecond answer.'),
+            ('signature and footer',
+             '<p>See you there.</p><div id="Signature">Best,<br>Pat Example</div>'
+             '<footer>Example Realty</footer><p>P.S. Bring the keys.</p>',
+             'See you there.\nP.S. Bring the keys.', 'Best,\nPat Example\nExample Realty',
+             'See you there.\nBest,\nPat Example\nExample Realty\nP.S. Bring the keys.'),
+            ('external banner',
+             '<table><tr><td>Caution: This email originated from outside of the organization. '
+             'Do not click links if you do not recognize the sender.</td></tr></table>'
+             '<p>Please send the plan.</p>',
+             'Please send the plan.',
+             'Caution: This email originated from outside of the organization. '
+             'Do not click links if you do not recognize the sender.',
+             'Caution: This email originated from outside of the organization. '
+             'Do not click links if you do not recognize the sender.\nPlease send the plan.'),
+            ('first-contact banner',
+             "<div>You don't often get email from pat@example.test. "
+             '<a href="https://example.test/tip">Learn why this is important</a></div><p>Here is the plan.</p>',
+             'Here is the plan.',
+             "You don't often get email from pat@example.test. Learn why this is important",
+             "You don't often get email from pat@example.test. Learn why this is important\nHere is the plan."),
+            ('Outlook forward',
+             '<div>For your review.</div><div><div id="divRplyFwdMsg">From: Pat Example<br>'
+             'Subject: Keys</div><p>The keys are at the desk.</p></div><p>P.S. Open by ten.</p>',
+             'For your review.',
+             'From: Pat Example\nSubject: Keys\nThe keys are at the desk.\nP.S. Open by ten.',
+             'For your review.\nFrom: Pat Example\nSubject: Keys\nThe keys are at the desk.\nP.S. Open by ten.'),
+            ('no history', '<p>A &amp; B.</p><p>&nbsp;</p><p>Next paragraph.</p>',
+             'A & B.\n\nNext paragraph.', '', 'A & B.\n\nNext paragraph.'),
+            ('wholly quoted', '<blockquote>Earlier note.</blockquote>',
+             '', 'Earlier note.', 'Earlier note.'),
+        ]
+        for name, html, authored, history, full in cases:
+            with self.subTest(name=name):
+                rows, _ = self.export(message(100), body(100, html=html), columns='body, authored, history')
+                self.assertEqual(rows, [(full, authored, history)])
+
+    def test_over_budget_html_keeps_the_full_body_and_exports_no_split(self):
+        html = '<div>' * 300 + 'Synthetic full body.' + '</div>' * 300
+        target = decode(
+            folder(50, 'Inbox'), message(100), body(100, html=html),
+            expected_stderr=b'hxprobe: skipped HTML body split (source nesting depth); kept full text\n',
+        )
+        with closing(sqlite3.connect(target)) as db:
+            self.assertEqual(db.execute('SELECT body, authored, history FROM messages').fetchall(),
+                             [('Synthetic full body.', None, None)])
+
+    def test_incomplete_bodies_export_no_split(self):
+        preview = 'Synthetic preview'
+        for name, bodies in [
+            ('preview only', []),
+            ('cached HTML preview', [body(100, html='<p>Synthetic preview</p>')]),
+            ('unverified format', [body(100, html='Decoded text without HTML')]),
+            ('missing sidecar', [body(100, sidecar='~/Files/S0/3/EFMData/1.dat')]),
+            ('conflicting bodies', [body(100, html='<p>First</p>'), body(100, html='<p>Second</p>')]),
+        ]:
+            with self.subTest(name=name):
+                rows, _ = self.export(message(100, preview=preview), *bodies, columns='body, authored, history')
+                self.assertEqual(rows, [(preview, None, None)])
+
+    def test_lossy_inline_utf8_exports_no_split(self):
+        broken = body(100, html='<p>ab!</p>').replace(b'ab!', b'ab\xff')
+        rows, _ = self.export(message(100), broken, columns='body, authored, history')
+        self.assertEqual(rows, [('ab\ufffd', None, None)])
 
     def test_conflicting_bodies_export_a_named_held_outcome(self):
         rows, _ = self.export(message(0x1001), body(0x1001, html='<p>Old longer text</p>'),

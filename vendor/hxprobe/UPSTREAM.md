@@ -46,6 +46,17 @@ WHAT CARR ADDS to `hxprobe db <file> [out.db] [files-dir]`:
   `Files/S0/<N>/EFMData/<id>.dat`. `<N>` is 845 on Joe's machine, so every
   `S0/*` folder is read rather than one hard-coded number. A sidecar is
   accepted only when its text contains the record's own preview opening.
+- Authored and earlier text for complete HTML (`src/body/split.rs`). The
+  `messages.authored` and `messages.history` columns contain two plain-text
+  strings, either of which may be empty. The HTML5 tree identifies bounded
+  quotes, signatures, footers and standalone banner lines. An Outlook
+  reply/forward header introduces the next bounded quote or the rest of
+  the body when there is no bounded quote. The decoder screens HTML before
+  parsing with a 2 MiB body limit, 128 levels of source nesting and 64
+  attributes per tag. It also declines ambiguous raw markup where those
+  limits cannot be checked. A refusal logs only the reason. Both split
+  columns are NULL on refusal or when HTML is incomplete or undecodable.
+  `messages.body` retains the full exported text for plain-text handling.
 - Copy collapse. Revisions of one message are joined by sender, normalized
   subject and preview opening within a day. A preview-only copy then joins the
   one full copy with the same sender and opening. The full body always wins,

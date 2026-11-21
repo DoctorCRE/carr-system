@@ -56,7 +56,7 @@ pub fn run(path: &OsStr, files: &OsStr, account: u64) -> Result<String, ()> {
         counts.insert("body_rejected", m.body_rejected);
         for b in &m.bodies {
             match b {
-                message::Body::Html(_) => *counts.get_mut("body_inline").unwrap() += 1,
+                message::Body::Html(_) | message::Body::LossyHtml(_) => *counts.get_mut("body_inline").unwrap() += 1,
                 message::Body::Sidecar(path) => {
                     *counts.get_mut("body_sidecar").unwrap() += 1;
                     let status = match sidecars.resolve(path) {
