@@ -100,8 +100,8 @@ SYSTEM_PROMPT = (
     'itself reports a milestone (a tour scheduled or confirmed, an LOI received, an LOI signed or executed, '
     'a lease sent for review, a lease signed or executed). Propose next_step only for a concrete ask of the '
     'broker or a commitment the broker owes, with a short imperative task, a due date (YYYY-MM-DD) and owner '
-    'the sending broker for outbound mail or the receiving broker for inbound mail unless the email names another owner. When the broker owes a reply, also propose reply_draft with a subject '
-    'and body for that receiving partner to review and edit. Draft only a grounded reply to the original '
+    'the sending broker for outbound mail or the receiving broker for inbound mail unless the email names another owner. When the broker owes a reply, also propose reply_draft with a body '
+    'for that receiving partner to review and edit. Draft only a grounded reply to the original '
     'sender, without inventing facts or commitments. Do not draft a reply for newsletters or notifications '
     'that need no response. The server assigns the draft owner from the receiving mailbox; do not supply '
     'owner on reply_draft. evidence_quote must be copied exactly, character for character, from '
@@ -153,9 +153,9 @@ def proposals(reply: dict, email: dict, today: date) -> list[dict]:
                 continue
             args.update(text=text[:500], next_date=due, owner=item['owner'] if item.get('owner') in OWNERS else email.get('mailbox_owner') or 'joe')
         elif item['kind'] == 'reply_draft':
-            subject, body = item.get('subject'), item.get('body')
-            if (not isinstance(subject, str) or not subject.strip() or len(subject) > 998 or
-                    not isinstance(body, str) or not body.strip() or len(body) > 20000):
+            source_subject, body = email.get('subject') or '', item.get('body')
+            subject = source_subject if source_subject.lower().startswith('re:') else (f'Re: {source_subject}' if source_subject else 'Re:')
+            if (len(subject) > 998 or not isinstance(body, str) or not body.strip() or len(body) > 20000):
                 continue
             args.update(subject=subject, body=body)
         seen.add(item['kind'])

@@ -112,7 +112,7 @@ def run(engine: Engine, classify=lambda email, today: BOTH, state: dict | None =
 class SwitchOn(unittest.TestCase):
     def test_a_filed_email_stores_its_suggestions_and_draft_through_the_engine(self):
         engine = Engine([mail('e1')])
-        reply = {'kind': 'reply_draft', 'evidence_quote': ASK, 'confidence': 0.9, 'subject': 'Re: Clinic space',
+        reply = {'kind': 'reply_draft', 'evidence_quote': ASK, 'confidence': 0.9, 'subject': 'Summary of request',
                  'body': 'Sending it today.'}
         with tempfile.TemporaryDirectory() as out:
             outcome, counts = run(engine, lambda email, today: {'proposals': [*BOTH['proposals'], reply]}, out=Path(out))

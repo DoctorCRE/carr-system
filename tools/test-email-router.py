@@ -39,7 +39,7 @@ BOTH = {'proposals': [
 def email(activity: str, body: str) -> dict:
     return {'activity_id': activity, 'deal': DEAL, 'deal_name': 'Synthetic coastal purchase',
             'phase': 'site_selection', 'deal_type': 'purchase', 'summary': 'Email from Synthetic Landlord: LOI',
-            'body': body, 'occurred_at': '2026-10-26T14:00:00Z'}
+            'subject': 'Floor plan', 'body': body, 'occurred_at': '2026-10-26T14:00:00Z'}
 
 
 class Refused(Exception):
@@ -288,6 +288,15 @@ class RouterTests(unittest.TestCase):
             'confidence': 0.95, 'subject': 'Re: Floor plan',
             'body': 'Thanks. I will send the floor plan by Friday.'})
 
+    def test_reply_subject_comes_from_the_source_email(self):
+        draft = {'kind': 'reply_draft', 'evidence_quote': ASK, 'confidence': 0.9,
+                 'subject': 'Summary of request', 'body': 'I will send the plan.'}
+        for source_subject, expected in [('Floor plan', 'Re: Floor plan'), ('RE: Floor plan', 'RE: Floor plan'), ('', 'Re:')]:
+            with self.subTest(source_subject=source_subject):
+                server = Server([dict(email('reply', ASK), subject=source_subject)])
+                route(server, lambda e, d: {'proposals': [draft]})
+                self.assertEqual(server.recorded()[0]['subject'], expected)
+
     def test_honest_email_becomes_sourced_proposals_with_confidence(self):
         server = Server([email('a1', f'{LOI} {ASK}')])
         counts = route(server, lambda e, d: BOTH)
@@ -300,8 +309,7 @@ class RouterTests(unittest.TestCase):
     def test_reply_drafts_require_grounded_confident_nonempty_bounded_text(self):
         valid = {'kind': 'reply_draft', 'evidence_quote': ASK, 'confidence': 0.9,
                  'subject': 'Re: Floor plan', 'body': 'I will send the plan by Friday.'}
-        invalid = [{'subject': ''}, {'subject': ' '}, {'subject': 'x' * 999}, {'subject': None},
-                   {'body': ''}, {'body': '\n\t'}, {'body': 'x' * 20001}, {'body': 5},
+        invalid = [{'body': ''}, {'body': '\n\t'}, {'body': 'x' * 20001}, {'body': 5},
                    {'confidence': 0.2}, {'evidence_quote': 'An invented request to send a plan.'}]
         for change in invalid:
             with self.subTest(change=list(change)):
