@@ -152,7 +152,7 @@ test('engine intake stays off by default and retries an overlapping sweep withou
       case slug when 'joe' then 'watching' else 'paused' end,'2027-02-01T11:50:00Z'
     from actor where slug in ('joe','dell')`, [deal]);
 
-  const change = phaseMove(deal, '9007199254740993', 3, 'negotiation');
+  const change = phaseMove(deal, '9007199254740993', 3, 'research', 'negotiation');
   const calls = [];
   let upstreamFails = true;
   let pauseDuringRead = false;
@@ -165,8 +165,8 @@ test('engine intake stays off by default and retries an overlapping sweep withou
     if (pauseDuringRead) await c.query("update ops.subject_watch_v2_subscription set state='paused',lifecycle_version=2 where actor_id=$1", [joe]);
     return engineWatchResponse(deal, [
       ...change, ...change,
-      ...phaseMove(deal, '9007199254740994', 4, 'legal', 'joe'),
-      ...phaseMove(deal, '9007199254740995', 12, 'closed'),
+      ...phaseMove(deal, '9007199254740994', 4, 'negotiation', 'legal', 'joe'),
+      ...phaseMove(deal, '9007199254740995', 12, 'legal', 'closed'),
     ]);
   });
   const sweep = (minute, switched = {}) => sweepSubjectWatches({ scheduledTime: Date.UTC(2027, 1, 1, 12, minute) }, {
@@ -242,7 +242,7 @@ async function engineWatchFixture(t) {
   const { id: client } = (await db.query(
     "insert into client(party_id,status,created_by,updated_by) values($1,'active',$2,$2) returning id", [party, actor],
   )).rows[0];
-  const addWatch = async name => {
+  const addWatch = async (name, subscribedAt = '2027-02-01T11:50:00Z') => {
     const { rows: [watch] } = await db.query(`
       with d as (
         insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by)
@@ -250,7 +250,7 @@ async function engineWatchFixture(t) {
       )
       insert into ops.subject_watch_v2_subscription(actor_id,subject_type,subject_id,baseline,policy,state,subscribed_at)
       select $3,'deal',id,'{}','{"change_kinds":["reply_arrived"],"include_self_changes":false}',
-        'watching','2027-02-01T11:50:00Z' from d returning id, subject_id as deal`, [client, name, actor]);
+        'watching',$4 from d returning id, subject_id as deal`, [client, name, actor, subscribedAt]);
     watchIds.push(watch.id);
     return watch;
   };
@@ -261,15 +261,15 @@ async function engineWatchFixture(t) {
   return { db, addWatch, sweep };
 }
 
-function phaseMove(deal, changeId, minute, phase, actor = 'dell') {
+function phaseMove(deal, changeId, minute, before, after, actor = 'dell') {
   const stamp = new Date(Date.UTC(2027, 1, 1, 12, minute)).toISOString();
   const entry = {
     change_id: changeId, table_name: 'deal_phase_change', record: { deal_id: deal, happened_at: stamp },
-    action: 'insert', old_value: null, actor, for_user: null, changed_at: stamp,
+    action: 'insert', actor, for_user: null, changed_at: stamp,
   };
   return [
-    { ...entry, field: 'happened_at', new_value: stamp },
-    { ...entry, field: 'phase', new_value: phase },
+    { ...entry, field: 'happened_at', old_value: null, new_value: stamp },
+    { ...entry, field: 'phase', old_value: before, new_value: after },
   ];
 }
 
@@ -296,7 +296,7 @@ test('missing and retryable deals do not stall another watch in the same sweep',
       }, { status: 404 });
     }
     if (deal === retry.deal && !recovered) return Response.json({ error: 'not_found' }, { status: 404 });
-    return engineWatchResponse(deal, phaseMove(deal, '1', 3, 'negotiation'));
+    return engineWatchResponse(deal, phaseMove(deal, '1', 3, 'research', 'negotiation'));
   });
 
   await sweep(5);
@@ -331,10 +331,10 @@ test('missing and retryable deals do not stall another watch in the same sweep',
   )).rows[0].count, 1);
 });
 
-test('engine phase inserts emit one transition per move and carry the prior phase across polls', async t => {
+test('engine phase inserts emit one transition per move across overlapping polls', async t => {
   const { db, addWatch, sweep } = await engineWatchFixture(t);
   const { deal } = await addWatch('Synthetic phase deal');
-  const changes = phaseMove(deal, '9007199254740993', 3, 'negotiation');
+  const changes = phaseMove(deal, '9007199254740993', 3, 'research', 'negotiation');
   t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(deal, changes));
   const receipts = async () => (await db.query(
     'select changes from ops.subject_watch_change where subject_id=$1 order by occurred_at', [deal],
@@ -343,11 +343,47 @@ test('engine phase inserts emit one transition per move and carry the prior phas
 
   await sweep(5);
   assert.deepEqual(await receipts(), [first]);
-  changes.push(...phaseMove(deal, '9007199254740994', 6, 'legal', 'joe'));
-  changes.push(...phaseMove(deal, '9007199254740995', 7, 'closed'));
+  changes.push(...phaseMove(deal, '9007199254740994', 6, 'negotiation', 'legal', 'joe'));
+  changes.push(...phaseMove(deal, '9007199254740995', 7, 'legal', 'closed'));
   await sweep(10);
   await sweep(15);
   assert.deepEqual(await receipts(), [
     first, { field: 'phase', before: 'legal', after: 'closed', reason_code: 'value_changed' },
   ]);
+});
+
+test('a watch created after an engine move sees a return to the copied phase', async t => {
+  const { db, addWatch, sweep } = await engineWatchFixture(t);
+  const { id, deal } = await addWatch('Synthetic return to copied phase', '2027-02-01T12:02:00Z');
+  const history = [
+    ...phaseMove(deal, '1', 1, 'research', 'negotiation'),
+    ...phaseMove(deal, '2', 3, 'negotiation', 'research'),
+  ];
+  t.mock.method(globalThis, 'fetch', async target => {
+    const since = Date.parse(target.searchParams.get('since'));
+    assert.equal(since, Date.UTC(2027, 1, 1, 12, 2));
+    return engineWatchResponse(deal, history.filter(edit => Date.parse(edit.changed_at) >= since));
+  });
+
+  await sweep(5);
+  assert.deepEqual((await db.query(
+    'select semantic_key, changes from ops.subject_watch_change where watch_generation_id=$1', [id],
+  )).rows, [{
+    semantic_key: 'engine:2:phase',
+    changes: [{ field: 'phase', before: 'negotiation', after: 'research', reason_code: 'value_changed' }],
+  }]);
+});
+
+test('the first recorded engine phase emits a transition with no prior phase', async t => {
+  const { db, addWatch, sweep } = await engineWatchFixture(t);
+  const { id, deal } = await addWatch('Synthetic first phase');
+  t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(deal, phaseMove(deal, '1', 3, null, 'negotiation')));
+
+  await sweep(5);
+  assert.deepEqual((await db.query(
+    'select semantic_key, changes from ops.subject_watch_change where watch_generation_id=$1', [id],
+  )).rows, [{
+    semantic_key: 'engine:1:phase',
+    changes: [{ field: 'phase', before: null, after: 'negotiation', reason_code: 'unknown_to_known' }],
+  }]);
 });
