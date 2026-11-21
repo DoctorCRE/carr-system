@@ -131,7 +131,46 @@ class CalendarAgendaTest(unittest.TestCase):
         self.assertEqual([r['title'] for r in snapshot['follow_up_reviews']],
                          ['Latest to end', 'Longer meeting', 'First to end'])
         self.assertEqual(counts['calendar_agenda_trimmed'], 1)
-        self.assertIn({'code': 'trimmed', 'count': 1}, snapshot['warnings'])
+        self.assertIn({'code': 'ended_trimmed', 'count': 1}, snapshot['warnings'])
+        self.assertNotIn('trimmed', [warning['code'] for warning in snapshot['warnings']])
+
+    def test_zero_duration_occurrence_at_opening_midnight(self):
+        for month, day in ((3, 8), (11, 1)):
+            with self.subTest(month=month, day=day):
+                midnight = datetime(2026, month, day, tzinfo=SETTINGS.timezone)
+                opening = int(midnight.timestamp())
+                closing = int((midnight + timedelta(days=14)).timestamp())
+                snapshot, _ = agenda([
+                    event(1, start_unix=opening - 3600, end_unix=opening),
+                    event(2, start_unix=opening, end_unix=opening, subject='At opening midnight'),
+                    event(3, start_unix=closing, end_unix=closing),
+                ], {}, SETTINGS, midnight + timedelta(hours=12))
+                self.assertEqual([i['title'] for i in snapshot['items']], ['At opening midnight'])
+
+    def test_moved_meeting_uses_start_and_end_of_the_selected_copy(self):
+        snapshot, _ = self.project([
+            event(hours=-11, end_unix=int((NOW - timedelta(hours=8)).timestamp())),
+            event(hours=-1, end_unix=int((NOW - timedelta(minutes=30)).timestamp()),
+                  attendees=[('Pat', 'pat@example.test')]),
+        ])
+        [meeting] = snapshot['items']
+        self.assertEqual((meeting['start'], meeting['end']),
+                         ('2026-10-20T14:00:00+00:00', '2026-10-20T14:30:00+00:00'))
+        self.assertTrue(meeting['time_changed'])
+        self.assertEqual(meeting['times'], ['2026-10-20T04:00:00+00:00', '2026-10-20T14:00:00+00:00'])
+        self.assertEqual(snapshot['follow_up_reviews'], [])
+
+    def test_byte_limit_counts_ended_and_later_trims_separately(self):
+        snapshot, counts = self.project([
+            event(n, hours=hours, location='é' * 12_000)
+            for n, hours in enumerate((-3, -2, 2, 3, 4))
+        ])
+        self.assertEqual([i['start'] for i in snapshot['items']],
+                         ['2026-10-20T17:00:00+00:00', '2026-10-20T18:00:00+00:00'])
+        self.assertEqual(counts['calendar_agenda_trimmed'], 3)
+        warnings = {w['code']: w.get('count') for w in snapshot['warnings']}
+        self.assertEqual(warnings.get('ended_trimmed'), 2)
+        self.assertEqual(warnings.get('trimmed'), 1)
 
     def test_other_accounts_and_outside_window_do_not_count_as_hidden_cancellations(self):
         other = event(lifecycle_status='canceled')

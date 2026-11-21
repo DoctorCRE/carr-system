@@ -67,7 +67,8 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
     for goid, group in by_goid.items():
         if _instance(goid) == '00000000' and goid in with_occurrences:
             continue
-        current = [e for e in group if e['end_unix'] > lo and e['start_unix'] < hi]
+        current = [e for e in group if e['start_unix'] < hi
+                   and (e['end_unix'] > lo or e['start_unix'] == e['end_unix'] == lo)]
         recent = [e for e in group if review_lo < e['end_unix'] <= review_hi]
         if not current and not recent:
             continue
@@ -83,15 +84,14 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
         conflict = len({json.dumps([e['subject'], e['location'], e['end_unix'] - e['start_unix'],
                                     sorted((n or '', m or '') for n, m in e['attendees'])]) for e in group}) > 1
         recurring = _instance(goid) != '00000000'
-        start = min(e['start_unix'] for e in (current or recent))
+        start, end = shown['start_unix'], shown['end_unix']
         local = datetime.fromtimestamp(start, tz)
-        length = shown['end_unix'] - shown['start_unix']
-        local_end = datetime.fromtimestamp(start + length, tz)
+        local_end = datetime.fromtimestamp(end, tz)
         counts['calendar_agenda_conflicts'] += conflict
         counts['calendar_agenda_time_changed'] += len(starts) > 1
         counts['calendar_agenda_recurring'] += recurring
         attendees = [{'name': name or None, 'email': (email or '').lower() or None} for name, email in shown['attendees']]
-        item = {'key': _hash(goid)[:16], 'start': _iso(start), 'end': _iso(start + length),
+        item = {'key': _hash(goid)[:16], 'start': _iso(start), 'end': _iso(end),
                       'all_day': local.time() == local_end.time() == time() and local_end.date() > local.date(),
                       'title': shown['subject'] or 'Meeting', 'location': shown['location'] or None,
                       'organizer': {'name': shown['organizer_name'] or None,
@@ -102,7 +102,7 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
                       'candidates': len(group), 'conflict': conflict}
         if current:
             items.append(item)
-        if (review_lo < start + length <= review_hi and length > 0
+        if (review_lo < end <= review_hi and end > start
                 and not item['all_day'] and not conflict and len(starts) == 1):
             reviews.append({k: item[k] for k in ('key', 'title', 'start', 'end')} | {
                 'state': 'needs_review',
@@ -134,7 +134,7 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
         ended_item = next(ended, None)
         if ended_item is not None:
             items.remove(ended_item)
-            counter, code = 'calendar_agenda_trimmed', 'trimmed'
+            counter, code = 'calendar_agenda_trimmed', 'ended_trimmed'
         elif reviews:
             reviews.pop()
             counter, code = 'calendar_follow_up_trimmed', 'follow_up_trimmed'
@@ -144,9 +144,9 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
         counts[counter] += 1
         warning = next((w for w in warnings if w['code'] == code), None)
         if warning is None:
-            warnings.append({'code': code, 'count': counts[counter]})
+            warnings.append({'code': code, 'count': 1})
         else:
-            warning['count'] = counts[counter]
+            warning['count'] += 1
     counts['calendar_follow_up_reviews'] = len(reviews)
     counts['calendar_agenda_items'] = len(snapshot['items'])
     counts['calendar_agenda_undecoded'] = undecoded
