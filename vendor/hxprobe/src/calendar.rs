@@ -29,10 +29,9 @@
 //! The same class also serializes working-hours blocks. Those carry no Global
 //! Object ID, which is what separates them from meetings.
 //!
-//! The order of the NUL-terminated fields varies between revisions of one
-//! item, so they are found by what they are rather than where they sit: the
-//! subject is the field written twice, and subject, location, organizer name
-//! and organizer address sit together in that order.
+//! When both time-zone strings and all seven text slots can be read in order,
+//! the paired subject slots establish the title, even when it is blank.
+//! Other revisions use the repeated subject and adjacent organizer fields.
 //!
 //! Global Object ID plus start groups observed schedule candidates. It cannot
 //! distinguish a moved occurrence from a recurring exception. Cancellation,
@@ -220,6 +219,59 @@ fn ends_at_repeated_subject(obj: &[u8], g: usize) -> bool {
 
 fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
     let g = memchr::memmem::find(obj, &GOID_PREFIX.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<u8>>())?;
+    let after_goid = &obj[g + goid.len() * 2..];
+    let fields = if let Some((mut fields, remaining)) = ordered_fields(after_goid) {
+        if !remaining.is_empty() {
+            fields.attendees = attendees_at(remaining, 0)?;
+        }
+        fields
+    } else {
+        repeated_fields(obj, g)?
+    };
+    Some(Event {
+        goid,
+        start_unix: start,
+        end_unix: end,
+        occurrence: obj[OCCURRENCE..OCCURRENCE + 8] == obj[START..START + 8],
+        ..fields
+    })
+}
+
+fn ordered_fields(after_goid: &[u8]) -> Option<(Event, &[u8])> {
+    let mut bytes = after_goid.strip_prefix(&[0, 0])?;
+    for _ in 0..2 {
+        let (&len, rest) = bytes.split_first()?;
+        let (zone, remaining) = rest.split_at_checked(usize::from(len))?;
+        if len % 2 != 0 || String::from_utf16(&utf16(zone)).is_err() {
+            return None;
+        }
+        bytes = remaining;
+    }
+    let mut fields: [String; 7] = Default::default();
+    for field in &mut fields {
+        let end = bytes.chunks_exact(2).position(|pair| pair == [0, 0])? * 2;
+        *field = String::from_utf16(&utf16(&bytes[..end])).ok()?;
+        bytes = &bytes[end + 2..];
+    }
+    let [first_subject, location, organizer_name, organizer_email, _, body, subject] = fields;
+    let canceled = CANCELED.iter().any(|prefix| first_subject.strip_prefix(prefix) == Some(subject.as_str()));
+    if first_subject != subject && !canceled {
+        return None;
+    }
+    let present = |s: String| (!s.is_empty()).then_some(s);
+    let fields = Event {
+        subject: present(subject),
+        location: present(location),
+        organizer_name: present(organizer_name),
+        organizer_email: is_email(&organizer_email).then_some(organizer_email),
+        body: (body.contains("\r\n") || body.chars().count() > 60).then_some(body),
+        canceled,
+        ..Event::default()
+    };
+    Some((fields, bytes))
+}
+
+fn repeated_fields(obj: &[u8], g: usize) -> Option<Event> {
     // The earliest block that parses to the end. Scanning from the end instead
     // stops at the trailing status bytes, which read as a count of zero.
     // An item with no attendees (an own appointment, a block of time) carries
@@ -278,11 +330,7 @@ fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
 
     // The first copy's run can start with the tail of the time-zone tables.
     let canceled = raw.iter().any(|r| CANCELED.iter().any(|p| r.ends_with(&format!("{p}{subject}"))));
-    let occurrence = obj.get(OCCURRENCE..OCCURRENCE + 8) == obj.get(START..START + 8);
     Some(Event {
-        goid,
-        start_unix: start,
-        end_unix: end,
         subject: Some(subject.to_string()),
         location,
         organizer_name,
@@ -290,7 +338,7 @@ fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
         body,
         attendees,
         canceled,
-        occurrence,
+        ..Event::default()
     })
 }
 
@@ -503,7 +551,8 @@ mod tests {
         let obj = object_with(true, "Canceled: Something Else Quarterly Site Review", &[]);
         let mut idx = Index::default();
         idx.observe(&envelope(&obj));
-        assert!(idx.events.values().all(|e| !e.canceled), "only the exact prefixed copy of the subject counts");
+        let ev = idx.events.values().next().expect("decoded");
+        assert!(!ev.canceled, "only the exact prefixed copy of the subject counts");
     }
 
     #[test]

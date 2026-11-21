@@ -74,7 +74,6 @@ class CalendarExportTests(unittest.TestCase):
                 self.assertEqual(dict(db.execute('SELECT key,value FROM meta'))['calendar_lifecycle_unsupported'], 5)
                 self.assertEqual(db.execute('SELECT COUNT(DISTINCT start_unix) FROM events').fetchone(), (2,))
 
-
     def project(self, *entries):
         with tempfile.TemporaryDirectory() as tmp:
             source, target = Path(tmp) / 'synthetic.hxd', Path(tmp) / 'synthetic.db'
@@ -102,10 +101,16 @@ class CalendarExportTests(unittest.TestCase):
         self.assertEqual(counts['calendar_agenda_undecoded'], 0)
         self.assertEqual([item['title'] for item in snapshot['items']], ['team@example.test'])
 
-    def test_unicode_recurring_all_day_event_in_another_time_zone(self):
+    def test_title_is_never_used_as_evidence_of_account_membership(self):
+        snapshot, counts = self.project(candidate(subject='ada@example.test', organizer=''))
+        self.assertEqual(counts['calendar_agenda_undecoded'], 0)
+        self.assertEqual(counts['calendar_agenda_other_accounts'], 1)
+        self.assertEqual(snapshot['items'], [])
+
+    def test_unicode_recurring_all_day_event_with_different_zone_metadata(self):
         snapshot, counts = self.project(candidate(
             [('Ada Example', 'ada@example.test')], subject='会議 📅', organizer='',
-            instance='07EA0A1E', start=1_793_077_200, duration=86_400,
+            instance='07EA0A1B', start=1_793_077_200, duration=86_400,
             zones=('Asia/Tokyo', 'Tokyo Standard Time')))
         self.assertEqual(counts['calendar_agenda_undecoded'], 0)
         [item] = snapshot['items']

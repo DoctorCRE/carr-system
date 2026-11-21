@@ -214,6 +214,12 @@ Synthetic tests prove candidate separation and fail-closed labeling only.
 Native decoder validation and controlled test-account format research are still
 required before current calendar lifecycle or completeness can be claimed.
 
+When the two length-prefixed time-zone strings and all seven text fields can
+be read in order, the decoder uses the two subject slots to confirm the title.
+Short and Unicode titles are kept, and two empty subject slots yield a null
+title. A remaining attendee block must parse through the end of the object.
+Revisions with other field layouts still use the repeated-text search.
+
 An object whose NUL-terminated fields run to its end, with no attendee count,
 decodes with no attendees. The 2026-10-21 TEST-account study pair showed such an
 appointment added one GOID/start identity and, before this, no decoded candidate.
