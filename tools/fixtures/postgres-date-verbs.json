@@ -13,7 +13,7 @@
         "stale-records"
       ]
     },
-    "producer_sha256": "8ae7f1c16a2835a2130aef2d89ac9818f5c4836ff9423dcf13d7d03441d321c6",
+    "producer_sha256": "b1cfa6452b815e1b4bfae1191bd840fe526a3339fd7d302e5d07330335206ad2",
     "driver_sha256": "eb2df1535cf15aad7c80eb5a41ff01dd319b7d344b12817faf5f3c8451012ef2"
   },
   "date_columns": {
