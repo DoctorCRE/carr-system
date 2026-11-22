@@ -1,4 +1,4 @@
--- rollback: switch off engine intake. Restore legacy reply predicates and retire engine intake objects in a forward migration.
+-- rollback: switch off engine intake. Retire engine intake and restore the original watch functions in a forward migration.
 -- expand-contract: add nullable scheduler progress and dedicated entry points. The two-argument sweep stays in place.
 -- lock-review: nullable columns need a short metadata lock on the small watch delivery table; no rewrite.
 set local lock_timeout='5s';
@@ -73,6 +73,140 @@ begin
   return batch;
 end $$;
 
+create function ops.subject_watch_reply_id(p_activity uuid) returns uuid
+language plpgsql stable set search_path=pg_catalog,pg_temp as $$
+begin
+  if to_regclass('next.outside_id') is null then return p_activity; end if;
+  return coalesce(
+    (select email_activity_id from next.outside_id where source='old_system' and value=p_activity::text),
+    (select e.activity_id from public.activity a join public.email mail on mail.id=a.email_id
+      join next.email e on e.message_id=mail.message_id where a.id=p_activity),
+    p_activity);
+end $$;
+
+create function ops.subject_watch_engine_reply_live(p_reply uuid,p_deal uuid,p_subscriber text) returns boolean
+language plpgsql stable set search_path=pg_catalog,pg_temp as $$
+begin
+  if to_regclass('next.email') is null then return false; end if;
+  return exists(
+    select from next.email e join next.email_mailbox m using(activity_id)
+    join next.app_user u on u.id=m.user_id
+    join next.activity_about a on a.activity_id=e.activity_id and a.deal_id=p_deal
+    where e.activity_id=p_reply and u.slug=p_subscriber
+      and not exists(select from next.party_email address
+        join next.app_user sender on sender.id=address.party_id where address.address=e.sender));
+end $$;
+
+create function ops.subject_watch_carr_reply_claimed(p_watch uuid,p_reply uuid,p_deal uuid,p_subscriber text)
+returns boolean language sql stable set search_path=pg_catalog,pg_temp as $$
+  select exists(
+    select from ops.subject_watch_change c
+    cross join lateral jsonb_array_elements(c.evidence_refs) ref
+    where c.watch_generation_id=p_watch and c.semantic_key not like 'engine-reply:%'
+      and ref->>'activity_id' is not null and ops.subject_watch_reply_id((ref->>'activity_id')::uuid)=p_reply
+      and (c.disposition='emitted' or (c.disposition='pending' and c.failure_count<2 and exists(
+        select from public.activity a where a.id=(ref->>'activity_id')::uuid and a.deal_id=p_deal
+          and a.email_source->>'mailbox_owner'=p_subscriber
+          and coalesce(a.email_context#>>'{lifecycle,state}','live')='live')))
+  ) or exists(
+    select from ops.notification n join public.actor a on a.id=n.recipient_actor
+    where a.slug=p_subscriber and n.subject_type='deal' and n.subject_ref=p_deal::text
+      and n.dedupe_key like 'subject-watch:'||p_watch||':reply:%'
+      and ops.subject_watch_reply_id(case when pg_input_is_valid(split_part(n.dedupe_key,':',4),'uuid')
+        then split_part(n.dedupe_key,':',4)::uuid end)=p_reply
+  )
+$$;
+
+create function ops.claim_subject_watch_carr_reply(p_watch uuid,p_activity uuid) returns boolean
+language plpgsql set search_path=pg_catalog,pg_temp as $$
+declare reply_key text;
+begin
+  if not exists(select from ops.subject_watch_change where watch_generation_id=p_watch
+      and semantic_key like 'engine-reply:%') then return true; end if;
+  reply_key:='engine-reply:'||ops.subject_watch_reply_id(p_activity);
+  if exists(select from ops.subject_watch_change where watch_generation_id=p_watch and semantic_key=reply_key
+      and disposition='emitted') then return false; end if;
+  delete from ops.subject_watch_change where watch_generation_id=p_watch and semantic_key=reply_key and disposition='pending';
+  return true;
+end $$;
+
+revoke all on function ops.subject_watch_reply_id(uuid),ops.subject_watch_engine_reply_live(uuid,uuid,text),
+  ops.subject_watch_carr_reply_claimed(uuid,uuid,uuid,text),ops.claim_subject_watch_carr_reply(uuid,uuid)
+  from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader;
+
+-- Both entry points use the same delivery loop, with engine receipts visible only to the enabled entry point.
+do $delivery$
+declare body text:=pg_get_functiondef('ops.sweep_subject_watches(timestamptz,integer)'::regprocedure);
+  patch record;
+  source_filter text:=$filter$(p_engine or split_part(c.semantic_key,':',1) not in ('engine','engine-reply'))$filter$;
+begin
+  for patch in select * from (values
+    ($old$ops.sweep_subject_watches(p_now timestamp with time zone, p_limit integer DEFAULT 50)$old$,
+      $new$ops.deliver_subject_watches(p_now timestamp with time zone, p_limit integer, p_engine boolean)$new$),
+    ($old$where c.watch_generation_id=s.id and c.disposition='pending'$old$,
+      'where '||source_filter||' and c.watch_generation_id=s.id and c.disposition=''pending'''),
+    ($old$update ops.subject_watch_change set disposition='suppressed' where watch_generation_id=w.id and disposition='pending';$old$,
+      'update ops.subject_watch_change c set disposition=''suppressed'' where '||source_filter||
+      ' and watch_generation_id=w.id and disposition=''pending'';'),
+    ($old$update ops.subject_watch_change c set disposition='suppressed'
+       where c.watch_generation_id=w.id$old$, $new$if p_engine then
+         delete from ops.subject_watch_change c where c.watch_generation_id=w.id and c.disposition='pending'
+           and case when c.semantic_key like 'engine-reply:%' then
+             not pol->'change_kinds' ? 'reply_arrived'
+             or not ops.subject_watch_engine_reply_live(split_part(c.semantic_key,':',2)::uuid,w.subject_id,slug_value)
+             or ops.subject_watch_carr_reply_claimed(w.id,split_part(c.semantic_key,':',2)::uuid,w.subject_id,slug_value)
+           else false end;
+       end if;
+       update ops.subject_watch_change c set disposition='suppressed'
+       where $new$||source_filter||' and c.watch_generation_id=w.id'),
+    ($old$or c.category='reply_arrived' and (not pol$old$,
+      $new$or c.category='reply_arrived' and c.semantic_key not like 'engine-reply:%' and (not pol$new$),
+    ($old$where a.email_source->>'mailbox_owner'=slug_value$old$,
+      $new$where a.email_source->>'mailbox_owner'=slug_value and (not p_engine or a.deal_id=w.subject_id)$new$),
+    ($old$select id from ops.subject_watch_change where watch_generation_id=w.id and disposition='pending'$old$,
+      'select id from ops.subject_watch_change c where '||source_filter||
+      ' and watch_generation_id=w.id and disposition=''pending'''||$new$
+             and case when c.semantic_key like 'engine-reply:%' then
+               ops.subject_watch_engine_reply_live(split_part(c.semantic_key,':',2)::uuid,w.subject_id,slug_value)
+             else true end$new$)
+  ) p(before,after) loop
+    if strpos(body,patch.before)=0 then raise exception 'watch_delivery_definition_changed'; end if;
+    body:=replace(body,patch.before,patch.after);
+  end loop;
+  execute body;
+end $delivery$;
+
+revoke all on function ops.deliver_subject_watches(timestamptz,integer,boolean)
+  from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader;
+
+create or replace function ops.sweep_subject_watches(p_now timestamptz,p_limit integer default 50)
+returns jsonb language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
+begin
+  return ops.deliver_subject_watches(p_now,p_limit,false);
+end $$;
+
+-- A CARR reply can take over an undelivered receipt. Both capture paths hold the watch lock.
+do $carr_reply$
+declare capture text:=pg_get_functiondef('ops.flush_subject_watch_changes()'::regprocedure);
+  immediate text:=pg_get_functiondef('ops.consume_subject_watch_event(uuid)'::regprocedure);
+  capture_match text:='has_reply:=true;';
+  immediate_match text:=$old$order by sw.id limit 2 for update of sw
+        loop
+          perform ops.mint_notification$old$;
+begin
+  if strpos(capture,capture_match)=0 or strpos(immediate,immediate_match)=0 then
+    raise exception 'watch_carr_reply_definition_changed';
+  end if;
+  execute replace(capture,capture_match,$new$if not ops.claim_subject_watch_carr_reply(w.id,reply.id) then continue; end if;
+      has_reply:=true;$new$);
+  execute replace(immediate,immediate_match,$new$order by sw.id limit 2
+        loop
+          perform pg_advisory_xact_lock(hashtextextended(s.actor_id::text||':deal:'||d.id::text,0));
+          perform from ops.subject_watch where id=s.id for update;
+          if not found or not ops.claim_subject_watch_carr_reply(s.id,reply.id) then continue; end if;
+          perform ops.mint_notification$new$);
+end $carr_reply$;
+
 create function ops.sweep_subject_watches(p_now timestamptz,p_limit integer,p_engine jsonb) returns jsonb
 language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
 declare
@@ -140,6 +274,8 @@ begin
           union all
           select distinct 'engine-reply:'||reply_id::uuid,'reply_arrived',null::text,null::text,p_now,'[]'::jsonb,reply_id::uuid
           from jsonb_array_elements_text(item.reply_activity_ids) as replies(reply_id) where w.replies
+            and ops.subject_watch_engine_reply_live(reply_id::uuid,w.deal_id,w.subscriber)
+            and not ops.subject_watch_carr_reply_claimed(w.watch_id,reply_id::uuid,w.deal_id,w.subscriber)
         )
         select * from receipts r where not exists(
           select from ops.subject_watch_change where watch_generation_id=w.watch_id and semantic_key=r.source_key)
@@ -166,7 +302,7 @@ begin
     end;
   end loop;
   begin
-    delivery:=ops.sweep_subject_watches(p_now,p_limit);
+    delivery:=ops.deliver_subject_watches(p_now,p_limit,true);
     -- A total engine outage leaves the sweep cursor alone when there was no legacy work.
     if failures>0 and failures=jsonb_array_length(p_engine) and delivery->>'scanned'='0' then
       raise sqlstate 'P1189';
@@ -181,30 +317,37 @@ revoke all on function ops.read_subject_watch_engine_batch(timestamptz,integer,u
 grant execute on function ops.read_subject_watch_engine_batch(timestamptz,integer,uuid[]),
   ops.sweep_subject_watches(timestamptz,integer,jsonb) to carr_writer;
 
--- Engine reply evidence comes from the subscriber-scoped feed, without a legacy activity row.
-do $engine_reply$
-declare sweep text:=pg_get_functiondef('ops.sweep_subject_watches(timestamptz,integer)'::regprocedure);
-  readback text:=pg_get_functiondef('ops.read_subject_watch_changes(text,uuid,uuid,uuid,integer)'::regprocedure);
-  patched text;
-  delivery_match text:=$old$join public.activity a on a.id=(refs.value->>'activity_id')::uuid
-             join public.event e on e.id=(refs.value->>'event_id')::uuid
-             where a.email_source->>'mailbox_owner'=slug_value
-               and coalesce(a.email_context#>>'{lifecycle,state}','live')='live'$old$;
-  read_match text:=$old$and (category<>'reply_arrived' or exists$old$;
-  evidence_match text:=$old$where ref->>'activity_id' is null or exists$old$;
+create or replace function ops.read_subject_watch_changes(p_kind text,p_id uuid,p_watch uuid,p_cursor uuid,p_limit integer)
+returns jsonb language plpgsql stable security definer set search_path=pg_catalog,pg_temp as $$
+declare a uuid:=ops.subject_watch_actor(); result jsonb;
 begin
-  patched:=replace(sweep,delivery_match,$new$join public.event e on e.id=(refs.value->>'event_id')::uuid
-             left join public.activity a on a.id=(refs.value->>'activity_id')::uuid
-             where (c.semantic_key like 'engine-reply:%' or (a.email_source->>'mailbox_owner'=slug_value
-               and coalesce(a.email_context#>>'{lifecycle,state}','live')='live'))$new$);
-  if patched=sweep or strpos(readback,read_match)=0 or strpos(readback,evidence_match)=0 then
-    raise exception 'watch_reply_predicate_changed';
-  end if;
-  execute patched;
-  execute replace(replace(readback,read_match,$new$and (category<>'reply_arrived' or semantic_key like 'engine-reply:%' or exists$new$),
-    evidence_match,$new$where ref->>'activity_id' is null or semantic_key like 'engine-reply:%' or exists$new$);
-end $engine_reply$;
-
+  if p_limit is null or p_limit not between 1 and 100 then raise exception 'watch_limit_invalid'; end if;
+  if ops.subject_watch_target(p_kind,p_id) is null then
+    return jsonb_build_object('ok',false,'error','watch_target_not_found'); end if;
+  if not exists(select 1 from ops.subject_watch where id=p_watch and actor_id=a and subject_type=p_kind and subject_id=p_id)
+    and not exists(select 1 from ops.subject_watch_v2_subscription where id=p_watch and actor_id=a and subject_type=p_kind and subject_id=p_id and state<>'removed') then
+    return jsonb_build_object('ok',false,'error','watch_target_not_found'); end if;
+  select coalesce(jsonb_agg(to_jsonb(page) order by page.id),'[]') into result from (
+    select id,watch_generation_id,subject_type,subject_id,source_event_id,source_revision,policy_version,
+      category,changes,(select coalesce(jsonb_agg(ref),'[]') from jsonb_array_elements(evidence_refs) ref
+      where case when semantic_key like 'engine-reply:%' then
+        ops.subject_watch_engine_reply_live((ref->>'activity_id')::uuid,subject_id,(select slug from public.actor where id=a))
+      else ref->>'activity_id' is null or exists(select 1 from public.activity mail join public.actor owner on owner.id=a
+        where mail.id=(ref->>'activity_id')::uuid and mail.email_source->>'mailbox_owner'=owner.slug
+          and coalesce(mail.email_context#>>'{lifecycle,state}','live')='live') end) evidence_refs,
+      occurred_at,recorded_at,eligible_at,disposition,notification_id
+    from ops.subject_watch_change where actor_id=a and watch_generation_id=p_watch
+      and (category<>'reply_arrived' or case when semantic_key like 'engine-reply:%' then
+        ops.subject_watch_engine_reply_live(split_part(semantic_key,':',2)::uuid,subject_id,(select slug from public.actor where id=a))
+      else exists(select 1 from jsonb_array_elements(evidence_refs) ref join public.activity mail on mail.id=(ref->>'activity_id')::uuid join public.actor owner on owner.id=a
+        where mail.email_source->>'mailbox_owner'=owner.slug
+        and coalesce(mail.email_context#>>'{lifecycle,state}','live')='live') end)
+      and (p_cursor is null or id>p_cursor) order by id limit p_limit+1
+  ) page;
+  return jsonb_build_object('ok',true,'schema_version','subject-watch-change.v1','changes',
+    (select coalesce(jsonb_agg(value order by ordinality),'[]') from jsonb_array_elements(result) with ordinality where ordinality<=p_limit),
+    'has_more',jsonb_array_length(result)>p_limit,'next_cursor',case when jsonb_array_length(result)>p_limit then result->(p_limit-1)->>'id' end);
+end $$;
 do $contract$
 declare contract jsonb:=ops.scac_current_grant_contract(); entries jsonb;
 begin

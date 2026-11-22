@@ -195,7 +195,14 @@ test('only the scheduler writer can execute the bounded engine watch functions',
   for (const table of ['subject_watch', 'subject_watch_v2_subscription', 'subject_watch_delivery', 'subject_watch_sweep', 'subject_watch_change', 'subject_watch_engine_start']) {
     await assert.rejects(c.query('select * from ops.' + table), { code: '42501' });
   }
-  await assert.rejects(c.query('select * from ops.subject_watch_engine_targets()'), { code: '42501' });
+  for (const call of [
+    "ops.subject_watch_engine_targets()",
+    "ops.deliver_subject_watches(now(),50,true)",
+    "ops.subject_watch_engine_reply_live(gen_random_uuid(),gen_random_uuid(),'joe')",
+    "ops.claim_subject_watch_carr_reply(gen_random_uuid(),gen_random_uuid())",
+  ]) {
+    await assert.rejects(c.query('select ' + call), { code: '42501' });
+  }
   for (const name of ['read_subject_watch_engine_batch', 'sweep_subject_watches']) {
     const { rows } = await c.query(`
       select coalesce(r.rolname,'public') as role
@@ -427,7 +434,7 @@ test('engine-only replies reach the subscriber once without a legacy activity ro
   const { id, deal } = await addWatch('Synthetic engine reply');
   const other = await addWatch('Synthetic other mailbox', { deal, subscriber: 'dell' });
   const muted = await addWatch('Synthetic muted replies', { changeKind: 'listing_status_changed' });
-  const replyId = '00000000-0000-4000-8000-000000000777';
+  const replyId = await engineReply(db, deal);
   t.mock.method(globalThis, 'fetch', async target => engineWatchResponse(target.pathname.split('/').at(-1), [],
     target.searchParams.get('subscriber') === 'joe' ? [replyId, replyId] : []));
   await sweep(5);
@@ -437,17 +444,11 @@ test('engine-only replies reach the subscriber once without a legacy activity ro
     [[id, other.id, muted.id]],
   );
   assert.deepEqual(rows, [{ watch_generation_id: id, category: 'reply_arrived', disposition: 'emitted' }]);
-  await db.query('begin');
-  try {
-    await db.query("select set_config('carr.acting_actor_slug','joe',true),set_config('carr.verified_human_actor_slug','joe',true)");
-    await db.query('set local role carr_writer');
-    const { rows: [{ result }] } = await db.query("select ops.read_subject_watch_changes('deal',$1,$2,null,50) result", [deal, id]);
-    assert.deepEqual(result.changes.map(change => change.evidence_refs[0].activity_id), [replyId]);
-  } finally { await db.query('rollback'); }
+  const history = await watchHistory(db, { deal, id });
+  assert.deepEqual(history.map(change => change.evidence_refs[0].activity_id), [replyId]);
 });
 
-async function engineReply(db, deal, { copiedFrom, messageId = null } = {}) {
-  const id = randomUUID();
+async function engineReply(db, deal, { id = randomUUID(), copiedFrom, messageId = null } = {}) {
   await db.query(`
     create schema if not exists next;
     create table if not exists next.app_user (id uuid primary key, slug text unique);
@@ -542,15 +543,11 @@ for (const identity of ['copied activity ID', 'message ID', 'same activity ID'])
     const first = await replyNotices(db, watch.id);
     assert.equal(first.length, 1);
 
-    let reply = await engineReply(db, watch.deal, {
-      copiedFrom: identity === 'copied activity ID' ? oldId : null, messageId,
+    const reply = await engineReply(db, watch.deal, {
+      id: identity === 'same activity ID' ? oldId : undefined,
+      copiedFrom: identity === 'copied activity ID' ? oldId : undefined,
+      messageId,
     });
-    if (identity === 'same activity ID') {
-      for (const table of ['email', 'email_mailbox', 'activity_about']) {
-        await db.query(`update next.${table} set activity_id=$1 where activity_id=$2`, [oldId, reply]);
-      }
-      reply = oldId;
-    }
     t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(watch.deal, [], [reply]));
     await sweep(10);
     assert.deepEqual(await replyNotices(db, watch.id), first);
