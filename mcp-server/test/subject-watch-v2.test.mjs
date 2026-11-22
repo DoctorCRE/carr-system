@@ -1,5 +1,6 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -443,4 +444,135 @@ test('engine-only replies reach the subscriber once without a legacy activity ro
     const { rows: [{ result }] } = await db.query("select ops.read_subject_watch_changes('deal',$1,$2,null,50) result", [deal, id]);
     assert.deepEqual(result.changes.map(change => change.evidence_refs[0].activity_id), [replyId]);
   } finally { await db.query('rollback'); }
+});
+
+async function engineReply(db, deal, { copiedFrom, messageId = null } = {}) {
+  const id = randomUUID();
+  await db.query(`
+    create schema if not exists next;
+    create table if not exists next.app_user (id uuid primary key, slug text unique);
+    create table if not exists next.email (activity_id uuid primary key, message_id text unique, sender text);
+    create table if not exists next.email_mailbox (activity_id uuid, user_id uuid, primary key(activity_id,user_id));
+    create table if not exists next.activity_about (activity_id uuid, deal_id uuid, primary key(activity_id,deal_id));
+    create table if not exists next.party_email (party_id uuid, address text);
+    create table if not exists next.outside_id (source text, value text, email_activity_id uuid, primary key(source,value));
+    insert into next.app_user select id,slug from public.actor where slug='joe' on conflict do nothing
+  `);
+  await db.query("insert into next.email values($1,$2,'sender@example.test')", [id, messageId]);
+  await db.query("insert into next.email_mailbox select $1,id from next.app_user where slug='joe'", [id]);
+  await db.query("insert into next.activity_about values($1,$2)", [id, deal]);
+  if (copiedFrom) await db.query("insert into next.outside_id values('old_system',$1,$2)", [copiedFrom, id]);
+  return id;
+}
+
+async function legacyReply(db, deal, messageId = null) {
+  const { id } = (await db.query(`
+    insert into public.activity(kind,occurred_at,deal_id,actor_id,summary,email_source)
+    select 'email_in',now(),$1,id,'Synthetic inbound','{"mailbox_owner":"joe","sender_email":"sender@example.test"}'
+    from public.actor where slug='dell' returning id
+  `, [deal])).rows[0];
+  if (messageId) await db.query(`
+    with message as (
+      insert into public.email(mailbox_account,message_id) values('mailbox@example.test',$2) returning id
+    )
+    update public.activity set email_id=message.id from message where activity.id=$1
+  `, [id, messageId]);
+  await db.query(`
+    insert into public.event(occurred_at,actor_id,verb,subject_type,subject_id,new_value,cause)
+    select now(),id,'confirm-email-filing','deal',$1,jsonb_build_object('activity_id',$2::uuid),'automation_job'
+    from public.actor where slug='dell'
+  `, [deal, id]);
+  return id;
+}
+
+async function replyNotices(db, watch) {
+  return (await db.query(
+    "select id from ops.notification where dedupe_key like 'subject-watch:'||$1::text||':%' order by id", [watch],
+  )).rows.map(row => row.id);
+}
+
+async function watchHistory(db, { deal, id }) {
+  await db.query('begin');
+  try {
+    await db.query("select set_config('carr.acting_actor_slug','joe',true),set_config('carr.verified_human_actor_slug','joe',true)");
+    await db.query('set local role carr_writer');
+    return (await db.query(
+      "select ops.read_subject_watch_changes('deal',$1,$2,null,50) result", [deal, id],
+    )).rows[0].result.changes;
+  } finally { await db.query('rollback'); }
+}
+
+for (const reason of ['switch off', 'unfiled', 'mailbox removed']) {
+  test(`engine reply queued during cooldown does not notify when ${reason}`, async t => {
+    const { db, addWatch, sweep } = await engineWatchFixture(t);
+    const watch = await addWatch('Synthetic delayed reply');
+    const reply = await engineReply(db, watch.deal);
+    await db.query("update ops.subject_watch_delivery set last_emitted_at='2027-02-01T12:04:00Z' where watch_id=$1", [watch.id]);
+    let replies = [reply];
+    const fetch = t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(watch.deal, [], replies));
+    await sweep(5);
+    assert.deepEqual(await replyNotices(db, watch.id), []);
+
+    if (reason !== 'switch off') {
+      await db.query(reason === 'unfiled'
+        ? 'delete from next.activity_about where activity_id=$1'
+        : 'delete from next.email_mailbox where activity_id=$1', [reply]);
+      replies = [];
+    }
+    await sweep(10, reason !== 'switch off');
+    assert.deepEqual(await replyNotices(db, watch.id), []);
+    if (reason === 'switch off') {
+      assert.equal(fetch.mock.callCount(), 1);
+      await sweep(11);
+      assert.equal((await replyNotices(db, watch.id)).length, 1);
+    } else {
+      assert.deepEqual(await watchHistory(db, watch), []);
+    }
+  });
+}
+
+for (const identity of ['copied activity ID', 'message ID', 'same activity ID']) {
+  test(`CARR delivery deduplicates the engine reply by ${identity}`, async t => {
+    const { db, addWatch, sweep } = await engineWatchFixture(t);
+    const watch = await addWatch('Synthetic previously delivered reply');
+    const messageId = identity === 'message ID' ? '<watch-duplicate@example.test>' : null;
+    const oldId = await legacyReply(db, watch.deal, messageId);
+    await db.query("update ops.subject_watch_change set eligible_at='2027-02-01T12:01:00Z' where watch_generation_id=$1", [watch.id]);
+    await sweep(5, false);
+    const first = await replyNotices(db, watch.id);
+    assert.equal(first.length, 1);
+
+    let reply = await engineReply(db, watch.deal, {
+      copiedFrom: identity === 'copied activity ID' ? oldId : null, messageId,
+    });
+    if (identity === 'same activity ID') {
+      for (const table of ['email', 'email_mailbox', 'activity_about']) {
+        await db.query(`update next.${table} set activity_id=$1 where activity_id=$2`, [oldId, reply]);
+      }
+      reply = oldId;
+    }
+    t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(watch.deal, [], [reply]));
+    await sweep(10);
+    assert.deepEqual(await replyNotices(db, watch.id), first);
+    assert.equal((await watchHistory(db, watch)).length, 1);
+  });
+}
+
+test('a sent engine reply disappears from history when unfiled and CARR cannot alert it again', async t => {
+  const { db, addWatch, sweep } = await engineWatchFixture(t);
+  const watch = await addWatch('Synthetic engine delivery');
+  const messageId = '<watch-first-engine@example.test>';
+  const reply = await engineReply(db, watch.deal, { messageId });
+  t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(watch.deal, [], [reply]));
+  await sweep(5);
+  const first = await replyNotices(db, watch.id);
+  assert.equal(first.length, 1);
+  assert.equal((await watchHistory(db, watch)).length, 1);
+
+  await legacyReply(db, watch.deal, messageId);
+  await db.query("update ops.subject_watch_change set eligible_at='2027-02-01T12:06:00Z' where watch_generation_id=$1", [watch.id]);
+  await sweep(10, false);
+  assert.deepEqual(await replyNotices(db, watch.id), first);
+  await db.query('delete from next.activity_about where activity_id=$1', [reply]);
+  assert.deepEqual(await watchHistory(db, watch), []);
 });
