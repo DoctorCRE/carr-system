@@ -198,8 +198,6 @@ test('only the scheduler writer can execute the bounded engine watch functions',
   for (const call of [
     "ops.subject_watch_engine_targets()",
     "ops.deliver_subject_watches(now(),50,true)",
-    "ops.subject_watch_engine_reply_live(gen_random_uuid(),gen_random_uuid(),'joe')",
-    "ops.claim_subject_watch_carr_reply(gen_random_uuid(),gen_random_uuid())",
   ]) {
     await assert.rejects(c.query('select ' + call), { code: '42501' });
   }
@@ -366,6 +364,33 @@ test('a watch created after an engine move sees a return to the copied phase', a
   }]);
 });
 
+test('a watch created during a sweep starts at subscription and sees the next phase move', async t => {
+  const { db, addWatch, sweep } = await engineWatchFixture(t);
+  const { deal } = await addWatch('Synthetic return to copied phase');
+  const history = [
+    ...phaseMove(deal, '1', 1, 'research', 'negotiation'),
+    ...phaseMove(deal, '2', 7, 'negotiation', 'research', 'joe'),
+  ];
+  let midFeed;
+  t.mock.method(globalThis, 'fetch', async target => {
+    midFeed ??= await addWatch('Synthetic mid-feed watch', {
+      deal, subscriber: 'dell', subscribedAt: '2027-02-01T12:06:00Z',
+    });
+    const since = Date.parse(target.searchParams.get('since'));
+    if (target.searchParams.get('subscriber') === 'dell') assert.equal(since, Date.UTC(2027, 1, 1, 12, 6));
+    return engineWatchResponse(deal, history.filter(edit => Date.parse(edit.changed_at) >= since));
+  });
+
+  await sweep(5);
+  await sweep(10);
+  assert.deepEqual((await db.query(
+    'select semantic_key, changes from ops.subject_watch_change where watch_generation_id=$1', [midFeed.id],
+  )).rows, [{
+    semantic_key: 'engine:2',
+    changes: [{ field: 'phase', before: 'negotiation', after: 'research', reason_code: 'value_changed' }],
+  }]);
+});
+
 test('the first recorded engine phase emits a transition with no prior phase', async t => {
   const { db, addWatch, sweep } = await engineWatchFixture(t);
   const { id, deal } = await addWatch('Synthetic first phase');
@@ -429,55 +454,64 @@ test('step completion with two engine fields counts as one update', async t => {
   }]);
 });
 
-test('engine-only replies reach the subscriber once without a legacy activity row', async t => {
+test('the engine reply list is ignored while deal changes continue', async t => {
   const { db, addWatch, sweep } = await engineWatchFixture(t);
-  const { id, deal } = await addWatch('Synthetic engine reply');
-  const other = await addWatch('Synthetic other mailbox', { deal, subscriber: 'dell' });
-  const muted = await addWatch('Synthetic muted replies', { changeKind: 'listing_status_changed' });
-  const replyId = await engineReply(db, deal);
-  t.mock.method(globalThis, 'fetch', async target => engineWatchResponse(target.pathname.split('/').at(-1), [],
-    target.searchParams.get('subscriber') === 'joe' ? [replyId, replyId] : []));
+  const { id, deal } = await addWatch('Synthetic engine reply ignored');
+  const reply = randomUUID();
+  await db.query("update ops.subject_watch_delivery set last_emitted_at='2027-02-01T12:04:00Z' where watch_id=$1", [id]);
+  t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(deal, [
+    ...phaseMove(deal, '1', 3, 'research', 'negotiation'),
+    ...phaseMove(deal, '2', 7, 'negotiation', 'legal'),
+  ], ['uncategorized reply metadata', reply]));
+
   await sweep(5);
-  await sweep(6);
-  const { rows } = await db.query(
-    'select watch_generation_id, category, disposition from ops.subject_watch_change where watch_generation_id=any($1)',
-    [[id, other.id, muted.id]],
-  );
-  assert.deepEqual(rows, [{ watch_generation_id: id, category: 'reply_arrived', disposition: 'emitted' }]);
-  const history = await watchHistory(db, { deal, id });
-  assert.deepEqual(history.map(change => change.evidence_refs[0].activity_id), [replyId]);
+  await sweep(10, false);
+  assert.deepEqual((await db.query(
+    'select disposition from ops.subject_watch_change where watch_generation_id=$1', [id],
+  )).rows, [{ disposition: 'pending' }]);
+
+  await sweep(11);
+  assert.deepEqual((await db.query(
+    'select semantic_key, category, disposition from ops.subject_watch_change where watch_generation_id=$1 order by semantic_key',
+    [id],
+  )).rows, [
+    { semantic_key: 'engine:1', category: 'material_changed', disposition: 'emitted' },
+    { semantic_key: 'engine:2', category: 'material_changed', disposition: 'emitted' },
+  ]);
 });
 
-async function engineReply(db, deal, { id = randomUUID(), copiedFrom, messageId = null } = {}) {
-  await db.query(`
-    create schema if not exists next;
-    create table if not exists next.app_user (id uuid primary key, slug text unique);
-    create table if not exists next.email (activity_id uuid primary key, message_id text unique, sender text);
-    create table if not exists next.email_mailbox (activity_id uuid, user_id uuid, primary key(activity_id,user_id));
-    create table if not exists next.activity_about (activity_id uuid, deal_id uuid, primary key(activity_id,deal_id));
-    create table if not exists next.party_email (party_id uuid, address text);
-    create table if not exists next.outside_id (source text, value text, email_activity_id uuid, primary key(source,value));
-    insert into next.app_user select id,slug from public.actor where slug='joe' on conflict do nothing
-  `);
-  await db.query("insert into next.email values($1,$2,'sender@example.test')", [id, messageId]);
-  await db.query("insert into next.email_mailbox select $1,id from next.app_user where slug='joe'", [id]);
-  await db.query("insert into next.activity_about values($1,$2)", [id, deal]);
-  if (copiedFrom) await db.query("insert into next.outside_id values('old_system',$1,$2)", [copiedFrom, id]);
-  return id;
-}
+test('CARR files and delivers its own replies with engine intake off or on', async t => {
+  const { db, addWatch, sweep } = await engineWatchFixture(t, { activate: false });
+  const off = await addWatch('Synthetic CARR reply with engine intake off');
+  const on = await addWatch('Synthetic CARR reply with engine intake on');
+  const fetch = t.mock.method(globalThis, 'fetch', async target => engineWatchResponse(target.pathname.split('/').at(-1), []));
 
-async function legacyReply(db, deal, messageId = null) {
+  const first = await legacyReply(db, off.deal);
+  await db.query("update ops.subject_watch_change set eligible_at='2027-02-01T12:01:00Z' where watch_generation_id=$1", [off.id]);
+  await sweep(5, false);
+  assert.equal(fetch.mock.callCount(), 0);
+
+  const second = await legacyReply(db, on.deal);
+  await db.query("update ops.subject_watch_change set eligible_at='2027-02-01T12:06:00Z' where watch_generation_id=$1", [on.id]);
+  await sweep(10);
+  assert.ok(fetch.mock.callCount() > 0);
+
+  for (const [watch, activity] of [[off, first], [on, second]]) {
+    assert.deepEqual((await db.query(`
+      select c.category, c.evidence_refs->0->>'activity_id' as activity_id, c.disposition, n.reason
+      from ops.subject_watch_change c join ops.notification n on n.id=c.notification_id
+      where c.watch_generation_id=$1`, [watch.id])).rows, [{
+      category: 'reply_arrived', activity_id: activity, disposition: 'emitted', reason: 'Reply received on a watched deal',
+    }]);
+  }
+});
+
+async function legacyReply(db, deal) {
   const { id } = (await db.query(`
     insert into public.activity(kind,occurred_at,deal_id,actor_id,summary,email_source)
     select 'email_in',now(),$1,id,'Synthetic inbound','{"mailbox_owner":"joe","sender_email":"sender@example.test"}'
     from public.actor where slug='dell' returning id
   `, [deal])).rows[0];
-  if (messageId) await db.query(`
-    with message as (
-      insert into public.email(mailbox_account,message_id) values('mailbox@example.test',$2) returning id
-    )
-    update public.activity set email_id=message.id from message where activity.id=$1
-  `, [id, messageId]);
   await db.query(`
     insert into public.event(occurred_at,actor_id,verb,subject_type,subject_id,new_value,cause)
     select now(),id,'confirm-email-filing','deal',$1,jsonb_build_object('activity_id',$2::uuid),'automation_job'
@@ -485,91 +519,3 @@ async function legacyReply(db, deal, messageId = null) {
   `, [deal, id]);
   return id;
 }
-
-async function replyNotices(db, watch) {
-  return (await db.query(
-    "select id from ops.notification where dedupe_key like 'subject-watch:'||$1::text||':%' order by id", [watch],
-  )).rows.map(row => row.id);
-}
-
-async function watchHistory(db, { deal, id }) {
-  await db.query('begin');
-  try {
-    await db.query("select set_config('carr.acting_actor_slug','joe',true),set_config('carr.verified_human_actor_slug','joe',true)");
-    await db.query('set local role carr_writer');
-    return (await db.query(
-      "select ops.read_subject_watch_changes('deal',$1,$2,null,50) result", [deal, id],
-    )).rows[0].result.changes;
-  } finally { await db.query('rollback'); }
-}
-
-for (const reason of ['switch off', 'unfiled', 'mailbox removed']) {
-  test(`engine reply queued during cooldown does not notify when ${reason}`, async t => {
-    const { db, addWatch, sweep } = await engineWatchFixture(t);
-    const watch = await addWatch('Synthetic delayed reply');
-    const reply = await engineReply(db, watch.deal);
-    await db.query("update ops.subject_watch_delivery set last_emitted_at='2027-02-01T12:04:00Z' where watch_id=$1", [watch.id]);
-    let replies = [reply];
-    const fetch = t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(watch.deal, [], replies));
-    await sweep(5);
-    assert.deepEqual(await replyNotices(db, watch.id), []);
-
-    if (reason !== 'switch off') {
-      await db.query(reason === 'unfiled'
-        ? 'delete from next.activity_about where activity_id=$1'
-        : 'delete from next.email_mailbox where activity_id=$1', [reply]);
-      replies = [];
-    }
-    await sweep(10, reason !== 'switch off');
-    assert.deepEqual(await replyNotices(db, watch.id), []);
-    if (reason === 'switch off') {
-      assert.equal(fetch.mock.callCount(), 1);
-      await sweep(11);
-      assert.equal((await replyNotices(db, watch.id)).length, 1);
-    } else {
-      assert.deepEqual(await watchHistory(db, watch), []);
-    }
-  });
-}
-
-for (const identity of ['copied activity ID', 'message ID', 'same activity ID']) {
-  test(`CARR delivery deduplicates the engine reply by ${identity}`, async t => {
-    const { db, addWatch, sweep } = await engineWatchFixture(t);
-    const watch = await addWatch('Synthetic previously delivered reply');
-    const messageId = identity === 'message ID' ? '<watch-duplicate@example.test>' : null;
-    const oldId = await legacyReply(db, watch.deal, messageId);
-    await db.query("update ops.subject_watch_change set eligible_at='2027-02-01T12:01:00Z' where watch_generation_id=$1", [watch.id]);
-    await sweep(5, false);
-    const first = await replyNotices(db, watch.id);
-    assert.equal(first.length, 1);
-
-    const reply = await engineReply(db, watch.deal, {
-      id: identity === 'same activity ID' ? oldId : undefined,
-      copiedFrom: identity === 'copied activity ID' ? oldId : undefined,
-      messageId,
-    });
-    t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(watch.deal, [], [reply]));
-    await sweep(10);
-    assert.deepEqual(await replyNotices(db, watch.id), first);
-    assert.equal((await watchHistory(db, watch)).length, 1);
-  });
-}
-
-test('a sent engine reply disappears from history when unfiled and CARR cannot alert it again', async t => {
-  const { db, addWatch, sweep } = await engineWatchFixture(t);
-  const watch = await addWatch('Synthetic engine delivery');
-  const messageId = '<watch-first-engine@example.test>';
-  const reply = await engineReply(db, watch.deal, { messageId });
-  t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(watch.deal, [], [reply]));
-  await sweep(5);
-  const first = await replyNotices(db, watch.id);
-  assert.equal(first.length, 1);
-  assert.equal((await watchHistory(db, watch)).length, 1);
-
-  await legacyReply(db, watch.deal, messageId);
-  await db.query("update ops.subject_watch_change set eligible_at='2027-02-01T12:06:00Z' where watch_generation_id=$1", [watch.id]);
-  await sweep(10, false);
-  assert.deepEqual(await replyNotices(db, watch.id), first);
-  await db.query('delete from next.activity_about where activity_id=$1', [reply]);
-  assert.deepEqual(await watchHistory(db, watch), []);
-});
