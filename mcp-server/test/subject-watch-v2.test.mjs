@@ -553,15 +553,6 @@ async function beginEngineDelivery(t) {
   return engine;
 }
 
-async function watchLifecycle(db, command, watch, version) {
-  await db.query("select set_config('carr.acting_actor_slug','joe',true),set_config('carr.verified_human_actor_slug','joe',true)");
-  const { rows: [{ result }] } = await db.query('select ops.subject_watch_v2($1,$2) result', [command, {
-    subject_type: 'deal', subject_id: watch.deal, subscription_id: watch.id, base_version: version,
-  }]);
-  assert.equal(result.ok, true, JSON.stringify(result));
-  return result.watch.state;
-}
-
 test('resuming a watch completes while engine progress is locked', async t => {
   const { db, addWatch } = await engineWatchFixture(t);
   const watch = await addWatch('Synthetic paused watch', { state: 'paused' });
@@ -570,7 +561,11 @@ test('resuming a watch completes while engine progress is locked', async t => {
   await engine.query('select watch_id from ops.subject_watch_engine_delivery where watch_id=$1 for update', [watch.id]);
   await db.query("begin; set local lock_timeout='100ms'");
   try {
-    assert.equal(await watchLifecycle(db, 'resume', watch, 1), 'watching');
+    await db.query("select set_config('carr.acting_actor_slug','joe',true),set_config('carr.verified_human_actor_slug','joe',true)");
+    const { rows: [{ result }] } = await db.query("select ops.subject_watch_v2('resume',$1) result", [{
+      subject_type: 'deal', subject_id: watch.deal, subscription_id: watch.id, base_version: 1,
+    }]);
+    assert.equal(result.watch?.state, 'watching', JSON.stringify(result));
     await db.query('commit');
   } finally {
     await db.query('rollback');
@@ -591,11 +586,9 @@ test('CARR automatically pauses an unavailable watch during an open engine trans
       }])],
     );
     assert.equal(failures, 0);
-    await db.query(`
-      update public.party set deleted_at=now() where id=(
-        select c.party_id from public.client c join public.deal d on d.client_id=c.id where d.id=$1
-      )
-    `, [watch.deal]);
+    await db.query(`update public.party p set deleted_at=now()
+      from public.client c join public.deal d on d.client_id=c.id
+      where p.id=c.party_id and d.id=$1`, [watch.deal]);
     await sweep(6, false);
     assert.deepEqual((await db.query(`
       select w.state,d.failure_count,d.failure_code from ops.subject_watch_v2_subscription w

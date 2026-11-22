@@ -98,13 +98,7 @@ begin
   end if;
   for item in select * from jsonb_to_recordset(p_engine) as x(watch_id uuid,lifecycle_version integer,status text,changes jsonb)
   loop
-    -- Lock the subscription through commit so a pause can only win before delivery.
-    perform 1 from ops.subject_watch_v2_subscription where id=item.watch_id and state='watching'
-      for no key update skip locked;
-    if not found then
-      perform 1 from ops.subject_watch where id=item.watch_id for no key update skip locked;
-      if not found then continue; end if;
-    end if;
+    if not pg_try_advisory_xact_lock(hashtextextended('subject-watch-engine:'||item.watch_id,0)) then continue; end if;
     select * into w from ops.subject_watch_engine_targets() where watch_id=item.watch_id;
     if not found or w.lifecycle_version is distinct from item.lifecycle_version or w.started_at>p_now
       or w.checked_at>=p_now or w.last_emitted_at>p_now-interval '5 minutes' then continue; end if;
@@ -185,7 +179,8 @@ begin
         last_emitted_at=case when cardinality(receipt_ids)>0 then p_now else last_emitted_at end,
         checked_at=case when cardinality(receipt_ids)<100 then p_now else checked_at end
       where watch_id=w.watch_id;
-    exception when sqlstate '57014' or others then
+    exception when sqlstate 'SW001' then continue;
+    when sqlstate '57014' or others then
       update ops.subject_watch_engine_delivery set failure_count=failure_count+1,failure_code=sqlstate where watch_id=w.watch_id;
       failures:=failures+1;
     end;
@@ -197,7 +192,6 @@ revoke all on function ops.read_subject_watch_engine_batch(timestamptz,integer,u
   ops.sweep_subject_watch_engine(timestamptz,jsonb) from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader;
 grant execute on function ops.read_subject_watch_engine_batch(timestamptz,integer,uuid[]),
   ops.sweep_subject_watch_engine(timestamptz,jsonb) to carr_writer;
-
 create index subject_watch_reply_notification on ops.subject_watch_change(notification_id)
 where category='reply_arrived' and notification_id is not null;
 
@@ -209,20 +203,38 @@ begin
     $new$where id=p_event_ref and verb=case when p_dedupe_key like 'subject-watch:engine:%'
       then 'subject-watch-engine-change' else 'subject-watch-scheduled-sweep' end$new$);
   if updated=definition then raise exception 'watch delivery guard missing from notification minter'; end if;
+  definition:=updated;
+  -- A pause that commits after the insert takes its snapshot can let one alert through.
+  updated:=replace(definition,$old$values (p_subject_type, p_subject_ref, p_event_ref, p_event_source,
+    v_recipient, p_reason, p_severity, p_deep_link, p_dedupe_key,
+    nullif(current_setting('carr.correlation_id', true), ''))$old$,
+    $new$select p_subject_type, p_subject_ref, p_event_ref, p_event_source,
+    v_recipient, p_reason, p_severity, p_deep_link, p_dedupe_key,
+    nullif(current_setting('carr.correlation_id', true), '')
+  where case when p_dedupe_key like 'subject-watch:engine:%' then exists(
+    select from ops.subject_watch_change c join ops.subject_watch_engine_targets() w
+      on w.watch_id=c.watch_generation_id and w.lifecycle_version=c.policy_version
+    where c.id=split_part(p_dedupe_key,':',4)::uuid) else true end$new$);
+  if updated=definition then raise exception 'watch notification insert missing'; end if;
+  definition:=updated;
+  updated:=replace(definition,$old$where recipient_actor = v_recipient and dedupe_key = p_dedupe_key;$old$,
+    $new$where recipient_actor = v_recipient and dedupe_key = p_dedupe_key;
+    if v_prior is null and p_dedupe_key like 'subject-watch:engine:%' then raise sqlstate 'SW001'; end if;$new$);
+  if updated=definition then raise exception 'watch notification deduplication missing'; end if;
   execute updated;
 
   definition:=pg_get_functiondef('ops.home_inbox_sources_v2(uuid)'::regprocedure);
   updated:=replace(definition,$old$jsonb_agg(to_jsonb(n) order by created_at desc,id desc)->0 latest,$old$,
     $new$jsonb_agg(to_jsonb(n) order by created_at desc,id desc)->0 latest,
-      (array_agg(n.reason order by created_at desc,id desc) filter (where
-        n.dedupe_key like 'subject-watch:%' and r.read_at is null and exists (
-          select from ops.subject_watch_change c where c.notification_id=n.id and c.category='reply_arrived'
-        )))[1] pending_reply_reason,$new$);
+      bool_or(n.dedupe_key like 'subject-watch:engine:%') has_engine_alert,
+      bool_or(r.read_at is null and exists (
+        select from ops.subject_watch_change c where c.notification_id=n.id and c.category='reply_arrived'
+      )) has_unread_reply,$new$);
   if updated=definition then raise exception 'Home notification grouping missing'; end if;
   definition:=updated;
   updated:=replace(definition,$old$coalesce(latest->>'reason','Update')$old$,
-    $new$coalesce(case when latest->>'dedupe_key' like 'subject-watch:engine:%' then g.pending_reply_reason end,
-      latest->>'reason','Update')$new$);
+    $new$(case when g.has_engine_alert and g.has_unread_reply then 'Reply received on a watched deal'
+      else coalesce(latest->>'reason','Update') end)$new$);
   if updated=definition then raise exception 'Home notification headline missing'; end if;
   execute updated;
 end $watch_notifications$;
