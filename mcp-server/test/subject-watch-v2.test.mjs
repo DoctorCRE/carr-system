@@ -505,32 +505,24 @@ test('CARR files and delivers its own replies with engine intake off or on', asy
   }
 });
 
-test('a CARR reply keeps the Home headline alongside an engine phase move', async t => {
+test('two CARR replies select the Home headline alongside an engine phase move', async t => {
   const { db, actor, addWatch, sweep } = await engineWatchFixture(t);
   const { id, deal } = await addWatch('Synthetic mixed watch batch');
-  const activity = await legacyReply(db, deal);
+  await legacyReply(db, deal);
+  await legacyReply(db, deal);
   await db.query("update ops.subject_watch_change set eligible_at='2027-02-01T12:01:00Z' where watch_generation_id=$1", [id]);
-  const changes = phaseMove(deal, '1', 3, 'research', 'negotiation');
-  t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(deal, changes));
-
-  await sweep(5);
-  await sweep(10);
-  assert.deepEqual((await db.query(`
-    select c.category, c.evidence_refs->0->>'activity_id' as activity_id, c.disposition,
-      n.reason, n.severity, n.deep_link
-    from ops.subject_watch_change c join ops.notification n on n.id=c.notification_id
-    where c.watch_generation_id=$1 order by c.category desc`, [id])).rows, [
-    { category: 'reply_arrived', activity_id: activity, disposition: 'emitted',
-      reason: 'Reply received on a watched deal', severity: 'action_required', deep_link: '/deals?deal=' + deal },
-    { category: 'material_changed', activity_id: null, disposition: 'emitted',
-      reason: 'Watched deal has 1 updates to review', severity: 'action_required', deep_link: '/deals?deal=' + deal },
-  ]);
-  const { rows } = await db.query(`
+  const cards = async () => (await db.query(`
     select card->>'title' as title, jsonb_array_length(card->'merged_source_ids') as notifications
     from ops.home_inbox_items_v3($1) card
     where card->>'source_type'='notification' and card->>'deal_id'=$2
-  `, [actor, deal]);
-  assert.deepEqual(rows, [{ title: 'Reply received on a watched deal · Synthetic mixed watch batch', notifications: 2 }]);
+  `, [actor, deal])).rows;
+
+  await sweep(5, false);
+  assert.deepEqual(await cards(), [{ title: 'Watched deal has 2 updates to review · Synthetic mixed watch batch', notifications: 1 }]);
+
+  t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(deal, phaseMove(deal, '1', 3, 'research', 'negotiation')));
+  await sweep(10);
+  assert.deepEqual(await cards(), [{ title: 'Reply received on a watched deal · Synthetic mixed watch batch', notifications: 2 }]);
 });
 
 test('an engine watch alert stays in-app with device delivery enabled', async t => {
@@ -586,13 +578,11 @@ test('resuming a watch completes while engine progress is locked', async t => {
   }
 });
 
-test('a pause can commit before an overlapping engine delivery without a late alert', async t => {
-  const { db, addWatch } = await engineWatchFixture(t);
-  const watch = await addWatch('Synthetic overlapping pause');
+test('CARR automatically pauses an unavailable watch during an open engine transaction', async t => {
+  const { db, addWatch, sweep } = await engineWatchFixture(t);
+  const watch = await addWatch('Synthetic unavailable deal');
   const engine = await beginEngineDelivery(t);
-  await db.query('begin');
   try {
-    assert.equal(await watchLifecycle(db, 'pause', watch, 1), 'paused');
     const { rows: [{ failures }] } = await engine.query(
       'select ops.sweep_subject_watch_engine($1,$2) failures',
       ['2027-02-01T12:05:00Z', JSON.stringify([{
@@ -601,14 +591,19 @@ test('a pause can commit before an overlapping engine delivery without a late al
       }])],
     );
     assert.equal(failures, 0);
-    await db.query('commit');
-    await engine.query('commit');
+    await db.query(`
+      update public.party set deleted_at=now() where id=(
+        select c.party_id from public.client c join public.deal d on d.client_id=c.id where d.id=$1
+      )
+    `, [watch.deal]);
+    await sweep(6, false);
+    assert.deepEqual((await db.query(`
+      select w.state,d.failure_count,d.failure_code from ops.subject_watch_v2_subscription w
+      join ops.subject_watch_delivery d on d.watch_id=w.id where w.id=$1
+    `, [watch.id])).rows, [{ state: 'paused', failure_count: 0, failure_code: null }]);
   } finally {
-    await db.query('rollback');
     await engine.query('rollback');
   }
-  assert.equal((await db.query('select 1 from ops.subject_watch_change where watch_generation_id=$1', [watch.id])).rowCount, 0);
-  assert.equal((await db.query("select 1 from ops.notification where subject_type='deal' and subject_ref=$1", [watch.deal])).rowCount, 0);
 });
 
 test('an engine-only alert does not delay a later CARR reply', async t => {
