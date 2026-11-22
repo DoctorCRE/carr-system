@@ -182,7 +182,7 @@ function readDealWatchField(value: unknown) {
 }
 
 type EngineWatchRead =
-  | { status: "ok"; changes: ReturnType<typeof readDealWatchField>[]; reply_activity_ids: string[] }
+  | { status: "ok"; changes: ReturnType<typeof readDealWatchField>[] }
   | { status: "missing" };
 
 export async function readEngineDealWatch(
@@ -218,15 +218,12 @@ export async function readEngineDealWatch(
     payload?.kind !== "deal" ||
     payload.id !== watch.deal_id ||
     payload.deal_id !== watch.deal_id ||
-    !Array.isArray(payload.changes) ||
-    !Array.isArray(payload.reply_activity_ids) ||
-    !payload.reply_activity_ids.every(isUuid)
+    !Array.isArray(payload.changes)
   )
     throw new Error("invalid_engine_watch_response");
   return {
     status: "ok",
     changes: payload.changes.map(readDealWatchField),
-    reply_activity_ids: payload.reply_activity_ids,
   };
 }
 
