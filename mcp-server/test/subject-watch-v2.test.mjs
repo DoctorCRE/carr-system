@@ -506,6 +506,46 @@ test('CARR files and delivers its own replies with engine intake off or on', asy
   }
 });
 
+test('a CARR reply keeps its own alert alongside an engine phase move', async t => {
+  const { db, addWatch, sweep } = await engineWatchFixture(t);
+  const { id, deal } = await addWatch('Synthetic mixed watch batch');
+  const activity = await legacyReply(db, deal);
+  await db.query("update ops.subject_watch_change set eligible_at='2027-02-01T12:01:00Z' where watch_generation_id=$1", [id]);
+  const changes = phaseMove(deal, '1', 3, 'research', 'negotiation');
+  t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(deal, changes));
+
+  await sweep(5);
+  await sweep(10);
+  assert.deepEqual((await db.query(`
+    select c.category, c.evidence_refs->0->>'activity_id' as activity_id, c.disposition,
+      n.reason, n.severity, n.deep_link
+    from ops.subject_watch_change c join ops.notification n on n.id=c.notification_id
+    where c.watch_generation_id=$1 order by c.category desc`, [id])).rows, [
+    { category: 'reply_arrived', activity_id: activity, disposition: 'emitted',
+      reason: 'Reply received on a watched deal', severity: 'action_required', deep_link: '/deals?deal=' + deal },
+    { category: 'material_changed', activity_id: null, disposition: 'emitted',
+      reason: 'Watched deal has 1 updates to review', severity: 'action_required', deep_link: '/deals?deal=' + deal },
+  ]);
+});
+
+test('an engine-only alert does not delay a later CARR reply', async t => {
+  const { db, addWatch, sweep } = await engineWatchFixture(t);
+  const { id, deal } = await addWatch('Synthetic reply after phase alert');
+  const changes = phaseMove(deal, '1', 3, 'research', 'negotiation');
+  t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(deal, changes));
+
+  await sweep(5);
+  await legacyReply(db, deal);
+  await db.query("update ops.subject_watch_change set eligible_at='2027-02-01T12:06:00Z' where watch_generation_id=$1 and category='reply_arrived'", [id]);
+  await sweep(6);
+  assert.deepEqual((await db.query(`
+    select n.reason from ops.subject_watch_change c join ops.notification n on n.id=c.notification_id
+    where c.watch_generation_id=$1 order by c.category desc`, [id])).rows, [
+    { reason: 'Reply received on a watched deal' },
+    { reason: 'Watched deal has 1 updates to review' },
+  ]);
+});
+
 async function legacyReply(db, deal) {
   const { id } = (await db.query(`
     insert into public.activity(kind,occurred_at,deal_id,actor_id,summary,email_source)
