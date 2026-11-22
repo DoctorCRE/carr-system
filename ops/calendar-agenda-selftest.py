@@ -42,12 +42,17 @@ class CalendarAgendaTest(unittest.TestCase):
                 self.hidden([event(hours=hours, lifecycle_status='canceled',
                                    lifecycle_reason='outlook_canceled_subject')])
 
-    def test_legacy_cancellation_spellings_remain_supported(self):
-        for title in ('Canceled: Synthetic', 'Cancelled: Synthetic', '  cAnCeLeD : Synthetic'):
+    def test_legacy_cancellation_matches_the_decoder_cases(self):
+        fixture = Path(__file__).resolve().parents[1] / 'vendor/hxprobe/tests/fixtures/calendar-cancellation.json'
+        for title, stripped in json.loads(fixture.read_text(encoding='utf-8')):
             with self.subTest(title=title):
-                row = event()
-                row['subject'] = title
-                self.hidden([row])
+                row = event(subject=title)
+                if stripped is not None:
+                    self.hidden([row])
+                else:
+                    snapshot, counts = self.project([row])
+                    self.assertEqual(len(snapshot['items']), 1)
+                    self.assertEqual(counts['calendar_agenda_canceled'], 0)
 
     def test_one_canceled_copy_dominates_conflicting_display_and_time_updates(self):
         for hours in (2, -2):
