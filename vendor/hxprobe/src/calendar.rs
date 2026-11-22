@@ -359,6 +359,108 @@ mod tests {
         out
     }
 
+    fn heap_field(obj: &mut Vec<u8>, at: usize, value: &[u8]) {
+        let heap = TAG as usize - 10 + 7;
+        let offset = (obj.len() - heap) as u32;
+        obj[at..at + 4].copy_from_slice(&offset.to_le_bytes());
+        obj[at + 4..at + 8].copy_from_slice(&(0x8000_0000 | value.len() as u32).to_le_bytes());
+        obj.extend(value);
+    }
+
+    fn heap_meeting(first_subject: &str, second_subject: &str, organizer: &str) -> Vec<u8> {
+        let mut obj = vec![0; TAG as usize - 10 + 7];
+        obj[..2].copy_from_slice(&CLASS.to_le_bytes());
+        obj[94..96].copy_from_slice(&7u16.to_le_bytes());
+        obj[START..START + 8].copy_from_slice(&ticks(1_793_000_000));
+        obj[END..END + 8].copy_from_slice(&ticks(1_793_003_600));
+        obj.extend(u16le(&format!("{GOID_PREFIX}00000000AAAA\0")));
+        for (at, value) in [(866, first_subject), (874, "Ada Example"), (882, organizer), (1014, second_subject)] {
+            heap_field(&mut obj, at, &u16le(&format!("{value}\0")));
+        }
+        let roster = [1u32.to_le_bytes().to_vec(), lp("Bo Example"), lp("bo@example.test"), vec![0; 12]].concat();
+        heap_field(&mut obj, 674, &roster);
+        obj
+    }
+
+    #[test]
+    fn decodes_a_roster_followed_by_other_heap_data() {
+        let title = "Quarterly Site Review";
+        for trailer in ["slot 970", "slot 970 and subject", "slot 690", "slot 826", "padding"] {
+            let mut obj = heap_meeting(title, title, "ada@example.test");
+            match trailer {
+                "slot 970" => heap_field(&mut obj, 970, &[0xa5; 24]),
+                "slot 970 and subject" => {
+                    heap_field(&mut obj, 970, &[0xa5; 24]);
+                    heap_field(&mut obj, 1014, &u16le(&format!("{title}\0")));
+                }
+                "slot 690" => heap_field(&mut obj, 690, &u16le("Meeting notes\0")),
+                "slot 826" => heap_field(&mut obj, 826, &u16le("Example Room\0")),
+                "padding" => obj.extend([0; 16]),
+                _ => unreachable!(),
+            }
+            let mut idx = Index::default();
+            idx.observe(&envelope(&obj));
+            let ev = idx.events.values().next().unwrap_or_else(|| panic!("missing meeting with {trailer}"));
+            assert_eq!(ev.subject.as_deref(), Some(title), "{trailer}");
+            assert_eq!(ev.organizer_email.as_deref(), Some("ada@example.test"));
+            assert_eq!(ev.attendees, vec![Attendee { name: "Bo Example".into(), email: "bo@example.test".into(), ..Default::default() }]);
+            assert!(!ev.canceled);
+        }
+    }
+
+    #[test]
+    fn marks_a_recovered_meeting_canceled_from_either_subject_slot() {
+        let title = "Quarterly Site Review";
+        let canceled = "Cancelled: Quarterly Site Review";
+        for (first, second) in [(canceled, title), (title, canceled), (canceled, canceled)] {
+            let mut obj = heap_meeting(first, second, "ada@example.test");
+            obj.extend([0xa5; 24]);
+            let mut idx = Index::default();
+            idx.observe(&envelope(&obj));
+            let ev = idx.events.values().next().expect("canceled meeting decoded");
+            assert_eq!(ev.subject.as_deref(), Some(title));
+            assert!(ev.canceled);
+        }
+    }
+
+    #[test]
+    fn recovery_requires_matching_subjects_and_an_organizer_address() {
+        for (first, second, organizer) in [
+            ("Planning", "Review", "ada@example.test"),
+            ("Canceled: Other Planning", "Planning", "ada@example.test"),
+            ("Planning", "Planning", "Example Room"),
+            ("", "", "ada@example.test"),
+        ] {
+            let mut obj = heap_meeting(first, second, organizer);
+            heap_field(&mut obj, 826, &u16le("Planning\0"));
+            obj.extend([0xa5; 8]);
+            let mut idx = Index::default();
+            idx.observe(&envelope(&obj));
+            assert_eq!(idx.identities.len(), 1);
+            assert!(idx.events.is_empty());
+        }
+    }
+
+    #[test]
+    fn main_decodable_layouts_keep_all_their_fields() {
+        let attendees = [("Bo Example", "bo@example.test")];
+        let mut no_roster = object(true, &[]);
+        no_roster.truncate(no_roster.len() - 4);
+        let mut two_rosters = heap_meeting("Planning", "Planning", "ada@example.test");
+        two_rosters.extend([0, 0]);
+        two_rosters.extend([1u32.to_le_bytes().to_vec(), lp("Cy Example"), lp("cy@example.test"), vec![0; 12]].concat());
+
+        for obj in [object(true, &attendees), object(true, &[]), no_roster, two_rosters,
+                    object_with(true, "Canceled: Quarterly Site Review", &attendees)] {
+            let expected = parse(&obj, goid(&obj).unwrap(), tick(&obj, START).unwrap(), tick(&obj, END).unwrap())
+                .expect("main decoder accepts the fixture");
+            let mut idx = Index::default();
+            idx.observe(&envelope(&obj));
+            assert_eq!(idx.events.len(), 1);
+            assert_eq!(format!("{:?}", idx.events.values().next().unwrap()), format!("{expected:?}"));
+        }
+    }
+
     #[test]
     fn decodes_a_meeting() {
         let mut idx = Index::default();
