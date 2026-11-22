@@ -85,6 +85,8 @@ pub struct Event {
     pub end_unix: i64,
     /// None is unreadable. An empty string is a confirmed blank subject.
     pub subject: Option<String>,
+    /// Private input to the agenda's existing copy and cancellation rules.
+    pub legacy_subject: Option<String>,
     pub location: Option<String>,
     pub organizer_name: Option<String>,
     pub organizer_email: Option<String>,
@@ -221,32 +223,33 @@ fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
     let g = memchr::memmem::find(obj, &GOID_PREFIX.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<u8>>())?;
     let text_at = |text_end| {
         let bytes = obj.get(g + goid.len() * 2..text_end)?.strip_prefix(&[0, 0])?;
-        Some(skip_zones(bytes).unwrap_or(bytes))
+        Some(skip_zones(bytes).unwrap_or(([&[][..]; 2], bytes)))
     };
     if let Some((mut copy, text_end)) = legacy_copy(obj, g, &goid, start, end) {
-        let title = text_at(text_end).and_then(|bytes| {
+        copy.subject = text_at(text_end).and_then(|(zones, bytes)| {
             let words = utf16(bytes);
             let slots: Vec<_> = words.strip_suffix(&[0])?.split(|unit| *unit == 0).collect();
-            confirmed_subject(&slots).0
+            subject_slots(&slots, zones, &copy.attendees).0
+                .filter(|subject| copy.legacy_subject.as_ref() == Some(subject))
         });
-        copy.subject = copy.subject.filter(|subject| title.as_ref() == Some(subject));
         return Some(copy);
     }
 
-    let bytes = text_at(obj.len())?;
+    let (zones, bytes) = text_at(obj.len())?;
     let words = utf16(bytes);
     let fields: Vec<_> = words.split(|unit| *unit == 0).take(7).collect();
     let &[_, location, name, email, _, notes, _] = fields.as_slice() else { return None };
     let text_len = fields.iter().map(|field| (field.len() + 1) * 2).sum::<usize>();
     let tail = bytes.get(text_len..)?;
     let attendees = if tail.is_empty() { Vec::new() } else { attendees_at(tail, 0)? };
-    let (subject, canceled) = confirmed_subject(&fields);
+    let (subject, canceled) = subject_slots(&fields, zones, &attendees);
     let text = |field| String::from_utf16(field).ok().filter(|s| !s.is_empty());
     Some(Event {
         goid,
         start_unix: start,
         end_unix: end,
         subject,
+        legacy_subject: None,
         location: text(location),
         organizer_name: text(name),
         organizer_email: text(email).filter(|s| is_email(s)),
@@ -257,30 +260,31 @@ fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
     })
 }
 
-fn skip_zones(mut bytes: &[u8]) -> Option<&[u8]> {
-    for _ in 0..2 {
+fn skip_zones(mut bytes: &[u8]) -> Option<([&[u8]; 2], &[u8])> {
+    let mut zones = [&[][..]; 2];
+    for zone in &mut zones {
         let (&len, rest) = bytes.split_first()?;
-        let (zone, remaining) = rest.split_at_checked(usize::from(len))?;
-        let zone = utf16(zone);
-        if len % 2 != 0 || zone.contains(&0) || String::from_utf16(&zone).is_err() {
+        (*zone, bytes) = rest.split_at_checked(usize::from(len))?;
+        let words = utf16(zone);
+        if len % 2 != 0 || words.contains(&0) || String::from_utf16(&words).is_err() {
             return None;
         }
-        bytes = remaining;
     }
-    Some(bytes)
+    Some((zones, bytes))
 }
 
-fn confirmed_subject(fields: &[&[u16]]) -> (Option<String>, bool) {
-    let [first, middle @ .., last] = fields else { return (None, false) };
-    if middle.len() < 4 {
-        return (None, false);
-    }
-    let (Ok(first), Ok(last_text)) = (String::from_utf16(first), String::from_utf16(last)) else {
+fn subject_slots(fields: &[&[u16]], zones: [&[u8]; 2], attendees: &[Attendee]) -> (Option<String>, bool) {
+    // Extra fields leave the subject slots unproven, even when the outer fields match.
+    let [first, location, name, email, owner, notes, second] = fields else { return (None, false) };
+    let (Ok(first), Ok(subject)) = (String::from_utf16(first), String::from_utf16(second)) else {
         return (None, false);
     };
-    let canceled = CANCELED.iter().any(|prefix| first.strip_prefix(prefix) == Some(&last_text));
-    let ambiguous = !last.is_empty() && middle.contains(last);
-    let title = (!ambiguous && (first == last_text || canceled)).then_some(last_text);
+    let canceled = CANCELED.iter().any(|prefix| first.strip_prefix(prefix) == Some(&subject));
+    let repeated = !subject.is_empty()
+        && ([location, name, email, owner, notes].contains(&second)
+            || zones.iter().any(|zone| utf16(zone) == *second)
+            || attendees.iter().any(|a| a.name == subject || a.email == subject));
+    let title = (!repeated && (first == subject || canceled)).then_some(subject);
     (title, canceled)
 }
 
@@ -348,7 +352,8 @@ fn legacy_copy(obj: &[u8], g: usize, goid: &str, start: i64, end: i64) -> Option
         goid: goid.to_owned(),
         start_unix: start,
         end_unix: end,
-        subject: Some(subject.to_string()),
+        subject: None,
+        legacy_subject: Some(subject.to_string()),
         location,
         organizer_name,
         organizer_email,

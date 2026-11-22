@@ -265,7 +265,8 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              lifecycle_reason TEXT NOT NULL,
              -- 'occurrence' (one instance of a recurring series) or 'item'.
              recurrence       TEXT NOT NULL,
-             subject_undecoded INTEGER NOT NULL
+             subject_undecoded INTEGER NOT NULL,
+             legacy_subject   TEXT
          );
          CREATE TABLE event_attendees (
              event_id      INTEGER NOT NULL REFERENCES events(id),
@@ -503,8 +504,8 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             .prepare(
                 "INSERT INTO events(goid,start_unix,end_unix,start_utc,end_utc,subject,location,
                                     organizer_name,organizer_email,body,lifecycle_status,lifecycle_reason,
-                                    recurrence,subject_undecoded)
-                 VALUES (?1,?2,?3,datetime(?2,'unixepoch'),datetime(?3,'unixepoch'),?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+                                    recurrence,subject_undecoded,legacy_subject)
+                 VALUES (?1,?2,?3,datetime(?2,'unixepoch'),datetime(?3,'unixepoch'),?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
             )
             .expect("prepare events");
         let mut ins_attendee = tx
@@ -524,7 +525,8 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             ins_event
                 .execute(rusqlite::params![
                     ev.goid, ev.start_unix, ev.end_unix, subject, ev.location,
-                    ev.organizer_name, ev.organizer_email, ev.body, status, reason, recurrence, ev.subject.is_none(),
+                    ev.organizer_name, ev.organizer_email, ev.body, status, reason, recurrence,
+                    ev.subject.is_none(), ev.legacy_subject,
                 ])
                 .expect("insert event");
             let event_id = tx.last_insert_rowid();

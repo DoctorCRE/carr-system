@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import sys
 import unittest
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -69,8 +70,11 @@ class CalendarAgendaTest(unittest.TestCase):
         self.assertEqual(counts['calendar_agenda_recurring'], 1)
         self.assertIn({'code': 'recurring_unverified', 'count': 1}, snapshot['warnings'])
 
-    def test_address_free_cancellation_still_hides_the_account_copy(self):
-        self.hidden([event(), event(organizer_email=None, lifecycle_status='canceled')])
+    def test_address_free_cancellation_fails_the_account_check(self):
+        snapshot, counts = self.project([event(), event(organizer_email=None, lifecycle_status='canceled')])
+        self.assertEqual(snapshot['items'], [])
+        self.assertEqual(snapshot['follow_up_reviews'], [])
+        self.assertEqual(counts['calendar_agenda_other_accounts'], 1)
 
     def test_account_evidence_does_not_cover_another_start(self):
         snapshot, counts = self.project([event(), event(hours=3, organizer_email=None)])
@@ -111,6 +115,19 @@ class CalendarAgendaTest(unittest.TestCase):
         self.assertEqual(len(snapshot['items']), 1)
         self.assertTrue(snapshot['items'][0]['conflict'])
         self.assertEqual(snapshot['follow_up_reviews'], [])
+
+    def test_shorter_display_title_does_not_change_which_items_get_trimmed(self):
+        short = event(1, subject='Short')
+        long = event(2, subject='Z' * 1000)
+        unreadable = long | dict(subject=None, subject_undecoded=True, legacy_subject=long['subject'])
+        snapshot, _ = self.project([short, unreadable])
+        self.assertEqual(len(snapshot['items']), 2)
+        with patch('lib.calendar_agenda.AGENDA_MAX_BYTES', len(json.dumps(snapshot)) + 100):
+            expected, _ = self.project([short, long])
+            actual, counts = self.project([short, unreadable])
+        self.assertEqual([item['title'] for item in actual['items']], ['Short'])
+        self.assertEqual(actual['items'], expected['items'])
+        self.assertEqual(counts['calendar_agenda_trimmed'], 1)
 
     def test_ended_meetings_use_the_central_midnight_boundary(self):
         snapshot, _ = self.project([

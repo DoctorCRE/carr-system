@@ -34,21 +34,17 @@ def _series(goid: str) -> str:
     return goid[:32] + '00000000' + goid[40:] if len(goid) >= 40 else goid
 
 
-def _participant_emails(event: dict) -> set[str]:
-    emails = {email.lower() for _, email in event['attendees'] if email}
-    if organizer := event['organizer_email']:
-        emails.add(organizer.lower())
-    return emails
+def _subject_evidence(event: dict) -> str | None:
+    return event.get('legacy_subject') or event['subject']
 
 
 def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datetime) -> tuple[dict, dict]:
     """The display snapshot of today's and upcoming meetings, plus recent outcome review proposals.
 
-    A meeting shows only when each retained copy names the configured account
-    as organizer or attendee. For the same Global Object ID and start, a copy
-    that names the account supersedes copies with no participant addresses for
-    display. An invite sent only to a group is left out and the snapshot says so.
-    Copies are collapsed by Global Object ID.
+    Joe is the configured account. A meeting shows only when every stored copy
+    names him as organizer or attendee, so TEST-account, personal and other
+    partners' items never show; an invite sent only to a group he belongs to is
+    left out and the snapshot says so. Copies are collapsed by Global Object ID.
     Outlook writes each recurring occurrence under its own ID (the instance date
     sits in bytes 16-19), so the series master is skipped once occurrences exist.
     Revision order is not decoded: an ID seen at more than one start is one row
@@ -72,29 +68,30 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
                             'calendar_agenda_recurring', 'calendar_agenda_trimmed',
                             'calendar_follow_up_trimmed'), 0)
     items, reviews = [], []
+    unreadable_keys = set()
     for goid, group in by_goid.items():
         if _instance(goid) == '00000000' and goid in with_occurrences:
             continue
-        observed = [(e, _participant_emails(e)) for e in group]
-        account_starts = {e['start_unix'] for e, emails in observed if account in emails}
-        copies = [(e, emails) for e, emails in observed if emails or e['start_unix'] not in account_starts]
-        candidates = [e for e, _ in copies]
-        current = [e for e in candidates if e['start_unix'] < hi
+        current = [e for e in group if e['start_unix'] < hi
                    and (e['end_unix'] > lo or e['start_unix'] == e['end_unix'] == lo)]
-        recent = [e for e in candidates if review_lo < e['end_unix'] <= review_hi]
+        recent = [e for e in group if review_lo < e['end_unix'] <= review_hi]
         if not current and not recent:
             continue
-        if not all(account in emails for _, emails in copies):
+        if not all(account in {(e['organizer_email'] or '').lower(), *((m or '').lower() for _, m in e['attendees'])}
+                   for e in group):
             counts['calendar_agenda_other_accounts'] += 1
             continue
-        if any(e.get('lifecycle_status') == 'canceled' or CANCELED.match(e['subject'] or '') for e in group):
+        if any(e.get('lifecycle_status') == 'canceled' or CANCELED.match(_subject_evidence(e) or '') for e in group):
             counts['calendar_agenda_canceled'] += 1
             continue
-        shown = max(current or recent, key=lambda e: (len(e['attendees']), e['end_unix']))
+        shown = max(current or recent, key=lambda e: (len(e['attendees']), len(_subject_evidence(e) or ''), e['end_unix']))
         starts = sorted({e['start_unix'] for e in group})
-        conflict = len({json.dumps([e['subject'], bool(e.get('subject_undecoded')), e['location'],
-                                    e['end_unix'] - e['start_unix'],
-                                    sorted((n or '', m or '') for n, m in e['attendees'])]) for e in candidates}) > 1
+        subjects = {subject for e in group if (subject := _subject_evidence(e)) is not None
+                    or not e.get('subject_undecoded')}
+        conflict = len(subjects) > 1 or len({
+            json.dumps([e['location'], e['end_unix'] - e['start_unix'],
+                        sorted((n or '', m or '') for n, m in e['attendees'])]) for e in group
+        }) > 1
         recurring = _instance(goid) != '00000000'
         start, end = shown['start_unix'], shown['end_unix']
         local = datetime.fromtimestamp(start, tz)
@@ -103,10 +100,12 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
         counts['calendar_agenda_time_changed'] += len(starts) > 1
         counts['calendar_agenda_recurring'] += recurring
         attendees = [{'name': name or None, 'email': (email or '').lower() or None} for name, email in shown['attendees']]
-        title = 'Meeting title unreadable' if shown.get('subject_undecoded') else shown['subject'] or 'Meeting'
-        item = {'key': _hash(goid)[:16], 'start': _iso(start), 'end': _iso(end),
+        key = _hash(goid)[:16]
+        if shown.get('subject_undecoded'):
+            unreadable_keys.add(key)
+        item = {'key': key, 'start': _iso(start), 'end': _iso(end),
                       'all_day': local.time() == local_end.time() == time() and local_end.date() > local.date(),
-                      'title': title, 'location': shown['location'] or None,
+                      'title': _subject_evidence(shown) or 'Meeting', 'location': shown['location'] or None,
                       'organizer': {'name': shown['organizer_name'] or None,
                                     'email': (shown['organizer_email'] or '').lower() or None},
                       'attendees': attendees[:AGENDA_ATTENDEES], 'attendee_count': len(attendees),
@@ -126,10 +125,11 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
     del reviews[100:]
     identities = {(e['goid'], e['start_unix']) for e in events}
     unreadable_titles = {(e['goid'], e['start_unix']) for e in events if e.get('subject_undecoded')}
-    undecoded = max(0, (meta.get('event_identities') or 0) - len(identities)) + len(unreadable_titles)
+    undecoded = max(0, (meta.get('event_identities') or 0) - len(identities))
     warnings: list[dict] = [{'code': 'responses_unverified'}, {'code': 'group_invites_not_shown'}]
+    undecoded_warning = {'code': 'undecoded', 'count': undecoded}
     if undecoded:
-        warnings.append({'code': 'undecoded', 'count': undecoded})
+        warnings.append(undecoded_warning)
     if counts['calendar_agenda_canceled']:
         warnings.append({'code': 'canceled_hidden', 'count': counts['calendar_agenda_canceled']})
     if counts['calendar_agenda_time_changed']:
@@ -145,23 +145,37 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
                 'warnings': warnings, 'items': items, 'follow_up_reviews': reviews}
     ended = iter(sorted((i for i in items if i['end'] <= snapshot['observed_at']),
                         key=lambda i: (i['end'], i['key'])))
-    while len(json.dumps(snapshot)) > AGENDA_MAX_BYTES and (reviews or items):
-        ended_item = next(ended, None)
-        if ended_item is not None:
-            items.remove(ended_item)
-            counter, code = 'calendar_agenda_trimmed', 'ended_trimmed'
-        elif reviews:
-            reviews.pop()
-            counter, code = 'calendar_follow_up_trimmed', 'follow_up_trimmed'
-        else:
-            items.pop()
-            counter, code = 'calendar_agenda_trimmed', 'trimmed'
-        counts[counter] += 1
-        warning = next((w for w in warnings if w['code'] == code), None)
-        if warning is None:
-            warnings.append({'code': code, 'count': 1})
-        else:
-            warning['count'] += 1
+
+    def trim():
+        while len(json.dumps(snapshot)) > AGENDA_MAX_BYTES and (reviews or items):
+            ended_item = next(ended, None)
+            if ended_item is not None:
+                items.remove(ended_item)
+                counter, code = 'calendar_agenda_trimmed', 'ended_trimmed'
+            elif reviews:
+                reviews.pop()
+                counter, code = 'calendar_follow_up_trimmed', 'follow_up_trimmed'
+            else:
+                items.pop()
+                counter, code = 'calendar_agenda_trimmed', 'trimmed'
+            counts[counter] += 1
+            warning = next((w for w in warnings if w['code'] == code), None)
+            if warning is None:
+                warnings.append({'code': code, 'count': 1})
+            else:
+                warning['count'] += 1
+
+    # Preserve the original budget decisions, then cap the published payload.
+    trim()
+    if unreadable_titles:
+        for row in (*items, *reviews):
+            if row['key'] in unreadable_keys:
+                row['title'] = 'Meeting title unreadable'
+        if not undecoded:
+            warnings.insert(2, undecoded_warning)
+        undecoded += len(unreadable_titles)
+        undecoded_warning['count'] = undecoded
+        trim()
     counts['calendar_follow_up_reviews'] = len(reviews)
     counts['calendar_agenda_items'] = len(snapshot['items'])
     counts['calendar_agenda_undecoded'] = undecoded

@@ -214,10 +214,13 @@ Synthetic tests prove candidate separation and fail-closed labeling only.
 Native decoder validation and controlled test-account format research are still
 required before current calendar lifecycle or completeness can be claimed.
 
-The legacy decoder still supplies the schedule, organizer, attendees and
-cancellation for each copy it can read. The title is kept when the two subject
-slots agree and their text differs from the other fields. A disagreeing,
-unreadable or ambiguous title sets `events.subject_undecoded` on the same copy.
+The legacy decoder supplies the schedule, organizer, attendees, cancellation,
+and private `events.legacy_subject` for each copy it can read. The agenda uses
+that subject as evidence for its existing rules. The display title requires
+the known seven-field layout and two matching subject slots, with the
+cancellation prefix accounted for. A nonempty title must differ from the
+other text fields, time zones, and attendee names and addresses. Ambiguous
+copies set `events.subject_undecoded` and keep their other evidence.
 
 Copies the legacy decoder cannot read can still export from the seven-field
 layout. It supports short and Unicode titles and confirms a blank title when
@@ -231,12 +234,11 @@ appointment added one GOID/start identity and, before this, no decoded candidate
 Intake stores opaque candidate hashes and provisional schedule timestamps in its
 private state. Separately it publishes the next fourteen days of meetings as a
 display snapshot (board `calendar-agenda`) for the morning brief, with no notes
-or bodies. Each retained copy must name the configured account. For the same
-Global Object ID and start, a copy that names the account supersedes copies
-with no participant addresses for display. A copy that names only other
-participants blocks the meeting even if its title is unreadable. Cancellation
-applies across copies. The agenda uses the selected copy's title, or displays
-`Meeting title unreadable` when that copy's title could not be decoded. The
+or bodies. Each stored copy must name the configured account. A recovered copy
+with no participant addresses or with only other participants blocks the
+meeting under that same rule. Cancellation applies across admitted copies.
+The agenda chooses the row using the private copy evidence and displays
+`Meeting title unreadable` when the selected title could not be confirmed. The
 undecoded warning counts each GOID and start once if any copy has an unreadable
 title or if the decoder could export no copy.
 
