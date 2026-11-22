@@ -255,7 +255,8 @@ export async function saveAssistantChange(env: EngineEnv, partner: string, save:
     if (!response.ok) {
       const code = result?.error;
       if (
-        save.path === "/jobs/activities/deal-note" &&
+        (save.path === "/jobs/activities/deal-note" || save.path === "/jobs/next-steps") &&
+        "deal_id" in save.body &&
         response.status === 404 &&
         code === "not_found" &&
         isUuid(result?.correlation_id)
