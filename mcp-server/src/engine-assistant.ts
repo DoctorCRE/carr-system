@@ -5,7 +5,7 @@ import { isInvoiceEvidence } from "./invoice-evidence.ts";
 import { ToolError } from "./tool-error.ts";
 import type { VerbInputs } from "./verb-contract.ts";
 
-type EngineEnv = {
+export type EngineEnv = {
   ENGINE_URL?: string;
   ENGINE_ACCESS_CLIENT_ID?: string;
   ENGINE_ACCESS_CLIENT_SECRET?: string;
@@ -117,7 +117,7 @@ function dealNoteReceipt(result: Record<string, unknown>, hasPlan: boolean) {
     : null;
 }
 
-export async function saveAssistantChange(env: EngineEnv, partner: string, save: Save) {
+function engineJobRequest(env: EngineEnv, path: string, job: string, partner: string) {
   const url = URL.parse(env.ENGINE_URL ?? "");
   const clientId = env.ENGINE_ACCESS_CLIENT_ID;
   const secret = env.ENGINE_ACCESS_CLIENT_SECRET;
@@ -133,23 +133,108 @@ export async function saveAssistantChange(env: EngineEnv, partner: string, save:
   )
     throw new ToolError({ error: "engine_assistant_configuration" });
 
-  const body = JSON.stringify(save.body);
-  const headers = {
-    "Content-Type": "application/json",
-    "User-Agent": engineClient.userAgent,
-    "CF-Access-Client-Id": clientId,
-    "CF-Access-Client-Secret": secret,
-    "Engine-Job": save.job ?? "agent",
-    "Engine-For-User": partner,
+  return {
+    target: new URL(path, url),
+    headers: {
+      "User-Agent": engineClient.userAgent,
+      "CF-Access-Client-Id": clientId,
+      "CF-Access-Client-Secret": secret,
+      "Engine-Job": job,
+      "Engine-For-User": partner,
+    },
   };
-  const target = new URL(save.path, url);
+}
+
+export type DealWatchTarget = {
+  watch_id: string;
+  lifecycle_version: number;
+  deal_id: string;
+  subscriber: string;
+  since: string;
+};
+
+function engineResult(payload: unknown): Record<string, unknown> | null {
+  return typeof payload === "object" && payload !== null && !Array.isArray(payload)
+    ? Object.fromEntries(Object.entries(payload))
+    : null;
+}
+
+function readDealWatchField(value: unknown) {
+  const change = engineResult(value);
+  const { change_id, table_name, action, field, old_value, new_value, actor, for_user, changed_at } = change ?? {};
+  if (
+    !change ||
+    typeof change_id !== "string" ||
+    !/^\d+$/.test(change_id) ||
+    typeof table_name !== "string" ||
+    (action !== "insert" && action !== "update" && action !== "delete") ||
+    typeof field !== "string" ||
+    !/^[a-z][a-z0-9_]*$/.test(field) ||
+    typeof actor !== "string" ||
+    (for_user !== null && typeof for_user !== "string") ||
+    !("old_value" in change) ||
+    !("new_value" in change) ||
+    typeof changed_at !== "string" ||
+    !Number.isFinite(Date.parse(changed_at))
+  )
+    throw new Error("invalid_engine_watch_change");
+  return { change_id, table_name, action, field, old_value, new_value, actor, for_user, changed_at };
+}
+
+type EngineWatchRead = { status: "ok"; changes: ReturnType<typeof readDealWatchField>[] } | { status: "missing" };
+
+export async function readEngineDealWatch(
+  env: EngineEnv,
+  watch: DealWatchTarget,
+  timeout: number,
+): Promise<EngineWatchRead> {
+  const { target, headers } = engineJobRequest(
+    env,
+    `/jobs/deal-watches/deal/${watch.deal_id}`,
+    "agent",
+    watch.subscriber,
+  );
+  target.searchParams.set("subscriber", watch.subscriber);
+  target.searchParams.set("since", watch.since);
+  const response = await fetch(target, { headers, redirect: "manual", signal: AbortSignal.timeout(timeout) }).catch(
+    () => {
+      throw new Error("engine_watch_unavailable");
+    },
+  );
+  if (!response.ok) {
+    if (response.status === 404) {
+      const refusal = engineResult(await response.json().catch(() => null));
+      // The router's generic 404 also says not_found, without a correlation ID.
+      if (refusal?.error === "not_found" && isUuid(refusal.correlation_id)) return { status: "missing" };
+    } else {
+      await response.body?.cancel().catch(() => {});
+    }
+    throw new Error("engine_watch_unavailable");
+  }
+  const payload = engineResult(await response.json().catch(() => null));
+  if (
+    payload?.kind !== "deal" ||
+    payload.id !== watch.deal_id ||
+    payload.deal_id !== watch.deal_id ||
+    !Array.isArray(payload.changes)
+  )
+    throw new Error("invalid_engine_watch_response");
+  return {
+    status: "ok",
+    changes: payload.changes.map(readDealWatchField),
+  };
+}
+
+export async function saveAssistantChange(env: EngineEnv, partner: string, save: Save) {
+  const { target, headers } = engineJobRequest(env, save.path, save.job ?? "agent", partner);
+  const body = JSON.stringify(save.body);
   let fetchError: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     let response: Response;
     try {
       response = await fetch(target, {
         method: "POST",
-        headers,
+        headers: { ...headers, "Content-Type": "application/json" },
         body,
         redirect: "manual",
         signal: AbortSignal.timeout(5_000),
@@ -166,11 +251,7 @@ export async function saveAssistantChange(env: EngineEnv, partner: string, save:
       await response.body?.cancel().catch(() => {});
       continue;
     }
-    const payload: unknown = await response.json().catch(() => null);
-    const result: Record<string, unknown> | null =
-      typeof payload === "object" && payload !== null && !Array.isArray(payload)
-        ? Object.fromEntries(Object.entries(payload))
-        : null;
+    const result = engineResult(await response.json().catch(() => null));
     if (!response.ok) {
       const code = result?.error;
       throw new ToolError({
@@ -202,7 +283,10 @@ export async function saveAssistantChange(env: EngineEnv, partner: string, save:
   }
   const unavailable = new ToolError({ error: "engine_assistant_unavailable" });
   if (fetchError instanceof Error) {
-    const redact = (text: string) => text.replaceAll(secret, "[redacted]").replaceAll(clientId, "[redacted]");
+    const redact = (text: string) =>
+      text
+        .replaceAll(headers["CF-Access-Client-Secret"], "[redacted]")
+        .replaceAll(headers["CF-Access-Client-Id"], "[redacted]");
     unavailable.cause = { name: redact(fetchError.name), message: redact(fetchError.message) };
   }
   throw unavailable;
