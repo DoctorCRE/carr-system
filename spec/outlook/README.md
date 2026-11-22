@@ -19,11 +19,14 @@ For a meeting with several stored copies, both endpoints come from the selected
 copy, and alternate start times remain visible. Follow-up reviews still use their
 own 24-hour window and eligibility rules.
 
-The snapshot is capped at 200,000 bytes. If it is too large, intake removes
-full rows for ended meetings in order of earliest end time. It then removes
-the oldest follow-up reviews and, if necessary, the latest upcoming rows.
-The snapshot reports how many ended meetings, follow-up reviews and later
-meetings it removed.
+Intake uses a 200,000-byte JSON budget to select meetings and follow-up reviews
+with the original titles. It removes the earliest-ended meetings first, then
+the oldest follow-up reviews and, if necessary, the latest upcoming meetings.
+Recovered copies can add meeting rows in the remaining space. The snapshot
+reports how many rows and reviews intake removed. After selection, intake
+updates the undecoded count and replaces unverified titles with
+`Meeting title unreadable`. These updates can increase the final size beyond
+the selection budget without changing which rows or reviews appear.
 
 For the Studio, run `bin/install-outlook-intake.sh` from the updated canonical
 checkout after merge to update the installed `outlook-repo` checkout.

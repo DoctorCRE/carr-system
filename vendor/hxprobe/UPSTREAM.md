@@ -218,10 +218,12 @@ The legacy decoder supplies the schedule, organizer, attendees, cancellation,
 and private `events.legacy_subject` for each copy it can read. The agenda uses
 that subject as evidence for its existing rules. The display title requires
 the known seven-field layout and two matching subject slots, with the
-cancellation prefix accounted for. The time-zone probe checks the two
-length-prefixed fields as text before using them to locate the first slot. A nonempty title must differ from the
-other text fields, time zones, and attendee names and addresses. Ambiguous
-copies set `events.subject_undecoded` and keep their other evidence.
+cancellation prefix accounted for. To skip a zone prefix, the reader requires
+two nonempty, length-prefixed names in IANA path or Windows standard time
+form. The seven slots must end exactly where the attendee block starts or
+where the object ends. A nonempty title must differ from the other text fields,
+time zones, and attendee names and addresses. Ambiguous titles set
+`events.subject_undecoded`, while main-decoded copies retain their other evidence.
 
 Copies the legacy decoder cannot read can still export from the seven-field
 layout. It supports short and Unicode titles and confirms a blank title when
@@ -239,9 +241,10 @@ or bodies. The agenda selects meetings and follow-up reviews from the copies
 the legacy decoder could read, using the original evidence, ordering and
 payload budget. Recovered copies with the same store ID or GOID are ignored.
 Recovered series masters are also ignored when the legacy decoder found an
-occurrence. Other recovered copies can fill the remaining space. Account and
-cancellation checks apply within each group of copies. Once selection is
-complete, the agenda displays `Meeting title unreadable` for an unconfirmed
+occurrence. Other recovered copies can fill the remaining space with meeting
+rows. Account and cancellation checks still apply within each group. Recovered
+copies contribute no follow-up reviews, conflicts or cancellation warnings.
+Once selection is complete, the agenda displays `Meeting title unreadable` for an unconfirmed
 title. The undecoded warning counts each GOID and start once if a considered
 copy has an unreadable title or no considered copy decoded.
 

@@ -150,10 +150,13 @@ class CalendarExportTests(unittest.TestCase):
                 for before, after in zip(expected[section], kept):
                     self.assertEqual(after, before | {'title': after['title']}
                                      if after['title'] == UNREADABLE else before, key)
-                self.assertLessEqual({row['key'] for row in actual[section]} - old_keys, recovered_keys, key)
-            for name in ('calendar_agenda_canceled', 'calendar_agenda_conflicts',
-                         'calendar_agenda_other_accounts', 'calendar_agenda_time_changed',
-                         'calendar_agenda_recurring', 'calendar_agenda_trimmed', 'calendar_follow_up_trimmed'):
+                allowed_keys = recovered_keys if section == 'items' else set()
+                self.assertLessEqual({row['key'] for row in actual[section]} - old_keys, allowed_keys, key)
+            self.assertEqual(new_counts['calendar_agenda_items'], len(actual['items']), key)
+            for name in ('calendar_agenda_canceled', 'calendar_agenda_conflicts', 'calendar_follow_up_trimmed'):
+                self.assertEqual(new_counts[name], main_counts[name], (key, name))
+            for name in ('calendar_agenda_other_accounts', 'calendar_agenda_time_changed',
+                         'calendar_agenda_recurring', 'calendar_agenda_trimmed'):
                 self.assertGreaterEqual(new_counts[name], main_counts[name], (key, name))
                 if not recovered_keys:
                     self.assertEqual(new_counts[name], main_counts[name], (key, name))
@@ -253,8 +256,9 @@ class CalendarExportTests(unittest.TestCase):
     def test_unicode_cancellation_is_decoded_and_hidden(self):
         snapshot, counts = self.project(candidate(subject='会議', first_subject='Cancelled: 会議'))
         self.assertEqual(counts['calendar_agenda_undecoded'], 0)
-        self.assertEqual(counts['calendar_agenda_canceled'], 1)
+        self.assertEqual(counts['calendar_agenda_canceled'], 0)
         self.assertEqual(snapshot['items'], [])
+        self.assertNotIn('canceled_hidden', {warning['code'] for warning in snapshot['warnings']})
 
     def test_address_free_cancellation_hides_an_undecoded_account_copy(self):
         snapshot, counts = self.project(
@@ -314,6 +318,36 @@ class CalendarExportTests(unittest.TestCase):
                                              first_subject='P' + 'x' * 40 + 'Review',
                                              subject='Planning', after_subject=('Review',)))
         self.assertEqual([item['title'] for item in snapshot['items']], [UNREADABLE])
+
+    def test_zoneless_fields_cannot_pose_as_zone_lengths(self):
+        for fields in (
+            dict(first_subject='', after_subject=('Example Room',)),
+            dict(first_subject='\u5402\u0200ZReview', notes=None, after_subject=('Review',)),
+        ):
+            with self.subTest(fields=fields):
+                snapshot, counts = self.project(candidate(zones=(), subject='Planning', **fields))
+                self.assertEqual([item['title'] for item in snapshot['items']], [UNREADABLE])
+                self.assertEqual(counts['calendar_agenda_undecoded'], 1)
+
+    def test_zoneless_blank_title_survives_with_or_without_attendee_count(self):
+        for omit_attendee_count in (True, False):
+            with self.subTest(omit_attendee_count=omit_attendee_count):
+                snapshot, counts = self.project(candidate(
+                    zones=(), subject='', omit_attendee_count=omit_attendee_count))
+                self.assertEqual([item['title'] for item in snapshot['items']], ['Meeting'])
+                self.assertEqual(counts['calendar_agenda_undecoded'], 0)
+
+    def test_recovered_copy_groups_add_rows_without_follow_ups_or_conflicts(self):
+        for subjects in ((('会議', '商談'), ('別件', '相談')), (('会議', '会議'), ('相談', '相談'))):
+            with self.subTest(subjects=subjects):
+                snapshot, counts = self.project(*(
+                    candidate(start=ENDED, first_subject=first, subject=second)
+                    for first, second in subjects
+                ))
+                [item] = snapshot['items']
+                self.assertFalse(item['conflict'])
+                self.assertEqual(snapshot['follow_up_reviews'], [])
+                self.assertEqual(counts['calendar_agenda_conflicts'], 0)
 
     def test_masking_at_the_byte_cap_keeps_independently_readable_meetings(self):
         rows = [candidate(identity=i, subject='Plan', omit_attendee_count=True) for i in range(549)]

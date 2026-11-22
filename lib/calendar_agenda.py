@@ -99,7 +99,7 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
     _trim(snapshot, counts, snapshot)
     warnings = snapshot['warnings']
     if recovered:
-        extra, extra_counts, extra_unreadable = _project(recovered, 0, settings, now)
+        extra, extra_counts, extra_unreadable = _project(recovered, 0, settings, now, recovered=True)
         unreadable_keys.update(extra_unreadable)
         _add_recovered(snapshot, counts, extra, extra_counts,
                        len(legacy_series & _occurrence_series(e['goid'] for e in recovered)))
@@ -121,13 +121,6 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
 
 
 def _add_recovered(snapshot: dict, counts: dict, extra: dict, extra_counts: dict, shared_series: int) -> None:
-    reviews = extra['follow_up_reviews']
-    slots = AGENDA_REVIEWS - len(snapshot['follow_up_reviews'])
-    excess = max(0, len(reviews) - slots)
-    if excess:
-        del reviews[slots:]
-        extra_counts['calendar_follow_up_trimmed'] += excess
-        _add_warning(extra['warnings'], 'follow_up_trimmed', excess)
     for name, count in extra_counts.items():
         counts[name] += count
     for warning in extra['warnings']:
@@ -138,13 +131,12 @@ def _add_recovered(snapshot: dict, counts: dict, extra: dict, extra_counts: dict
             _add_warning(snapshot['warnings'], code, count)
 
     snapshot['items'].extend(extra['items'])
-    snapshot['follow_up_reviews'].extend(reviews)
     _trim(snapshot, counts, extra)
     snapshot['items'].sort(key=_item_key)
-    snapshot['follow_up_reviews'].sort(key=_review_key, reverse=True)
 
 
-def _project(events: list[dict], undecoded: int, settings: OutlookSettings, now: datetime) -> tuple[dict, dict, set[str]]:
+def _project(events: list[dict], undecoded: int, settings: OutlookSettings, now: datetime,
+             *, recovered: bool = False) -> tuple[dict, dict, set[str]]:
     tz = settings.timezone
     day = datetime.combine(now.astimezone(tz).date(), time(), tz)
     lo, hi = int(day.timestamp()), int((day + timedelta(days=AGENDA_DAYS)).timestamp())
@@ -155,7 +147,7 @@ def _project(events: list[dict], undecoded: int, settings: OutlookSettings, now:
     by_goid: dict[str, list[dict]] = {}
     for e in events:
         by_goid.setdefault(e['goid'], []).append(e)
-    counts = dict.fromkeys(('calendar_agenda_items', 'calendar_agenda_canceled', 'calendar_agenda_conflicts',
+    counts = dict.fromkeys(('calendar_agenda_canceled', 'calendar_agenda_conflicts',
                             'calendar_agenda_other_accounts', 'calendar_agenda_time_changed',
                             'calendar_agenda_recurring', 'calendar_agenda_trimmed',
                             'calendar_follow_up_trimmed'), 0)
@@ -167,21 +159,19 @@ def _project(events: list[dict], undecoded: int, settings: OutlookSettings, now:
         current = [e for e in group if e['start_unix'] < hi
                    and (e['end_unix'] > lo or e['start_unix'] == e['end_unix'] == lo)]
         recent = [e for e in group if review_lo < e['end_unix'] <= review_hi]
-        if not current and not recent:
+        if not current and (recovered or not recent):
             continue
         if not all(account in {(e['organizer_email'] or '').lower(), *((m or '').lower() for _, m in e['attendees'])}
                    for e in group):
             counts['calendar_agenda_other_accounts'] += 1
             continue
         if any(e.get('lifecycle_status') == 'canceled' or CANCELED.match(_subject_evidence(e) or '') for e in group):
-            counts['calendar_agenda_canceled'] += 1
+            counts['calendar_agenda_canceled'] += not recovered
             continue
         shown = max(current or recent, key=lambda e: (len(e['attendees']), len(_subject_evidence(e) or ''), e['end_unix']))
         starts = sorted({e['start_unix'] for e in group})
-        subjects = {subject for e in group if (subject := _subject_evidence(e)) is not None
-                    or not e.get('subject_undecoded')}
-        conflict = len(subjects) > 1 or len({
-            json.dumps([e['location'], e['end_unix'] - e['start_unix'],
+        conflict = not recovered and len({
+            json.dumps([_subject_evidence(e), e['location'], e['end_unix'] - e['start_unix'],
                         sorted((n or '', m or '') for n, m in e['attendees'])]) for e in group
         }) > 1
         recurring = _instance(goid) != '00000000'
@@ -206,7 +196,7 @@ def _project(events: list[dict], undecoded: int, settings: OutlookSettings, now:
                       'candidates': len(group), 'conflict': conflict}
         if current:
             items.append(item)
-        if (review_lo < end <= review_hi and end > start
+        if (not recovered and review_lo < end <= review_hi and end > start
                 and not item['all_day'] and not conflict and len(starts) == 1):
             reviews.append({k: item[k] for k in ('key', 'title', 'start', 'end')} | {
                 'state': 'needs_review',

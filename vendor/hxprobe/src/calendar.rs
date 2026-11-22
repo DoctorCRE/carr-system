@@ -223,13 +223,16 @@ fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
     let g = memchr::memmem::find(obj, &GOID_PREFIX.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<u8>>())?;
     let text_at = |text_end| {
         let bytes = obj.get(g + goid.len() * 2..text_end)?.strip_prefix(&[0, 0])?;
-        Some(skip_zones(bytes).unwrap_or(([&[][..]; 2], bytes)))
+        Some(named_zones(bytes).unwrap_or(([&[][..]; 2], bytes)))
     };
     if let Some((mut copy, text_end)) = legacy_copy(obj, g, &goid, start, end) {
         copy.subject = text_at(text_end).and_then(|(zones, bytes)| {
             let words = utf16(bytes);
-            let slots: Vec<_> = words.strip_suffix(&[0])?.split(|unit| *unit == 0).collect();
-            subject_slots(&slots, zones, &copy.attendees).0
+            let (slots, text_len) = calendar_slots(&words)?;
+            if text_len != bytes.len() {
+                return None;
+            }
+            subject_slots(slots, zones, &copy.attendees).0
                 .filter(|subject| copy.legacy_subject.as_ref() == Some(subject))
         });
         return Some(copy);
@@ -237,12 +240,11 @@ fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
 
     let (zones, bytes) = text_at(obj.len())?;
     let words = utf16(bytes);
-    let fields: Vec<_> = words.split(|unit| *unit == 0).take(7).collect();
-    let &[_, location, name, email, _, notes, _] = fields.as_slice() else { return None };
-    let text_len = fields.iter().map(|field| (field.len() + 1) * 2).sum::<usize>();
+    let (fields, text_len) = calendar_slots(&words)?;
+    let [_, location, name, email, _, notes, _] = fields;
     let tail = bytes.get(text_len..)?;
     let attendees = if tail.is_empty() { Vec::new() } else { attendees_at(tail, 0)? };
-    let (subject, canceled) = subject_slots(&fields, zones, &attendees);
+    let (subject, canceled) = subject_slots(fields, zones, &attendees);
     let text = |field| String::from_utf16(field).ok().filter(|s| !s.is_empty());
     Some(Event {
         goid,
@@ -260,30 +262,51 @@ fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
     })
 }
 
-fn skip_zones(mut bytes: &[u8]) -> Option<([&[u8]; 2], &[u8])> {
+fn calendar_slots(words: &[u16]) -> Option<([&[u16]; 7], usize)> {
+    let mut remaining = words;
+    let mut slots = [&[][..]; 7];
+    for slot in &mut slots {
+        let end = remaining.iter().position(|&unit| unit == 0)?;
+        *slot = &remaining[..end];
+        remaining = &remaining[end + 1..];
+    }
+    Some((slots, (words.len() - remaining.len()) * 2))
+}
+
+fn named_zones(mut bytes: &[u8]) -> Option<([&[u8]; 2], &[u8])> {
     let mut zones = [&[][..]; 2];
     for zone in &mut zones {
         let (&len, rest) = bytes.split_first()?;
+        // Two empty lengths look exactly like a blank zoneless subject.
+        if len == 0 || len % 2 != 0 {
+            return None;
+        }
         (*zone, bytes) = rest.split_at_checked(usize::from(len))?;
         let text = String::from_utf16(&utf16(zone)).ok()?;
-        // A UTF-16 subject can begin with a byte that looks like a zone length.
-        if len % 2 != 0 || !is_text(&text) || text.chars().any(char::is_control) {
+        let iana_name = text.contains('/') && text.split('/').all(|part| {
+            !part.is_empty() && part.bytes().all(|b| b.is_ascii_alphanumeric() || b"_+-".contains(&b))
+        });
+        let windows_name = text.ends_with(" Standard Time") && text.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b" .+-".contains(&b));
+        if !(iana_name || windows_name) {
             return None;
         }
     }
     Some((zones, bytes))
 }
 
-fn subject_slots(fields: &[&[u16]], zones: [&[u8]; 2], attendees: &[Attendee]) -> (Option<String>, bool) {
-    // Extra fields leave the subject slots unproven, even when the outer fields match.
-    let [first, location, name, email, owner, notes, second] = fields else { return (None, false) };
+fn subject_slots(fields: [&[u16]; 7], zones: [&[u8]; 2], attendees: &[Attendee]) -> (Option<String>, bool) {
+    let [first, location, name, email, owner, notes, second] = fields;
+    if !email.is_empty() && !String::from_utf16(email).is_ok_and(|value| is_email(&value)) {
+        return (None, false);
+    }
     let (Ok(first), Ok(subject)) = (String::from_utf16(first), String::from_utf16(second)) else {
         return (None, false);
     };
     let canceled = CANCELED.iter().any(|prefix| first.strip_prefix(prefix) == Some(&subject));
     let repeated = !subject.is_empty()
         && ([location, name, email, owner, notes].contains(&second)
-            || zones.iter().any(|zone| utf16(zone) == *second)
+            || zones.iter().any(|zone| utf16(zone) == second)
             || attendees.iter().any(|a| a.name == subject || a.email == subject));
     let title = (!repeated && (first == subject || canceled)).then_some(subject);
     (title, canceled)

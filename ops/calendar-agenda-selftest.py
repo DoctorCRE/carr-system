@@ -11,7 +11,7 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.calendar_agenda import agenda
+from lib.calendar_agenda import AGENDA_MAX_BYTES, agenda
 
 NOW = datetime(2026, 10, 20, 15, tzinfo=timezone.utc)
 SETTINGS = SimpleNamespace(account='owner@example.test', timezone=ZoneInfo('America/Chicago'))
@@ -128,6 +128,23 @@ class CalendarAgendaTest(unittest.TestCase):
         self.assertEqual([item['title'] for item in actual['items']], ['Short'])
         self.assertEqual(actual['items'], expected['items'])
         self.assertEqual(counts['calendar_agenda_trimmed'], 1)
+
+    def test_masking_all_titles_keeps_selection_even_when_display_exceeds_budget(self):
+        events = [event(n, hours=-2, subject='A') for n in range(600)]
+        expected, counts = self.project(events)
+        self.assertEqual(len(expected['follow_up_reviews']), 100)
+        self.assertGreater(counts['calendar_agenda_trimmed'], 0)
+        self.assertLessEqual(len(json.dumps(expected)), AGENDA_MAX_BYTES)
+
+        actual, _ = self.project([
+            e | dict(subject=None, subject_undecoded=True, legacy_subject=e['subject'])
+            for e in events
+        ])
+        for section in ('items', 'follow_up_reviews'):
+            self.assertEqual(actual[section], [
+                row | {'title': 'Meeting title unreadable'} for row in expected[section]
+            ])
+        self.assertGreater(len(json.dumps(actual)), AGENDA_MAX_BYTES)
 
     def test_recovery_cannot_duplicate_a_legacy_store_id_under_a_different_goid(self):
         original = event(id=7)
