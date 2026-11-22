@@ -3,7 +3,13 @@ import { type TestContext, test } from "node:test";
 import { Pool } from "@neondatabase/serverless";
 import { publicError } from "../src/public-errors.ts";
 import { NOW } from "./helpers/fixed-clock.ts";
-import { derivedIdempotencyKey, executeRegisteredTool, record, ToolError } from "./helpers/legacy-test-registry.ts";
+import {
+  array,
+  derivedIdempotencyKey,
+  executeRegisteredTool,
+  record,
+  ToolError,
+} from "./helpers/legacy-test-registry.ts";
 
 const { callTool } = record(await import(new URL("../src/mcp.js", import.meta.url).href));
 const identity = record(await import(new URL("../src/identity.js", import.meta.url).href));
@@ -122,6 +128,17 @@ test("deal activity retries a committed save without changing its time, key, or 
     summary: "Reviewed the specimen\n\nFollow up on the measurements.",
     about: [{ deal_id: deal }],
   });
+});
+
+test("list-verbs advertises exact deal UUIDs for log-activity", async () => {
+  const result = record(await executeRegisteredTool(legacy(), agent, "list-verbs", { filter: "log-activity" }));
+  const verb = array(result.verbs)
+    .map(record)
+    .find((entry) => entry.name === "log-activity");
+  assert.ok(verb);
+  const ref = record(record(record(verb.inputSchema).properties).ref);
+  assert.ok(typeof ref.description === "string");
+  assert.match(ref.description, /exact deal UUID/i);
 });
 
 for (const kind of ["call", "meeting", "note"]) {

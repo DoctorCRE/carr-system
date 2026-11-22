@@ -4301,7 +4301,7 @@ export const TOOLS = {
     description: "Log a business touch (call, email, meeting, tour, text, note, LOI...) against a deal/client/lead/vendor. THE default verb after any real-world contact. occurred_at = when it happened (defaults now); anything missing goes in 'owed', never invented. Writes an activity row; contact-kind rows are what move last_touch and lift capture coverage.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" },
-      ref: { type: "string", description: "L-/C-/V- ref or deal name" },
+      ref: { type: "string", description: "L-/C-/V- ref, deal name, or exact deal UUID. Use the UUID for a call, meeting, or note on a deal that exists only in DoctorCRE Engine." },
       // 'analysis' added by ORDER 36 (one-writer Phase B). It is the LAST slug on
       // purpose: it is not a touch (is_contact=false in activity_kind, so it can
       // never move Last Touch) and it is the write path for dossier analysis
