@@ -677,7 +677,7 @@ test("with the Engine on, email step confirmation directs the partner to Home wi
   assert.equal(upstream.calls.length, 0);
 });
 
-test("the Worker files a deal note and Home review without running legacy after-commit work", async (t) => {
+test("the Worker files a note and Home review for a deal only in the Engine", async (t) => {
   const upstream = engine(t, () =>
     Response.json(
       {
@@ -688,7 +688,7 @@ test("the Worker files a deal note and Home review without running legacy after-
       { status: 201 },
     ),
   );
-  const c = legacy();
+  const c = legacy({ found: false });
   const reads: string[] = [];
   const actor: unknown = worker(t, (sql) => {
     reads.push(sql);
@@ -713,8 +713,7 @@ test("the Worker files a deal note and Home review without running legacy after-
     proposal_id: key,
     next_step_required: false,
   });
-  assert.equal(reads.length, 1);
-  assert.match(reads[0] ?? "", /v_ref_index/);
+  assert.equal(reads.length, 0);
   assert.equal(upstream.calls.length, 1);
   assert.equal(upstream.calls[0]?.path, "/jobs/activities/deal-note");
   assert.deepEqual(upstream.calls[0]?.body, {
@@ -722,6 +721,85 @@ test("the Worker files a deal note and Home review without running legacy after-
     deal_id: deal,
     text: "The example survey was sent.",
   });
+});
+
+test("a missing deal ID returns a plain refusal from the note save", async (t) => {
+  t.mock.method(console, "error", () => {});
+  const upstream = engine(t, () => Response.json({ error: "not_found", correlation_id: savedId }, { status: 404 }));
+  await assert.rejects(
+    executeRegisteredTool(
+      legacy({ found: false }),
+      agent,
+      "add-deal-note",
+      { idempotency_key: key, deal, text: "The example survey was sent." },
+      upstream.env,
+    ),
+    (error: unknown) => {
+      const response = publicError(error);
+      assert.equal(response.error, "subject_not_found");
+      assert.equal(response.hint, "No record matched the supplied reference or name. Check it and try again.");
+      return true;
+    },
+  );
+  assert.equal(upstream.calls.length, 1);
+  assert.equal(upstream.calls[0]?.path, "/jobs/activities/deal-note");
+});
+
+test("a deal note can still be saved by name", async (t) => {
+  const upstream = engine(t, () =>
+    Response.json({ activity_id: savedId, proposal_id: null, next_step_required: true }, { status: 201 }),
+  );
+  const name = "Example Survey Deal";
+  const db = {
+    async query(sql: string, values: unknown[]) {
+      assert.match(sql, /v_ref_index\s+where subject_type='deal' and display_name ilike/);
+      assert.deepEqual(values, [`%${name}%`]);
+      return { rows: [{ subject_id: deal }] };
+    },
+  };
+  const reply = record(
+    await executeRegisteredTool(
+      db,
+      agent,
+      "add-deal-note",
+      { idempotency_key: key, deal: name, text: "The example survey was sent." },
+      upstream.env,
+    ),
+  );
+  assert.equal(reply.note_id, savedId);
+  assert.deepEqual(
+    upstream.calls.map(({ path, body }) => [path, body]),
+    [["/jobs/activities/deal-note", { idempotency_key: key, deal_id: deal, text: "The example survey was sent." }]],
+  );
+});
+
+test("a deal note replays when the retry changes the UUID casing", async (t) => {
+  const dealId = "abcdef01-0000-4000-8000-000000000001";
+  const saves: string[] = [];
+  const upstream = engine(t, (body) => {
+    const request = JSON.stringify(body);
+    const previous = saves[0];
+    if (previous !== undefined && previous !== request) return Response.json({ error: "key_reuse" }, { status: 409 });
+    if (previous === undefined) saves.push(request);
+    return Response.json(
+      { activity_id: savedId, proposal_id: null, next_step_required: true, replayed: previous !== undefined },
+      { status: 201 },
+    );
+  });
+  const db = legacy({ found: false });
+  const args = { idempotency_key: key, text: "The example survey was sent." };
+  const first = record(
+    await executeRegisteredTool(db, agent, "add-deal-note", { ...args, deal: dealId }, upstream.env),
+  );
+  const retry = record(
+    await executeRegisteredTool(db, agent, "add-deal-note", { ...args, deal: dealId.toUpperCase() }, upstream.env),
+  );
+
+  assert.equal(first.deal_id, dealId);
+  assert.equal(first.note_id, savedId);
+  assert.deepEqual(retry, { ...first, replayed: true });
+  assert.equal(upstream.calls.length, 2);
+  assert.equal(saves.length, 1);
 });
 
 test("a deal note and replacement plan replay as a single engine save", async (t) => {

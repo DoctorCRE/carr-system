@@ -254,6 +254,13 @@ export async function saveAssistantChange(env: EngineEnv, partner: string, save:
     const result = engineResult(await response.json().catch(() => null));
     if (!response.ok) {
       const code = result?.error;
+      if (
+        save.path === "/jobs/activities/deal-note" &&
+        response.status === 404 &&
+        code === "not_found" &&
+        isUuid(result?.correlation_id)
+      )
+        throw new ToolError({ error: "subject_not_found", ref: save.body.deal_id });
       throw new ToolError({
         error: code === "key_reuse" ? code : "engine_assistant_refused",
         engine_status: response.status,
