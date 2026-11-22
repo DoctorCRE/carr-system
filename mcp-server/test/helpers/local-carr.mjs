@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { neonConfig } from '@neondatabase/serverless';
 import { acquireDisposablePostgres } from './disposable-postgres.ts';
+import { trackLocalDatabaseClients } from './local-database-clients.ts';
 import { callContext, openCallSession, seedSyntheticBook, rehearsalClock, observeRehearsalClaim } from './call-rehearsal.ts';
 import { APP_STAGING_HOST } from '../../src/staging-browser.ts';
 import { TOOLS, executeRegisteredTool } from '../../src/tools.js';
@@ -34,9 +35,15 @@ registerHooks({ resolve: (specifier, context, next) => specifier === 'cloudflare
 // Neon's SQL-over-HTTP protocol (raw text output, array mode) answered by pg.
 const textTypes = { getTypeParser: () => value => value };
 const pools = new Map();
+const clients = trackLocalDatabaseClients();
 const poolFor = dsn => {
-  if (!pools.has(dsn)) pools.set(dsn, new pg.Pool({ connectionString: dsn, max: 4, types: textTypes }));
-  return pools.get(dsn);
+  let pool = pools.get(dsn);
+  if (!pool) {
+    pool = new pg.Pool({ connectionString: dsn, max: 4, types: textTypes });
+    clients.watch(pool);
+    pools.set(dsn, pool);
+  }
+  return pool;
 };
 const shaped = result => ({ command: result.command, rowCount: result.rowCount,
   fields: result.fields.map(({ name, dataTypeID }) => ({ name, dataTypeID })), rows: result.rows });
@@ -243,10 +250,14 @@ export async function startLocalCarr({ port = 0, assets = async () => new Respon
       for (const call of calls) call.stop();
       for (const root of roots) rmSync(root, { recursive: true, force: true });
       await new Promise(resolve => server.close(resolve));
-      await Promise.allSettled([...pools.values()].map(pool => pool.end()));
-      pools.clear();
-      await admin.end();
-      await database.close();
+      await clients.close(pools.values(), async () => {
+        pools.clear();
+        try {
+          await admin.end();
+        } finally {
+          await database.close();
+        }
+      });
     },
   };
 }

@@ -1,0 +1,9 @@
+{
+  "node": [
+    "test/helpers/local-database-clients.ts",
+    "test/local-database-clients.test.ts"
+  ],
+  "entry": [
+    "test/local-database-clients.test.ts"
+  ]
+}
