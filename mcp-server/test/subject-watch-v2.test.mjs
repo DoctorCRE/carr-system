@@ -546,6 +546,50 @@ test('an engine-only alert does not delay a later CARR reply', async t => {
   ]);
 });
 
+for (const code of ['55P03', 'P0001']) {
+  test(`engine alert failure ${code} leaves the CARR reply committed and retries the engine change`, async t => {
+    const { db, addWatch, sweep } = await engineWatchFixture(t);
+    const { id, deal } = await addWatch('Synthetic mixed watch with engine insert failure');
+    await legacyReply(db, deal);
+    await db.query("update ops.subject_watch_change set eligible_at='2027-02-01T12:04:00Z' where watch_generation_id=$1", [id]);
+    t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(deal, phaseMove(deal, '1', 3, 'research', 'negotiation')));
+
+    await db.query(`
+      create function ops.reject_test_engine_alert() returns trigger language plpgsql as $$
+      begin
+        if new.reason = 'Watched deal has 1 updates to review' then raise sqlstate '${code}'; end if;
+        return new;
+      end $$;
+      create trigger reject_test_engine_alert before insert on ops.notification
+      for each row execute function ops.reject_test_engine_alert()
+    `);
+    try {
+      await sweep(5);
+      assert.deepEqual((await db.query(`
+        select c.disposition, n.reason, d.failure_count, d.failure_code
+        from ops.subject_watch_change c join ops.subject_watch_delivery d on d.watch_id=c.watch_generation_id
+        left join ops.notification n on n.id=c.notification_id
+        where c.watch_generation_id=$1 and c.category='reply_arrived'`, [id])).rows, [
+        { disposition: 'emitted', reason: 'Reply received on a watched deal', failure_count: 0, failure_code: null },
+      ]);
+      assert.deepEqual((await db.query(`
+        select failure_count, failure_code, checked_at from ops.subject_watch_engine_delivery where watch_id=$1`, [id])).rows, [
+        { failure_count: 1, failure_code: code, checked_at: null },
+      ]);
+    } finally {
+      await db.query('drop trigger reject_test_engine_alert on ops.notification; drop function ops.reject_test_engine_alert()');
+    }
+    await sweep(10);
+    await sweep(15);
+    assert.deepEqual((await db.query(`
+      select c.category, n.reason from ops.subject_watch_change c join ops.notification n on n.id=c.notification_id
+      where c.watch_generation_id=$1 order by c.category desc`, [id])).rows, [
+      { category: 'reply_arrived', reason: 'Reply received on a watched deal' },
+      { category: 'material_changed', reason: 'Watched deal has 1 updates to review' },
+    ]);
+  });
+}
+
 async function legacyReply(db, deal) {
   const { id } = (await db.query(`
     insert into public.activity(kind,occurred_at,deal_id,actor_id,summary,email_source)
