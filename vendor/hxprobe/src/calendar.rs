@@ -10,9 +10,14 @@
 //!  ...  time-zone tables: strings with a one-byte length prefix
 //!  ...  NUL-terminated UTF-16LE fields: subject, location, organizer name,
 //!       organizer address, the owner's name, notes, and the subject again
-//!  end  attendee block: u32 count, then per attendee a length-prefixed
-//!       name, a length-prefixed address and 12 status bytes, to the end
+//!  ...  attendee block: u32 count, then per attendee a length-prefixed
+//!       name, a length-prefixed address and 12 status bytes
 //! ```
+//!
+//! Some objects store other heap data after the roster. If the end-based
+//! parse fails, the decoder reads the exact roster span from slot +674.
+//! It requires an organizer address at +882 and matching subject text at
+//! +866 and +1014 after removing any cancellation prefix.
 //!
 //! The 12 status bytes are three little-endian u32 words: attendee kind,
 //! response, and a word always seen as zero. A TEST-account invitation
@@ -40,6 +45,8 @@
 //! No candidate establishes current schedule state or attendance.
 
 use std::collections::{BTreeMap, BTreeSet};
+
+use crate::object::{self, Object};
 
 const TAG: u16 = 0x0455;
 const CLASS: u16 = 0x006b;
@@ -81,6 +88,7 @@ impl Attendee {
 }
 
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct Event {
     pub goid: String,
     pub start_unix: i64,
@@ -115,7 +123,11 @@ impl Index {
             if end < start {
                 continue;
             }
-            let Some(ev) = parse(obj, goid, start, end) else { continue };
+            let Some(ev) = parse(obj, &goid, start, end)
+                .or_else(|| parse_roster_slot(obj, &goid, start, end))
+            else {
+                continue;
+            };
             self.events.entry(obj.to_vec()).or_insert(ev);
         }
     }
@@ -159,7 +171,7 @@ fn goid(obj: &[u8]) -> Option<String> {
     Some(id)
 }
 
-/// The attendee block starting at `p`, if it parses exactly to the object end.
+/// The attendee block starting at `p`, if it consumes the supplied bytes.
 fn attendees_at(obj: &[u8], p: usize) -> Option<Vec<Attendee>> {
     let n = u32::from_le_bytes(obj.get(p..p + 4)?.try_into().ok()?);
     if n > MAX_ATTENDEES {
@@ -218,7 +230,7 @@ fn ends_at_repeated_subject(obj: &[u8], g: usize) -> bool {
     last.chars().count() >= 2 && is_text(last) && earlier.iter().any(|f| f.ends_with(last.as_str()))
 }
 
-fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
+fn parse(obj: &[u8], goid: &str, start: i64, end: i64) -> Option<Event> {
     let g = memchr::memmem::find(obj, &GOID_PREFIX.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<u8>>())?;
     // The earliest block that parses to the end. Scanning from the end instead
     // stops at the trailing status bytes, which read as a count of zero.
@@ -280,7 +292,7 @@ fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
     let canceled = raw.iter().any(|r| CANCELED.iter().any(|p| r.ends_with(&format!("{p}{subject}"))));
     let occurrence = obj.get(OCCURRENCE..OCCURRENCE + 8) == obj.get(START..START + 8);
     Some(Event {
-        goid,
+        goid: goid.to_owned(),
         start_unix: start,
         end_unix: end,
         subject: Some(subject.to_string()),
@@ -292,6 +304,63 @@ fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
         canceled,
         occurrence,
     })
+}
+
+fn parse_roster_slot(obj: &[u8], goid: &str, start: i64, end: i64) -> Option<Event> {
+    let record = Object::new(obj, TAG as usize - 10)?;
+    let inline_slot = |at| {
+        if record.external(at) {
+            return None;
+        }
+        record.slot(at)?
+    };
+    let roster = inline_slot(674)?;
+    let at = roster.as_ptr() as usize - obj.as_ptr() as usize;
+    if obj.get(at.checked_sub(2)?..at)? != [0, 0] || at + roster.len() == obj.len() {
+        return None;
+    }
+    let attendees = attendees_at(roster, 0)?;
+    if attendees.is_empty() || attendees.iter().any(|attendee| !is_email(&attendee.email)) {
+        return None;
+    }
+
+    let first = inline_slot(866)?;
+    let second = inline_slot(1014)?;
+    if first.as_ptr() == second.as_ptr() {
+        return None;
+    }
+    let first = object::text(first)?;
+    let second = object::text(second)?;
+    let (first, first_canceled) = split_cancellation(&first);
+    let (subject, second_canceled) = split_cancellation(&second);
+    if first != subject || subject.trim().is_empty() {
+        return None;
+    }
+
+    let text = |at| inline_slot(at).and_then(object::text).filter(|s| !s.is_empty());
+    let organizer_email = text(882).filter(|s| is_email(s))?;
+    Some(Event {
+        goid: goid.to_owned(),
+        start_unix: start,
+        end_unix: end,
+        subject: Some(subject.to_owned()),
+        location: text(826),
+        organizer_name: text(874),
+        organizer_email: Some(organizer_email),
+        body: None,
+        attendees,
+        canceled: first_canceled || second_canceled,
+        occurrence: obj.get(OCCURRENCE..OCCURRENCE + 8) == obj.get(START..START + 8),
+    })
+}
+
+fn split_cancellation(subject: &str) -> (&str, bool) {
+    if let Some((prefix, title)) = subject.trim_start().split_once(':') {
+        if CANCELED.iter().any(|p| prefix.eq_ignore_ascii_case(p.trim_end_matches(": "))) {
+            return (title.trim_start(), true);
+        }
+    }
+    (subject, false)
 }
 
 #[cfg(test)]
@@ -382,6 +451,10 @@ mod tests {
         obj
     }
 
+    fn main_event(obj: &[u8]) -> Option<Event> {
+        parse(obj, &goid(obj)?, tick(obj, START)?, tick(obj, END)?)
+    }
+
     #[test]
     fn decodes_a_roster_followed_by_other_heap_data() {
         let title = "Quarterly Site Review";
@@ -398,6 +471,7 @@ mod tests {
                 "padding" => obj.extend([0; 16]),
                 _ => unreachable!(),
             }
+            assert!(main_event(&obj).is_none(), "main misses {trailer}");
             let mut idx = Index::default();
             idx.observe(&envelope(&obj));
             let ev = idx.events.values().next().unwrap_or_else(|| panic!("missing meeting with {trailer}"));
@@ -415,6 +489,7 @@ mod tests {
         for (first, second) in [(canceled, title), (title, canceled), (canceled, canceled)] {
             let mut obj = heap_meeting(first, second, "ada@example.test");
             obj.extend([0xa5; 24]);
+            assert!(main_event(&obj).is_none());
             let mut idx = Index::default();
             idx.observe(&envelope(&obj));
             let ev = idx.events.values().next().expect("canceled meeting decoded");
@@ -442,6 +517,24 @@ mod tests {
     }
 
     #[test]
+    fn recovery_rejects_a_misframed_roster_or_an_aliased_subject() {
+        let mut obj = heap_meeting("Planning", "Planning", "ada@example.test");
+        obj.extend([0xa5; 24]);
+        let wrong_len = object::u32_at(&obj, 678).unwrap() + 1;
+        let subject_slot: [u8; 8] = obj[866..874].try_into().unwrap();
+        let mut misframed = obj.clone();
+        misframed[678..682].copy_from_slice(&wrong_len.to_le_bytes());
+        let mut aliased = obj;
+        aliased[1014..1022].copy_from_slice(&subject_slot);
+        for candidate in [misframed, aliased] {
+            let mut idx = Index::default();
+            idx.observe(&envelope(&candidate));
+            assert_eq!(idx.identities.len(), 1);
+            assert!(idx.events.is_empty());
+        }
+    }
+
+    #[test]
     fn main_decodable_layouts_keep_all_their_fields() {
         let attendees = [("Bo Example", "bo@example.test")];
         let mut no_roster = object(true, &[]);
@@ -452,12 +545,11 @@ mod tests {
 
         for obj in [object(true, &attendees), object(true, &[]), no_roster, two_rosters,
                     object_with(true, "Canceled: Quarterly Site Review", &attendees)] {
-            let expected = parse(&obj, goid(&obj).unwrap(), tick(&obj, START).unwrap(), tick(&obj, END).unwrap())
-                .expect("main decoder accepts the fixture");
+            let expected = main_event(&obj).expect("main decoder accepts the fixture");
             let mut idx = Index::default();
             idx.observe(&envelope(&obj));
             assert_eq!(idx.events.len(), 1);
-            assert_eq!(format!("{:?}", idx.events.values().next().unwrap()), format!("{expected:?}"));
+            assert_eq!(idx.events.values().next(), Some(&expected));
         }
     }
 
