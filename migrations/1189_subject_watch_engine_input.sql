@@ -31,7 +31,7 @@ create function ops.subject_watch_engine_resume() returns trigger
 language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
 begin
   insert into ops.subject_watch_engine_resume_floor(watch_id,resumed_at)
-  select new.id,clock_timestamp() where new.subject_type='deal' and exists(select 1 from ops.subject_watch_engine_start)
+  select new.id,clock_timestamp() where new.subject_type='deal'
   on conflict(watch_id) do update set resumed_at=excluded.resumed_at;
   return new;
 end $$;
@@ -237,8 +237,13 @@ begin
   if updated=definition then raise exception 'Home notification limit missing'; end if;
   definition:=updated;
   updated:=replace(definition,$old$jsonb_agg(to_jsonb(n) order by created_at desc,id desc)->0 latest,$old$,
-    $new$jsonb_agg(to_jsonb(n) order by n.engine_watch,created_at desc,id desc)->0 latest,$new$);
+    $new$jsonb_agg(to_jsonb(n) order by created_at desc,id desc)->0 latest,
+      (array_agg(n.reason order by created_at desc,id desc) filter (where not n.engine_watch))[1] carr_title_reason,$new$);
   if updated=definition then raise exception 'Home notification representative missing'; end if;
+  definition:=updated;
+  updated:=replace(definition,$old$coalesce(latest->>'reason','Update')$old$,
+    $new$coalesce(carr_title_reason,latest->>'reason','Update')$new$);
+  if updated=definition then raise exception 'Home notification title missing'; end if;
   execute updated;
 end $watch_notifications$;
 
