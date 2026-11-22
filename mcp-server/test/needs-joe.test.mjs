@@ -123,6 +123,16 @@ test("every source contributes, each item carries the six fields Joe needs", asy
   assert.equal(list.count, list.items.length);
 });
 
+test("work requests and board questions explain how to answer without retired links", async () => {
+  const { list } = await read();
+  for (const [source, verb] of [["work_request", "answer-work-request-for-joe"], ["board_question", "answer-board-question"]]) {
+    const entry = list.items.find(item => item.source === source);
+    assert.equal(entry.link, null);
+    assert.match(entry.action, new RegExp(verb));
+    assert.equal(TOOLS[verb].write, true);
+  }
+});
+
 test("human-only classes come from the existing gates, most specific first", async () => {
   const { list } = await read();
   const byKey = Object.fromEntries(list.items.map(item => [item.key, item]));
