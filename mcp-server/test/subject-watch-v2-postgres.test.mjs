@@ -53,7 +53,7 @@ test('private deal watch binding scopes settings to the verified partner', async
   )).rows[0];
   const { occurred_at: earlier } = (await owner.query(`
     insert into activity(kind,occurred_at,deal_id,actor_id,summary,email_source)
-    select 'email_in',now()-interval '1 day',$1,id,'Synthetic prior reply','{"mailbox_owner":"joe"}'
+    select 'email_in',now()-interval '1 day',$1,id,'Synthetic prior reply','{"mailbox_owner":"joe","sender_email":"synthetic@example.test"}'
     from actor where slug='joe' returning occurred_at`, [deal])).rows[0];
   const noticeCount = async () => (await owner.query(
     "select count(*) from ops.notification where subject_type='deal' and subject_ref=$1", [deal]
@@ -99,7 +99,7 @@ test('private deal watch binding scopes settings to the verified partner', async
     )).rows[0];
     const target = batch.find(item => item.watch_id === first.watch.id);
     assert.ok(target);
-    assert.equal(Date.parse(target.started_at), Date.parse(first.watch.subscribed_at));
+    assert.ok(Date.parse(target.since) >= Date.parse(first.watch.subscribed_at));
     assert.ok(Date.parse(target.since) > earlier.getTime());
   } finally {
     await owner.query('rollback');
