@@ -1,0 +1,11 @@
+[
+  ["Canceled: Training", "Training"],
+  ["Cancelled:Training", "Training"],
+  ["  cAnCeLeD : Planning", "Planning"],
+  ["\tCANCELLED\u00a0:\tTraining", "Training"],
+  ["\u001cCanceled\u001f: Training", "Training"],
+  ["Canceled Training", null],
+  ["Cancellation: Training", null],
+  ["Training canceled: reschedule", null],
+  ["Canceled later: Training", null]
+]

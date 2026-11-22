@@ -16,8 +16,8 @@
 //!
 //! Some objects store other heap data after the roster. If the end-based
 //! parse fails, the decoder reads the exact roster span from slot +674.
-//! It requires an organizer address at +882 and matching subject text at
-//! +866 and +1014 after removing any cancellation prefix.
+//! It requires an organizer address at +882 and separate subject spans at
+//! +866 and +1014 whose text matches after removing any cancellation prefix.
 //!
 //! The 12 status bytes are three little-endian u32 words: attendee kind,
 //! response, and a word always seen as zero. A TEST-account invitation
@@ -326,7 +326,16 @@ fn parse_roster_slot(obj: &[u8], goid: &str, start: i64, end: i64) -> Option<Eve
 
     let first = inline_slot(866)?;
     let second = inline_slot(1014)?;
-    if first.as_ptr() == second.as_ptr() {
+    let overlaps = |left: &[u8], right: &[u8]| {
+        let left = left.as_ptr_range();
+        let right = right.as_ptr_range();
+        left.start.max(right.start) < left.end.min(right.end)
+    };
+    if overlaps(first, second)
+        || std::iter::once(roster)
+            .chain([690, 826, 874, 882, 970].into_iter().filter_map(inline_slot))
+            .any(|field| overlaps(first, field) || overlaps(second, field))
+    {
         return None;
     }
     let first = object::text(first)?;
@@ -355,9 +364,12 @@ fn parse_roster_slot(obj: &[u8], goid: &str, start: i64, end: i64) -> Option<Eve
 }
 
 fn split_cancellation(subject: &str) -> (&str, bool) {
-    if let Some((prefix, title)) = subject.trim_start().split_once(':') {
+    // Python's agenda regex treats these four controls as whitespace too.
+    let whitespace = |c: char| c.is_whitespace() || matches!(c, '\u{001c}'..='\u{001f}');
+    if let Some((prefix, title)) = subject.split_once(':') {
+        let prefix = prefix.trim_matches(whitespace);
         if CANCELED.iter().any(|p| prefix.eq_ignore_ascii_case(p.trim_end_matches(": "))) {
-            return (title.trim_start(), true);
+            return (title.trim_start_matches(whitespace), true);
         }
     }
     (subject, false)
@@ -531,6 +543,55 @@ mod tests {
             idx.observe(&envelope(&candidate));
             assert_eq!(idx.identities.len(), 1);
             assert!(idx.events.is_empty());
+        }
+    }
+
+    #[test]
+    fn recovery_rejects_overlapping_subject_fields() {
+        let mut obj = heap_meeting("Planning", "Review", "ada@example.test");
+        heap_field(&mut obj, 866, &u16le("Cancelled: Training\0"));
+        let suffix = object::u32_at(&obj, 866).unwrap() + u16le("Cancelled: ").len() as u32;
+        let length = 0x8000_0000 | u16le("Training\0").len() as u32;
+        obj[1014..1018].copy_from_slice(&suffix.to_le_bytes());
+        obj[1018..1022].copy_from_slice(&length.to_le_bytes());
+        obj.extend([0xa5; 24]);
+
+        let mut idx = Index::default();
+        idx.observe(&envelope(&obj));
+        assert_eq!(idx.identities.len(), 1);
+        assert!(idx.events.is_empty());
+    }
+
+    #[test]
+    fn recovery_rejects_a_subject_that_points_into_the_location() {
+        let mut obj = heap_meeting("Planning", "Training", "ada@example.test");
+        heap_field(&mut obj, 826, &u16le("Cancelled: Training\0"));
+        let location_slot: [u8; 8] = obj[826..834].try_into().unwrap();
+        obj[866..874].copy_from_slice(&location_slot);
+        obj.extend([0xa5; 24]);
+
+        let mut idx = Index::default();
+        idx.observe(&envelope(&obj));
+        assert_eq!(idx.identities.len(), 1);
+        assert!(idx.events.is_empty());
+    }
+
+    #[test]
+    fn recovered_subjects_follow_agenda_cancellation_cases() {
+        let cases: Vec<(String, Option<String>)> =
+            serde_json::from_str(include_str!("../tests/fixtures/calendar-cancellation.json")).unwrap();
+        for (input, stripped) in &cases {
+            let title = stripped.as_deref().unwrap_or(input);
+            for (first, second) in [(input.as_str(), title), (title, input.as_str())] {
+                let mut obj = heap_meeting(first, second, "ada@example.test");
+                obj.extend([0xa5; 24]);
+                let mut idx = Index::default();
+                idx.observe(&envelope(&obj));
+                let event = idx.events.values().next()
+                    .unwrap_or_else(|| panic!("missing copy for {input:?}"));
+                assert_eq!(event.subject.as_deref(), Some(title), "{input:?}");
+                assert_eq!(event.canceled, stripped.is_some(), "{input:?}");
+            }
         }
     }
 
