@@ -773,6 +773,35 @@ test("a deal note can still be saved by name", async (t) => {
   );
 });
 
+test("a deal note replays when the retry changes the UUID casing", async (t) => {
+  const dealId = "abcdef01-0000-4000-8000-000000000001";
+  const saves: string[] = [];
+  const upstream = engine(t, (body) => {
+    const request = JSON.stringify(body);
+    const previous = saves[0];
+    if (previous !== undefined && previous !== request) return Response.json({ error: "key_reuse" }, { status: 409 });
+    if (previous === undefined) saves.push(request);
+    return Response.json(
+      { activity_id: savedId, proposal_id: null, next_step_required: true, replayed: previous !== undefined },
+      { status: 201 },
+    );
+  });
+  const db = legacy({ found: false });
+  const args = { idempotency_key: key, text: "The example survey was sent." };
+  const first = record(
+    await executeRegisteredTool(db, agent, "add-deal-note", { ...args, deal: dealId }, upstream.env),
+  );
+  const retry = record(
+    await executeRegisteredTool(db, agent, "add-deal-note", { ...args, deal: dealId.toUpperCase() }, upstream.env),
+  );
+
+  assert.equal(first.deal_id, dealId);
+  assert.equal(first.note_id, savedId);
+  assert.deepEqual(retry, { ...first, replayed: true });
+  assert.equal(upstream.calls.length, 2);
+  assert.equal(saves.length, 1);
+});
+
 test("a deal note and replacement plan replay as a single engine save", async (t) => {
   let attempts = 0;
   const upstream = engine(t, () =>
