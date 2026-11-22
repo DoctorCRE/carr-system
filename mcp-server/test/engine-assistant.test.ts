@@ -61,8 +61,8 @@ function engine(t: TestContext, respond: (body: unknown, path: string) => Respon
   t.mock.method(globalThis, "fetch", async (url: URL, request: RequestInit) => {
     const { headers, method, redirect, body } = request;
     if (redirect === "error") throw new TypeError('Invalid redirect value, must be one of "follow" or "manual"');
-    assert.ok(typeof body === "string");
-    const parsed: unknown = JSON.parse(body);
+    assert.ok(method === "GET" ? body === undefined : typeof body === "string");
+    const parsed: unknown = typeof body === "string" ? JSON.parse(body) : undefined;
     calls.push({ path: url.pathname, headers: new Headers(headers), method, redirect, body: parsed });
     return respond(parsed, url.pathname);
   });
@@ -476,6 +476,119 @@ test("completes the sponsor's current step by deal or party and preserves its re
       ["/jobs/next-steps/complete", { idempotency_key: key, deal_id: deal }, "dell"],
       ["/jobs/next-steps/complete", { idempotency_key: key, party_id: deal }, "dell"],
     ],
+  );
+});
+
+test("the Worker finishes an engine-only deal step and files one outcome note across retries", async (t) => {
+  const dealId = "abcdef01-0000-4000-8000-000000000001";
+  const dealPath = `/jobs/deals/${dealId}`;
+  const completionPath = "/jobs/next-steps/complete";
+  const notePath = "/jobs/activities";
+  const noteKey = derivedIdempotencyKey("complete-action-outcome", key);
+  const outcome = "The example survey was sent.";
+  const receipts = new Map<string, unknown>();
+  const upstream = engine(t, (body, path) => {
+    if (path === dealPath) return Response.json({ deal_id: dealId });
+    assert.ok(path === completionPath || path === notePath);
+    const payload = record(body);
+    const receiptKey = path === completionPath ? key : noteKey;
+    assert.equal(payload.idempotency_key, receiptKey);
+    const replayed = receipts.has(receiptKey);
+    if (replayed) assert.deepEqual(payload, receipts.get(receiptKey));
+    else receipts.set(receiptKey, payload);
+    return Response.json(
+      path === completionPath
+        ? { next_step_id: savedId, status: "done", replayed }
+        : { activity_id: savedId, replayed },
+    );
+  });
+  const db = legacy({ found: false });
+  const actor: unknown = worker(t, db.query);
+  const env = { ...upstream.env, DATABASE_URL_WRITER: "postgres://fixture@synthetic.invalid/fixture" };
+  const complete = (ref: string) =>
+    callTool(env, actor, "call-verb", { verb: "complete-action", args: { idempotency_key: key, ref, outcome } });
+  const first = {
+    ok: true,
+    subject: { type: "deal", id: dealId },
+    count: 1,
+    completed: [{ next_action_id: savedId }],
+  };
+  assert.deepEqual(await complete(dealId.toUpperCase()), first);
+  assert.deepEqual(await complete(dealId), { ...first, replayed: true });
+  const requests = [
+    ["GET", dealPath],
+    ["POST", completionPath],
+    ["POST", notePath],
+  ];
+  assert.deepEqual(
+    upstream.calls.map(({ method, path }) => [method, path]),
+    [...requests, ...requests],
+  );
+  for (const request of upstream.calls) {
+    assert.equal(request.headers.get("Engine-Job"), "agent");
+    assert.equal(request.headers.get("Engine-For-User"), "dell");
+    assert.equal(request.headers.get("CF-Access-Client-Id"), env.ENGINE_ACCESS_CLIENT_ID);
+    assert.equal(request.headers.get("CF-Access-Client-Secret"), env.ENGINE_ACCESS_CLIENT_SECRET);
+    assert.equal(request.redirect, "manual");
+  }
+  assert.deepEqual(
+    [...receipts.values()],
+    [
+      { idempotency_key: key, deal_id: dealId },
+      { idempotency_key: noteKey, kind: "note", summary: outcome, about: [{ deal_id: dealId }] },
+    ],
+  );
+  assert.deepEqual(db.changes, []);
+});
+
+test("an unknown completion UUID stops after the Engine deal lookup", async (t) => {
+  const upstream = engine(t, () => Response.json({ error: "not_found", correlation_id: savedId }, { status: 404 }));
+  const db = legacy({ found: false, writes: true });
+  await assert.rejects(
+    executeRegisteredTool(db, agent, "complete-action", { idempotency_key: key, ref: deal }, upstream.env),
+    { payload: { error: "subject_not_found", ref: deal } },
+  );
+  assert.deepEqual(
+    upstream.calls.map(({ method, path }) => [method, path]),
+    [["GET", `/jobs/deals/${deal}`]],
+  );
+  assert.deepEqual(db.changes, []);
+});
+
+test("an unavailable or mismatched Engine deal read cannot complete a step", async (t) => {
+  let reply = Response.json({ error: "database_unavailable" }, { status: 503 });
+  const upstream = engine(t, () => reply);
+  const db = legacy({ found: false, writes: true });
+  const complete = () =>
+    executeRegisteredTool(db, agent, "complete-action", { idempotency_key: key, ref: deal }, upstream.env);
+  await assert.rejects(complete(), { payload: { error: "engine_assistant_unavailable" } });
+  reply = Response.json({ deal_id: savedId });
+  await assert.rejects(complete(), { payload: { error: "engine_assistant_unavailable" } });
+  const lookup = ["GET", `/jobs/deals/${deal}`];
+  assert.deepEqual(
+    upstream.calls.map(({ method, path }) => [method, path]),
+    [lookup, lookup],
+  );
+  assert.deepEqual(db.changes, []);
+});
+
+test("a named deal can still be completed through the legacy name lookup", async (t) => {
+  const upstream = engine(t, () => Response.json({ next_step_id: savedId, status: "done" }));
+  const name = "Example Survey Deal";
+  const db = {
+    async query(sql: string, values: unknown[]) {
+      assert.match(sql, /v_ref_index\s+where subject_type='deal' and display_name ilike/);
+      assert.deepEqual(values, [`%${name}%`]);
+      return { rows: [{ subject_id: deal }] };
+    },
+  };
+  const result = record(
+    await executeRegisteredTool(db, agent, "complete-action", { idempotency_key: key, ref: name }, upstream.env),
+  );
+  assert.deepEqual(result.completed, [{ next_action_id: savedId }]);
+  assert.deepEqual(
+    upstream.calls.map(({ path, body }) => [path, body]),
+    [["/jobs/next-steps/complete", { idempotency_key: key, deal_id: deal }]],
   );
 });
 

@@ -183,6 +183,41 @@ export async function readEngineCalendarAgenda(env: EngineEnv, partner: string) 
   return { snapshot, confirmed: new Set(snapshot.confirmed), dismissed: new Set(snapshot.dismissed) };
 }
 
+function isMissingEngineRecord(status: number, result: Record<string, unknown> | null) {
+  // The router's generic 404 also says not_found, without a correlation ID.
+  return status === 404 && result?.error === "not_found" && isUuid(result.correlation_id);
+}
+
+export async function readAssistantDeal(
+  env: EngineEnv,
+  partner: string,
+  ref: string,
+): Promise<{ type: "deal"; id: string }> {
+  const id = ref.toLowerCase();
+  const { target, headers } = engineJobRequest(env, `/jobs/deals/${id}`, "agent", partner);
+  const response = await fetch(target, {
+    method: "GET",
+    headers,
+    redirect: "manual",
+    signal: AbortSignal.timeout(5_000),
+  }).catch(() => {
+    throw new ToolError({ error: "engine_assistant_unavailable" });
+  });
+  const result = engineResult(await response.json().catch(() => null));
+  if (isMissingEngineRecord(response.status, result)) throw new ToolError({ error: "subject_not_found", ref });
+  if (response.status >= 500 || (response.ok && result?.deal_id !== id))
+    throw new ToolError({ error: "engine_assistant_unavailable" });
+  if (!response.ok) {
+    const code = result?.error;
+    throw new ToolError({
+      error: "engine_assistant_refused",
+      engine_status: response.status,
+      ...(typeof code === "string" && engineErrorSlug.test(code) ? { engine_error: code } : {}),
+    });
+  }
+  return { type: "deal", id };
+}
+
 function readDealWatchField(value: unknown) {
   const change = engineResult(value);
   const { change_id, table_name, action, field, old_value, new_value, actor, for_user, changed_at } = change ?? {};
@@ -228,8 +263,7 @@ export async function readEngineDealWatch(
   if (!response.ok) {
     if (response.status === 404) {
       const refusal = engineResult(await response.json().catch(() => null));
-      // The router's generic 404 also says not_found, without a correlation ID.
-      if (refusal?.error === "not_found" && isUuid(refusal.correlation_id)) return { status: "missing" };
+      if (isMissingEngineRecord(response.status, refusal)) return { status: "missing" };
     } else {
       await response.body?.cancel().catch(() => {});
     }
@@ -281,9 +315,7 @@ export async function saveAssistantChange(env: EngineEnv, partner: string, save:
       if (
         (save.path === "/jobs/activities/deal-note" || save.path === "/jobs/next-steps") &&
         "deal_id" in save.body &&
-        response.status === 404 &&
-        code === "not_found" &&
-        isUuid(result?.correlation_id)
+        isMissingEngineRecord(response.status, result)
       )
         throw new ToolError({ error: "subject_not_found", ref: save.body.deal_id });
       throw new ToolError({

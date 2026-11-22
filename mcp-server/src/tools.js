@@ -26,7 +26,7 @@ import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dea
 import { canonicalJson } from "./artifact-trust.js";
 import { safeInteger, integerFields } from "./safe-integer.ts";
 import { invoiceTrackerTools } from "./invoice-tracker.ts";
-import { assistantOldRole, captureAssistantInvoice, readEngineCalendarAgenda, saveAssistantChange } from "./engine-assistant.ts";
+import { assistantOldRole, captureAssistantInvoice, readAssistantDeal, readEngineCalendarAgenda, saveAssistantChange } from "./engine-assistant.ts";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.ts";
 import { readDealChecklist } from "./deal-checklist.ts";
@@ -273,7 +273,11 @@ function dealNoteInput(args) {
 
 const ASSISTANT_ROLE_REF_TYPES = { l: 'lead', c: 'client', v: 'vendor', t: 'vendor' };
 
-async function resolveAssistantStepSubject(client, ref) {
+async function resolveAssistantStepSubject(client, ref, completion) {
+  if (completion && UUID_KEY.test(ref)) {
+    const exact = await resolveExactSubject(client, ref);
+    return exact ?? await readAssistantDeal(completion.env, completion.partner, ref);
+  }
   const prefix = /^([lcvt])-/i.exec(ref)?.[1].toLowerCase();
   if (!prefix) return resolveSubject(client, ref);
   const type = ASSISTANT_ROLE_REF_TYPES[prefix];
@@ -300,7 +304,7 @@ async function saveAssistantVerb(client, actor, verb, args, env) {
   const subject = dealOnly && UUID_KEY.test(args.deal)
     ? { type: 'deal', id: args.deal.toLowerCase() }
     : stepWrite && !docStep
-      ? await resolveAssistantStepSubject(client, args.ref)
+      ? await resolveAssistantStepSubject(client, args.ref, completion && partner ? { env, partner } : undefined)
       : await resolveSubject(client, dealOnly ? args.deal : args.ref);
   if (dealOnly && subject.type !== 'deal') throw new ToolError({ error: "not_a_deal", resolved: subject });
   const oldRole = stepWrite ? assistantOldRole(subject.type, subject.id) : null;
@@ -994,6 +998,14 @@ async function actionOwner(client, actor, requested) {
   return { slug, id: owner.rows[0].id };
 }
 
+async function resolveExactSubject(client, ref) {
+  const { rows } = await client.query(
+    "select subject_type, subject_id from v_ref_index where subject_id=$1 limit 2", [ref]);
+  if (rows.length === 1) return { type: rows[0].subject_type, id: rows[0].subject_id };
+  const deal = rows.find(row => row.subject_type === "deal");
+  return deal ? { type: "deal", id: deal.subject_id } : null;
+}
+
 async function resolveSubject(client, ref) {
   // Accepts 'L-204', 'C-127', 'V-CPA-006', a deal name, or a party/practice name.
   //
@@ -1003,14 +1015,9 @@ async function resolveSubject(client, ref) {
   // was found by ORDER 6's done-test. The security model wins; the verb adapts.
   // A raw UUID resolves exactly (the Deal Room board addresses deals by id;
   // v_ref_index carries the id, so views-only holds).
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref)) {
-    const r = await client.query(
-      "select subject_type, subject_id from v_ref_index where subject_id=$1 limit 2", [ref]);
-    if (r.rows.length === 1) return { type: r.rows[0].subject_type, id: r.rows[0].subject_id };
-    if (r.rows.length > 1) {
-      const deal = r.rows.find(x => x.subject_type === "deal");
-      if (deal) return { type: "deal", id: deal.subject_id };
-    }
+  if (UUID_KEY.test(ref)) {
+    const exact = await resolveExactSubject(client, ref);
+    if (exact) return exact;
   }
   if (/^L-\d+/i.test(ref)) {
     const r = await client.query(
