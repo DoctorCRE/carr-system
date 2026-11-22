@@ -165,7 +165,7 @@ const isReviewKeyList = (value: unknown): value is string[] =>
 export async function readEngineCalendarAgenda(env: EngineEnv, partner: string) {
   const { target, headers } = engineJobRequest(env, "/jobs/calendar/agenda", "agent", partner);
   const response = await fetch(target, { headers, redirect: "manual", signal: AbortSignal.timeout(5_000) });
-  if (!response.ok) {
+  if (response.status !== 200) {
     await response.body?.cancel().catch(() => {});
     throw new Error("engine_calendar_unavailable");
   }

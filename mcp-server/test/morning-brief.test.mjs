@@ -485,6 +485,54 @@ test("morning-brief reads each authenticated partner's current engine agenda and
   assert.equal(fetch.mock.callCount(), 2);
 });
 
+function engineAgendaFixture(fields = {}) {
+  return { ...calendarFixture(), follow_up_reviews: [], confirmed: [], dismissed: [], ...fields };
+}
+
+test("morning-brief directs unresolved engine meeting reviews to the actions on DoctorCRE Home", async (t) => {
+  briefEngineFixture(t, () => Response.json(engineAgendaFixture({ follow_up_reviews: [{
+    key: "0000000000000000", title: "Synthetic finished review",
+    start: new Date(NOW - 3_600_000).toISOString(), end: new Date(NOW - 600_000).toISOString(),
+    state: "needs_review", prompt: "Confirm whether this meeting happened.",
+  }] })));
+  const result = await callTool(BRIEF_ENGINE_ENV, { ...JOE }, "morning-brief", {});
+  const [review] = result.sections.calendar.follow_up_reviews;
+  assert.match(review.prompt, /DoctorCRE Home.*It happened.*Dismiss/);
+  assert.equal(review.confirmed, false);
+  assert.equal(review.dismissed, false);
+});
+
+test("morning-brief reports a partial HTTP agenda as unavailable", async (t) => {
+  briefEngineFixture(t, () => Response.json(engineAgendaFixture({ items: [] }), { status: 206 }));
+  const result = await callTool(BRIEF_ENGINE_ENV, { ...JOE }, "morning-brief", {});
+  assert.deepEqual(result.sections.calendar, { state: "unavailable", reason: "source_unavailable", items: [] });
+  assert.equal(result.coverage.required_sections.find(row => row.key === "calendar").counts.items, null);
+});
+
+test("morning-brief reports engine snapshots with incomplete meeting times as unavailable", async (t) => {
+  const incomplete = { title: "Synthetic meeting missing its end", start: new Date(NOW - 3_600_000).toISOString() };
+  const snapshots = [
+    engineAgendaFixture({ items: [incomplete] }),
+    engineAgendaFixture({ follow_up_reviews: [{ ...incomplete, key: "0000000000000000",
+      state: "needs_review", prompt: "Confirm whether this meeting happened." }] }),
+  ];
+  let snapshot;
+  briefEngineFixture(t, () => Response.json(snapshot));
+  for (snapshot of snapshots) {
+    const result = await callTool(BRIEF_ENGINE_ENV, { ...JOE }, "morning-brief", {});
+    assert.deepEqual(result.sections.calendar, { state: "unavailable", reason: "source_unavailable", items: [] });
+    assert.equal(result.coverage.required_sections.find(row => row.key === "calendar").counts.items, null);
+  }
+});
+
+test("morning-brief keeps valid engine meetings and reports Outlook warnings", async (t) => {
+  briefEngineFixture(t, () => Response.json(engineAgendaFixture({ warnings: [{ code: "undecoded", count: 3 }] })));
+  const result = await callTool(BRIEF_ENGINE_ENV, { ...JOE }, "morning-brief", {});
+  assert.equal(result.sections.calendar.state, "partial");
+  assert.equal(result.sections.calendar.items.length, 2);
+  assert.match(result.sections.calendar.notes[0], /3 calendar items in Outlook couldn't be read/);
+});
+
 test("a failed engine agenda read is unavailable even with an older CARR snapshot", async (t) => {
   let respond;
   const fetch = briefEngineFixture(t, () => respond());

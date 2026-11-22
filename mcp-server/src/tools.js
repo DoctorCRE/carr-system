@@ -91,7 +91,7 @@ import { EMAIL_IDENTITY_SCHEMA, lockEmailIdentity, capturedEmail, guardEmailActi
 import { emailProposalTools, resolveEmailProposal } from "./email-proposals.js";
 import { clearTheDeckTools } from "./clear-the-deck.js";
 import { addCalendarMeetingPrep } from "./calendar-meeting-prep.js";
-import { CALENDAR_AGENDA_BOARD, calendarSection, addCalendarContacts, addCalendarDealSuggestions, addCalendarConfirmations } from "./brief-calendar.js";
+import { CALENDAR_AGENDA_BOARD, calendarSection, addCalendarContacts, addCalendarDealSuggestions, addCalendarConfirmations, unavailableCalendar } from "./brief-calendar.js";
 import { emailLeadProposalTools } from "./email-lead-proposal.ts";
 import { leadAutomationTools } from "./lead-automation.js";
 import { actionLinkTools } from "./action-links.js";
@@ -3634,13 +3634,7 @@ export const TOOLS = {
       try {
         if (engineEnv?.ENGINE_ASSISTANT === "true") {
           const agenda = await readEngineCalendarAgenda(engineEnv, scope.sponsor);
-          if (agenda) {
-            calendar = calendarSection(agenda.snapshot);
-            for (const review of calendar?.follow_up_reviews ?? []) {
-              review.confirmed = agenda.confirmed.has(review.key);
-              review.dismissed = agenda.dismissed.has(review.key);
-            }
-          }
+          if (agenda) calendar = calendarSection(agenda.snapshot, undefined, agenda);
         } else {
           const result = await c.query(
             `select snapshot_json from board_snapshot
@@ -3655,7 +3649,7 @@ export const TOOLS = {
           await addCalendarMeetingPrep(c, calendar, scope.sponsor);
         }
       } catch {
-        calendar = { state: "unavailable", reason: "source_unavailable", items: [] };
+        calendar = unavailableCalendar();
       }
       const sections = { ...(needsJoe ? { needs_joe: needsJoe } : {}),
         today, ...(calendar ? { calendar } : {}), claim_card: claimCard, deals, loops, renewals,
