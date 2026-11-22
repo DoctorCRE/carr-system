@@ -779,7 +779,8 @@ export class DealWatchSettings extends WorkerEntrypoint {
 
     const verb = SUBJECT_WATCH_V2_VERBS[command];
     const args = { ...fields, subject_type: "deal", subject_id: dealId };
-    if (!new Validator(TOOLS[verb].inputSchema).validate(args).valid)
+    const validator = new Validator(structuredClone(TOOLS[verb].inputSchema));
+    if (!validator.validate(args).valid)
       return { ok: false, error: "invalid_request" };
     const actor = { slug: partner, human: true, via: "deal-watch-settings" };
     try {

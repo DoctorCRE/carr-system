@@ -59,12 +59,12 @@ export function subjectWatchTools({ withEnvelope, ToolError }) {
 }
 
 export const SUBJECT_WATCH_V2_VERBS = Object.freeze({
-  read: 'read-subject-watch-v2',
   watch: 'watch-subject-v2',
   pause: 'pause-subject-watch-v2',
   resume: 'resume-subject-watch-v2',
   'replace-policy': 'replace-subject-watch-policy-v2',
   unwatch: 'unwatch-subject-v2',
+  read: 'read-subject-watch-v2',
   list: 'list-subject-watches-v2',
 });
 
