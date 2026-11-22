@@ -3,6 +3,8 @@
 Intake owns decoding and publication. Cancellation applies across stored copies
 of the same GOID because revision ordering is not established by the decoder.
 """
+from __future__ import annotations
+
 from datetime import datetime, time, timedelta, timezone
 import hashlib
 import json
