@@ -8,7 +8,8 @@ alter table ops.subject_watch_delivery
   add column engine_checked_at timestamptz,
   add column engine_floor_at timestamptz,
   add column engine_attempted_at timestamptz,
-  add column engine_missing_at timestamptz;
+  add column engine_missing_at timestamptz,
+  add column engine_last_emitted_at timestamptz;
 
 create table ops.subject_watch_engine_start (
   singleton boolean primary key default true check(singleton),
@@ -75,7 +76,7 @@ end $$;
 
 create function ops.deliver_subject_watches(p_now timestamptz,p_limit integer,p_engine_enabled boolean)
 returns jsonb language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
-declare w record; st ops.subject_watch_delivery; pol jsonb; keys jsonb; fresh jsonb; ids uuid[];
+declare w record; st ops.subject_watch_delivery; pol jsonb; keys jsonb; fresh jsonb; ids uuid[]; engine_batch boolean;
  cursor_id uuid; candidate_count integer:=0; last_candidate uuid;
  event_id uuid; minted jsonb; nid uuid; emits integer:=0; slug_value text; target jsonb; link text;
 begin
@@ -152,11 +153,15 @@ begin
              join public.event e on e.id=(refs.value->>'event_id')::uuid
              where e.actor_id is distinct from w.actor_id and e.sponsoring_human_slug is distinct from slug_value));
        begin
-       if st.last_emitted_at is null or st.last_emitted_at<=p_now-interval '5 minutes' then
+       -- Keep the original CARR batch and its cooldown independent of engine delivery.
+       foreach engine_batch in array case when p_engine_enabled and w.subject_type='deal'
+         then array[false,true] else array[false] end loop
+         if greatest(st.last_emitted_at,case when engine_batch then st.engine_last_emitted_at end)
+           >p_now-interval '5 minutes' then continue; end if;
          select array_agg(id order by id) into ids from (
            select id from ops.subject_watch_change c where watch_generation_id=w.id and disposition='pending'
              and eligible_at<=p_now and failure_count<2
-             and (p_engine_enabled or c.semantic_key not like 'engine:%')
+             and (c.semantic_key like 'engine:%')=engine_batch
            order by id limit 100 for update skip locked) pending;
          if cardinality(ids)>0 then
            if w.subject_type='deal' then link:='/deals?deal='||w.subject_id;
@@ -171,10 +176,14 @@ begin
            nid:=(minted->>'notification_id')::uuid;
            if nid is null then raise exception 'watch_notification_not_minted'; end if;
            update ops.subject_watch_change set disposition='emitted',notification_id=nid where id=any(ids);
-           update ops.subject_watch_delivery set last_emitted_at=p_now where watch_id=w.id;
+           if engine_batch then
+             update ops.subject_watch_delivery set engine_last_emitted_at=p_now where watch_id=w.id;
+           else
+             update ops.subject_watch_delivery set last_emitted_at=p_now where watch_id=w.id;
+           end if;
            emits:=emits+1;
          end if;
-       end if;
+       end loop;
        exception when sqlstate '57014' then
          update ops.subject_watch_delivery set failure_count=least(2,failure_count+1),failure_code=sqlstate,
            next_evaluation_at=p_now+interval '5 minutes' where watch_id=w.id;
