@@ -26,7 +26,7 @@ import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dea
 import { canonicalJson } from "./artifact-trust.js";
 import { safeInteger, integerFields } from "./safe-integer.ts";
 import { invoiceTrackerTools } from "./invoice-tracker.ts";
-import { assistantOldRole, captureAssistantInvoice, saveAssistantChange } from "./engine-assistant.ts";
+import { assistantOldRole, captureAssistantInvoice, readEngineCalendarAgenda, saveAssistantChange } from "./engine-assistant.ts";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.ts";
 import { readDealChecklist } from "./deal-checklist.ts";
@@ -3485,7 +3485,7 @@ export const TOOLS = {
     write: false,
     description: "The record-native morning brief for the authenticated Joe or Dell context. It composes Needs Joe when applicable, live triage, claim-card, deal-room, loop-board, the redacted renewal decision queue, assurance cadence, published system costs, and, once the partner's own Outlook intake has published one, the next seven days of calendar meetings (Outlook local store; attendance and cancellations unverified). Sections preserve ready, empty, partial, or unavailable. Coverage names every required section, points to its response content, and counts returned rows only, never queue totals. Unavailable is never rewritten as empty. Takes no audience, sponsor, or partner argument.",
     inputSchema: { type: "object", properties: {} },
-    handler: async (c, actor, args) => {
+    handler: async (c, actor, args, engineEnv) => {
       // This is an audience boundary, not a convenience filter.  A shared-only
       // runtime cannot choose Joe or Dell by argument, model name, or cwd.
       const scope = personalScopeForActor(actor);
@@ -3625,12 +3625,23 @@ export const TOOLS = {
       // calendar; a partner without one has no calendar source, not an empty day.
       let calendar = null;
       try {
-        const result = await c.query(
-          `select snapshot_json from board_snapshot
-            where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id=$3`,
-          [organizationTenantForActor(actor), scope.sponsor, CALENDAR_AGENDA_BOARD]);
-        calendar = calendarSection(result.rows[0]?.snapshot_json);
-        if (calendar?.follow_up_reviews?.length) await addCalendarConfirmations(c, calendar, actor);
+        if (engineEnv?.ENGINE_ASSISTANT === "true") {
+          const agenda = await readEngineCalendarAgenda(engineEnv, scope.sponsor);
+          if (agenda) {
+            calendar = calendarSection(agenda.snapshot);
+            for (const review of calendar?.follow_up_reviews ?? []) {
+              review.confirmed = agenda.confirmed.has(review.key);
+              review.dismissed = agenda.dismissed.has(review.key);
+            }
+          }
+        } else {
+          const result = await c.query(
+            `select snapshot_json from board_snapshot
+              where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id=$3`,
+            [organizationTenantForActor(actor), scope.sponsor, CALENDAR_AGENDA_BOARD]);
+          calendar = calendarSection(result.rows[0]?.snapshot_json);
+          if (calendar?.follow_up_reviews?.length) await addCalendarConfirmations(c, calendar, actor);
+        }
         if (calendar?.sources && calendar.items.length) {
           await addCalendarContacts(c, calendar);
           await addCalendarDealSuggestions(c, calendar, scope.sponsor);
@@ -9092,7 +9103,7 @@ export async function executeRegisteredTool(client, actor, name, args = {}, engi
   // generic handling.
   try {
     if (!tool.write && name.includes('email')) await guardEmailAction(client,args,ToolError,false);
-    if (engineEnv?.ENGINE_ASSISTANT === 'true') {
+    if (tool.write && engineEnv?.ENGINE_ASSISTANT === 'true') {
       if (name === 'record-deal-invoice') {
         const mailbox = mailboxOwnerForActor(actor);
         if (!mailbox) throw new ToolError({ error: 'invoice_mailbox_identity_required' });
@@ -9103,7 +9114,7 @@ export async function executeRegisteredTool(client, actor, name, args = {}, engi
       const saved = await saveAssistantVerb(client, actor, name, args, engineEnv);
       if (saved) return saved;
     }
-    const result = await tool.handler(client, actor, args);
+    const result = await tool.handler(client, actor, args, engineEnv);
     return await linkFutureWork(client, actor, name, args, result, writeEvent);
   } catch (e) {
     if (e instanceof ToolError) throw e;

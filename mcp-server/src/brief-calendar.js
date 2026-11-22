@@ -3,8 +3,7 @@ import { organizationTenantForActor } from "./identity.js";
 import { partnerAuthoritySlugForActor } from "./partner-authority.js";
 // The morning brief's calendar section. The Outlook intake on the partner's own
 // machine publishes the next fourteen days of their meetings as one display
-// snapshot (publish-board-snapshot, board "calendar-agenda"); this shapes the
-// next seven days of it. The snapshot is display data from Outlook's local
+// snapshot. The brief shows the next seven days. The snapshot is display data from Outlook's local
 // store. It carries the gaps the reader knows about as warning codes, each one
 // becomes a plain sentence here, and a section with any of them is partial,
 // never ready.

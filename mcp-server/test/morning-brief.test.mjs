@@ -7,7 +7,8 @@ import { NOW } from "./helpers/fixed-clock.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ToolError, executeRegisteredTool } from "../src/tools.js";
-import { readCallCountSQL } from "../src/mcp.js";
+import { callTool, readCallCountSQL } from "../src/mcp.js";
+import { neonConfig } from "../src/postgres.ts";
 
 const JOE = { slug: "joe", display: "Joe", human: true, via: "oauth-google", client_id: "fixture" };
 const DELL = { slug: "dell", display: "Dell", human: true, via: "oauth-google", client_id: "fixture" };
@@ -424,6 +425,100 @@ test("morning-brief shows the partner's own published calendar for the next seve
   const read = c.queries.find(({ params }) => params[2] === "calendar-agenda");
   assert.deepEqual(read.params.slice(1), ["joe", "calendar-agenda"], "sponsor comes from authentication");
   assert.ok(result.coverage.required_sections.some((row) => row.key === "calendar" && row.counts.items === 2));
+});
+
+const BRIEF_ENGINE_ENV = {
+  DATABASE_URL_READER: "postgres://synthetic@synthetic.invalid/synthetic",
+  ENGINE_ASSISTANT: "true",
+  ENGINE_URL: "https://engine.example.test/",
+  ENGINE_ACCESS_CLIENT_ID: "fixture-client",
+  ENGINE_ACCESS_CLIENT_SECRET: "fixture-secret",
+};
+
+function briefEngineFixture(t, respond) {
+  const legacy = calendarFixture(NOW, new Date(NOW - 86400000).toISOString());
+  const previous = neonConfig.fetchFunction;
+  t.after(() => { neonConfig.fetchFunction = previous; });
+  neonConfig.fetchFunction = async (_url, options) => {
+    const { query, params } = JSON.parse(options.body);
+    const row = query === "select id from public.actor where slug=$1"
+      ? { id: "00000000-0000-4000-8000-000000000001" }
+      : params[2] === "calendar-agenda" ? { snapshot_json: legacy } : {};
+    const fields = Object.keys(row).map(name => ({ name, dataTypeID: 3802 }));
+    const rows = fields.length ? [Object.values(row).map(value => JSON.stringify(value))] : [];
+    return Response.json({ fields, rows, rowCount: rows.length, command: "SELECT", rowAsArray: true });
+  };
+  return t.mock.method(globalThis, "fetch", async (url, request) => {
+    assert.equal(url.href, "https://engine.example.test/jobs/calendar/agenda");
+    assert.equal(request.method ?? "GET", "GET");
+    assert.equal(request.redirect, "manual");
+    const headers = new Headers(request.headers);
+    assert.equal(headers.get("engine-job"), "agent");
+    assert.equal(headers.get("cf-access-client-id"), BRIEF_ENGINE_ENV.ENGINE_ACCESS_CLIENT_ID);
+    assert.equal(headers.get("cf-access-client-secret"), BRIEF_ENGINE_ENV.ENGINE_ACCESS_CLIENT_SECRET);
+    return respond(headers.get("engine-for-user"));
+  });
+}
+
+test("morning-brief reads each authenticated partner's current engine agenda and observation time", async (t) => {
+  const observations = { joe: NOW - 60000, dell: NOW - 120000 };
+  const reviews = [{ key: "0000000000000000", title: "Synthetic finished review",
+    start: new Date(NOW - 3_600_000).toISOString(), end: new Date(NOW - 600_000).toISOString(),
+    state: "needs_review", prompt: "Confirm whether this meeting happened." }];
+  const fetch = briefEngineFixture(t, partner => {
+    const agenda = calendarFixture(NOW, new Date(observations[partner]).toISOString());
+    agenda.items[2].title = `Synthetic meeting for ${partner}`;
+    return Response.json({ ...agenda, follow_up_reviews: reviews,
+      confirmed: partner === "joe" ? [reviews[0].key] : [],
+      dismissed: partner === "dell" ? [reviews[0].key] : [] });
+  });
+  for (const actor of [JOE, DELL]) {
+    const result = await callTool(BRIEF_ENGINE_ENV, { ...actor }, "morning-brief", {});
+    const calendar = result.sections.calendar;
+    assert.equal(calendar.observed_at, new Date(observations[actor.slug]).toISOString());
+    assert.deepEqual(calendar.items.map(row => row.title), [`Synthetic meeting for ${actor.slug}`, "Synthetic site tour"]);
+    assert.equal(calendar.follow_up_reviews[0].confirmed, actor.slug === "joe");
+    assert.equal(calendar.follow_up_reviews[0].dismissed, actor.slug === "dell");
+    const coverage = result.coverage.required_sections.find(row => row.key === "calendar");
+    assert.deepEqual(coverage.counts, { items: 2, follow_up_reviews: 1 });
+  }
+  assert.equal(fetch.mock.callCount(), 2);
+});
+
+test("a failed engine agenda read is unavailable even with an older CARR snapshot", async (t) => {
+  let respond;
+  const fetch = briefEngineFixture(t, () => respond());
+  for (const failure of [
+    () => Response.json({ error: "database_unavailable", detail: "private fixture" }, { status: 503 }),
+    () => new Response("unreadable response"),
+    () => Response.json({ ...calendarFixture(), items: [] }),
+    () => { throw new Error("private transport detail"); },
+  ]) {
+    respond = failure;
+    const result = await callTool(BRIEF_ENGINE_ENV, { ...JOE }, "morning-brief", {});
+    assert.deepEqual(result.sections.calendar, { state: "unavailable", reason: "source_unavailable", items: [] });
+    assert.equal(result.coverage.required_sections.find(row => row.key === "calendar").counts.items, null);
+  }
+  assert.equal(fetch.mock.callCount(), 4);
+});
+
+test("morning-brief distinguishes a missing engine agenda from a published empty agenda", async (t) => {
+  const fetch = briefEngineFixture(t, partner => Response.json(partner === "dell" ? null : {
+    ...calendarFixture(), items: [], follow_up_reviews: [], confirmed: [], dismissed: [],
+  }));
+  const missing = await callTool(BRIEF_ENGINE_ENV, { ...DELL }, "morning-brief", {});
+  assert.equal(missing.sections.calendar, undefined);
+  const published = await callTool(BRIEF_ENGINE_ENV, { ...JOE }, "morning-brief", {});
+  assert.equal(published.sections.calendar.state, "empty");
+  assert.equal(fetch.mock.callCount(), 2);
+});
+
+test("switching off engine assistant keeps the legacy calendar read", async (t) => {
+  const fetch = briefEngineFixture(t, () => assert.fail("an engine request was made"));
+  const result = await callTool({ ...BRIEF_ENGINE_ENV, ENGINE_ASSISTANT: "false" }, { ...JOE }, "morning-brief", {});
+  assert.equal(result.sections.calendar.observed_at, new Date(NOW - 86400000).toISOString());
+  assert.deepEqual(result.sections.calendar.items.map(row => row.title), ["Synthetic lender call", "Synthetic site tour"]);
+  assert.equal(fetch.mock.callCount(), 0);
 });
 
 test("morning-brief flags overlapping timed meetings without treating all-day entries as conflicts", async () => {
