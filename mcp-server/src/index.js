@@ -779,8 +779,10 @@ export class DealWatchSettings extends WorkerEntrypoint {
 
     const verb = SUBJECT_WATCH_V2_VERBS[command];
     const args = { ...fields, subject_type: "deal", subject_id: dealId };
-    const validator = new Validator(structuredClone(TOOLS[verb].inputSchema));
-    if (!validator.validate(args).valid)
+    const schema = structuredClone(TOOLS[verb].inputSchema);
+    // The v2 store casts the lifecycle version to a PostgreSQL integer.
+    if (schema.properties.base_version) schema.properties.base_version.maximum = 2 ** 31 - 1;
+    if (!new Validator(schema).validate(args).valid)
       return { ok: false, error: "invalid_request" };
     const actor = { slug: partner, human: true, via: "deal-watch-settings" };
     try {
