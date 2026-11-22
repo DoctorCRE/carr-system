@@ -114,8 +114,8 @@ class Gates:
         if isolated:
             temporary.mkdir(parents=True, exist_ok=True)
             env.update(TMPDIR=str(temporary), TMP=str(temporary), TEMP=str(temporary))
-        print(f'gate-start {name}', file=sys.stderr, flush=True)
         with log.open('wb') as out:
+            print(f'gate-start {name}', file=sys.stderr, flush=True)
             try:
                 rc = subprocess.run(command, stdout=out, stderr=subprocess.STDOUT, env=env).returncode
             except OSError as error:

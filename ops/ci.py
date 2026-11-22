@@ -494,6 +494,10 @@ def main(argv=None):
     def cancel(signum, _):
         for sig in (signal.SIGINT, signal.SIGTERM):
             signal.signal(sig, signal.SIG_IGN)
+        if controller.class_name == 'gates':
+            for log in sorted(controller.logdir.glob('gate-*.log')):
+                if not (log.with_suffix('.rc').exists() or log.with_suffix('.log.rc').exists()):
+                    print(f'gate-unfinished {log.stem}', file=sys.stderr, flush=True)
         if signum == signal.SIGINT:
             raise KeyboardInterrupt
         sys.exit(143)

@@ -54,6 +54,28 @@ class GatesTest(unittest.TestCase):
         self.assertIn('OK    gates       2 selftest suites + safety hook installation', output)
         self.assertIn('suite passed', output)
 
+    def test_cancellation_names_only_started_unfinished_suites(self):
+        self.suite('ops/a-finished-selftest.py', 'pass')
+        self.suite('ops/b-active-selftest.py',
+                   'import os, signal\n'
+                   'os.kill(int(os.environ["FIXTURE_CI_PID"]), signal.SIGTERM)\n'
+                   'signal.pause()')
+        self.suite('ops/c-queued-selftest.py', 'pass')
+        result = subprocess.run(
+            ['bash', '-c', 'export FIXTURE_CI_PID=$$; exec bash ops/ci.sh --strict --only gates'],
+            cwd=self.root,
+            env={**ci.fixture_env(), 'RUNNER_TEMP': str(self.root / 'logs'), 'CARR_CI_GATE_JOBS': '1'},
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 143, result.stderr)
+        self.assertIn('gate-start gate-a-finished-selftest.py', result.stderr)
+        self.assertIn('gate-done gate-a-finished-selftest.py 0', result.stderr)
+        self.assertIn('gate-start gate-b-active-selftest.py', result.stderr)
+        self.assertNotIn('gate-done gate-b-active-selftest.py', result.stderr)
+        self.assertNotIn('gate-start gate-c-queued-selftest.py', result.stderr)
+        reports = [line for line in result.stderr.splitlines() if line.startswith('gate-unfinished ')]
+        self.assertEqual(reports, ['gate-unfinished gate-b-active-selftest.py'], result.stderr)
+
     def test_measured_suite_budget_does_not_raise_other_suites(self):
         (self.root / 'ops/config/ci-execution-budgets.json').write_text(json.dumps({
             'gate_suites': {'ops/guard-selftest.py': {'timeout_seconds': 777}}}))
