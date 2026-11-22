@@ -838,6 +838,16 @@ test("a future activity is still refused before either write path", async (t) =>
   assert.equal(upstream.calls.length, 0);
 });
 
+test("an activity timestamp with many time separators stays on the legacy path", async (t) => {
+  const upstream = engine(t, () => assert.fail("invalid timestamp made an engine request"));
+  const occurred_at = `2026-10-10T${"T".repeat(20_000)}`;
+  await assert.rejects(
+    executeRegisteredTool(legacy(), agent, "log-activity", { ...activity, occurred_at }, upstream.env),
+    LegacyReached,
+  );
+  assert.equal(upstream.calls.length, 0);
+});
+
 test("saves the engine cannot take yet stay on the legacy handler", async (t) => {
   const step = { idempotency_key: key, ref: deal, description: "Send sample measurements" };
   const link = { from_ref: "L-001", to_ref: "C-001", kind: "intro" };
@@ -940,6 +950,30 @@ const invoice = {
 };
 const mailboxPartner = { id: agent.id, slug: "dell", human: true };
 const localMailbox = { ...agent, slug: "dell-local", via: "local-token" };
+
+test("invoice capture checks long addresses with many domain dots", async (t) => {
+  const upstream = engine(t, () => Response.json({ invoice_id: savedId, evidence_ref: invoice.native_ref }));
+  const from_address = `invoice@example${".".repeat(20_000)}test`;
+  await assert.rejects(
+    executeRegisteredTool(
+      legacy(),
+      mailboxPartner,
+      "record-deal-invoice",
+      { ...invoice, from_address: `${from_address} ` },
+      upstream.env,
+    ),
+    { payload: { error: "invalid_engine_invoice_evidence" } },
+  );
+  assert.equal(upstream.calls.length, 0);
+  await executeRegisteredTool(
+    legacy(),
+    mailboxPartner,
+    "record-deal-invoice",
+    { ...invoice, from_address },
+    upstream.env,
+  );
+  assert.equal(upstream.calls.length, 1);
+});
 
 test("invoice capture off writes the legacy invoice with its local date", async (t) => {
   const upstream = engine(t, () => assert.fail("off made an engine request"), "false");

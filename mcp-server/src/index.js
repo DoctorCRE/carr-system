@@ -83,11 +83,12 @@ import INGEST_TRANSPORT from "./ingest-transport.v1.json" with { type: "json" };
 // at its own call site below, since a 401 is invisible to a >=500 check.
 
 import { WorkerEntrypoint } from "cloudflare:workers";
+import { Validator } from "@cfworker/json-schema";
 import { OAuthProvider, getOAuthApi } from "@cloudflare/workers-oauth-provider";
 import { neon, Pool } from "./postgres.ts";
 import { scheduledPushOutbox } from "./web-push-outbox.ts";
 import { scheduledSubjectWatches } from "./subject-watch-scheduler.ts";
-import { mcpApiHandler, dispatch } from "./mcp.js";
+import { mcpApiHandler, dispatch, callTool } from "./mcp.js";
 import { handleAuthorize, handleCallback, handleConsent } from "./google-oidc.js";
 export { PhoneAudioHandoff } from './phone-audio-handoff.ts';
 export { OAuthConsentState } from "./oauth-consent-state.ts";
@@ -96,7 +97,7 @@ export { AiNeuronBudget } from "./ai-budget.js";
 import { sharedOAuthFetch, mcpOriginRefusal, isSharedOAuthPath } from "./oauth-policy.ts";
 import { agentActorForToken, authenticatedIdentity, comparisonActorForPartner, sessionCheckpointActorForToken, continuityActorForTokenMaps,
          serveReviewRequest, unattendedActorForToken,
-         hermesActorForTokenMaps, hermesCosActorForToken } from "./identity.js";
+         hermesActorForTokenMaps, hermesCosActorForToken, isKnownPartner } from "./identity.js";
 import { pipelineChanges } from "./dealroom.ts";
 import { authorizeProgram6Action, businessResponse, createDealroomHandler, isDealroomRequest, isLegacyDealroomRequest } from "./dealroom-web.js";
 import { createWorkspaceBusinessReader } from "./workspace-business-read.js";
@@ -107,7 +108,8 @@ import { createDealDeliverablesHandler } from "./deal-deliverables-web.js";
 import { executeRegisteredTool } from "./tools.js";
 import { createCaptureHandler } from "./capture.js";
 import { createPhoneCallHandler, PHONE_STUDIO_PREFIX } from "./phone-call-sessions.js";
-import { TOOLS } from "./tools.js";
+import { TOOLS, ToolError } from "./tools.js";
+import { SUBJECT_WATCH_V2_VERBS } from "./subject-watches.js";
 import { buildRelease } from "./release.js";
 import { readCommandCenterSummary } from "./workspace-command-center.js";
 import { wrapWithCorrelation } from "./correlation.ts";
@@ -761,6 +763,34 @@ export class ComparisonReads extends WorkerEntrypoint {
       business: (read, actor) => businessResponse(read, env, actor, comparisonBusinessReader),
     });
     return wrapWithCorrelation(withFailureRecording(serve))(request, env, ctx);
+  }
+}
+
+// Only the bound Worker can supply the partner it verified.
+export class DealWatchSettings extends WorkerEntrypoint {
+  async run(partner, dealId, input) {
+    if (!isKnownPartner(partner)) return { ok: false, error: "unknown_partner" };
+    if (!input || typeof input !== "object" || Array.isArray(input) ||
+        Object.hasOwn(input, "subject_type") || Object.hasOwn(input, "subject_id"))
+      return { ok: false, error: "invalid_request" };
+    const { command, ...fields } = input;
+    if (typeof command !== "string" || command === "list" || !Object.hasOwn(SUBJECT_WATCH_V2_VERBS, command))
+      return { ok: false, error: "watch_command_invalid" };
+
+    const verb = SUBJECT_WATCH_V2_VERBS[command];
+    const args = { ...fields, subject_type: "deal", subject_id: dealId };
+    const schema = structuredClone(TOOLS[verb].inputSchema);
+    // The v2 store casts the lifecycle version to a PostgreSQL integer.
+    if (schema.properties.base_version) schema.properties.base_version.maximum = 2 ** 31 - 1;
+    if (!new Validator(schema).validate(args).valid)
+      return { ok: false, error: "invalid_request" };
+    const actor = { slug: partner, human: true, via: "deal-watch-settings" };
+    try {
+      return await callTool({ ...this.env, ctx: this.ctx }, actor, verb, args);
+    } catch (error) {
+      if (error instanceof ToolError) return { ok: false, error: error.payload.error };
+      throw error;
+    }
   }
 }
 

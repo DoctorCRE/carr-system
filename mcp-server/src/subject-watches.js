@@ -58,17 +58,24 @@ export function subjectWatchTools({ withEnvelope, ToolError }) {
   };
 }
 
+export const SUBJECT_WATCH_V2_VERBS = Object.freeze({
+  watch: 'watch-subject-v2',
+  pause: 'pause-subject-watch-v2',
+  resume: 'resume-subject-watch-v2',
+  'replace-policy': 'replace-subject-watch-policy-v2',
+  unwatch: 'unwatch-subject-v2',
+  read: 'read-subject-watch-v2',
+  list: 'list-subject-watches-v2',
+});
+
 export function subjectWatchV2Tools({ withEnvelope, ToolError }) {
   const unwrap = result => {
     if (!result?.ok) throw new ToolError({ error: result?.error || 'subject_watch_unavailable' });
     return parseSubjectWatchV2(result);
   };
   const tools = {};
-  for (const command of ['watch', 'pause', 'resume', 'replace-policy', 'unwatch', 'read', 'list']) {
+  for (const [command, verb] of Object.entries(SUBJECT_WATCH_V2_VERBS)) {
     const write = !['read', 'list'].includes(command);
-    const verb = { watch: 'watch-subject-v2', unwatch: 'unwatch-subject-v2', list: 'list-subject-watches-v2',
-      read: 'read-subject-watch-v2', pause: 'pause-subject-watch-v2', resume: 'resume-subject-watch-v2',
-      'replace-policy': 'replace-subject-watch-policy-v2' }[command];
     const properties = command === 'list' ? {
       cursor: { type: 'string', pattern: UUID.source },
       limit: { type: 'integer', minimum: 1, maximum: 100, default: 50 },

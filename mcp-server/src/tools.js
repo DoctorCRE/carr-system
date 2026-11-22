@@ -250,11 +250,16 @@ function assertActivityTime(occurred_at) {
 
 const ENGINE_ACTIVITY_FIELDS = new Set(['idempotency_key', 'ref', 'kind', 'summary', 'detail', 'owed', 'occurred_at']);
 
+function isZonedActivityTime(value) {
+  if (typeof value !== 'string' || !isCalendarDate(value.slice(0, 10))) return false;
+  const timeStart = value.lastIndexOf('T');
+  return timeStart >= 0 && /^T.*(?:Z|[+-]\d\d:\d\d)$/.test(value.slice(timeStart)) &&
+    Number.isFinite(Date.parse(value));
+}
+
 function isEngineActivity(args) {
-  const { occurred_at } = args;
   return ['call', 'meeting', 'note'].includes(args.kind) &&
-    (occurred_at === undefined || (typeof occurred_at === 'string' && /T.*(?:Z|[+-]\d\d:\d\d)$/.test(occurred_at) &&
-      isCalendarDate(occurred_at.slice(0, 10)) && Number.isFinite(Date.parse(occurred_at)))) &&
+    (args.occurred_at === undefined || isZonedActivityTime(args.occurred_at)) &&
     Object.keys(args).every(field => ENGINE_ACTIVITY_FIELDS.has(field));
 }
 
