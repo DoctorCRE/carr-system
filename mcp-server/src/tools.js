@@ -9082,7 +9082,6 @@ export async function executeRegisteredTool(client, actor, name, args = {}, engi
   // assertRequiredArgs above: a missing required field used to reach the
   // handler as undefined and come back as a confident empty answer.
   assertRequiredArgs(tool.inputSchema, args);
-  guardCalendarReviewWrite(engineEnv, name, args);
   if (FEATURE_VERBS[name]) await requireFeature(client, actor, FEATURE_VERBS[name]);
   // V5-S01 GLOBAL BOUNDARIES, AT THE ONE SEAM EVERY DOOR PASSES (2026-09-25).
   // Evaluated here, after coercion and the required-argument check so the
@@ -9111,6 +9110,7 @@ export async function executeRegisteredTool(client, actor, name, args = {}, engi
   // connection or driver fault) still surfaces as-is for the transport's own
   // generic handling.
   try {
+    guardCalendarReviewWrite(engineEnv, name, args);
     if (!tool.write && name.includes('email')) await guardEmailAction(client,args,ToolError,false);
     if (tool.write && engineEnv?.ENGINE_ASSISTANT === 'true') {
       if (name === 'record-deal-invoice') {
@@ -9123,7 +9123,9 @@ export async function executeRegisteredTool(client, actor, name, args = {}, engi
       const saved = await saveAssistantVerb(client, actor, name, args, engineEnv);
       if (saved) return saved;
     }
-    const result = await tool.handler(client, actor, args, engineEnv);
+    const result = name === 'morning-brief' || name === 'resolve-candidate'
+      ? await tool.handler(client, actor, args, engineEnv)
+      : await tool.handler(client, actor, args);
     return await linkFutureWork(client, actor, name, args, result, writeEvent);
   } catch (e) {
     if (e instanceof ToolError) throw e;
