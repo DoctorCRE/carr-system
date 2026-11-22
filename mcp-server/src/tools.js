@@ -287,6 +287,13 @@ async function resolveAssistantStepSubject(client, ref, completion) {
   return { type, id: result.rows[0].subject_id };
 }
 
+function guardCalendarReviewWrite(env, verb, args) {
+  if (env?.ENGINE_ASSISTANT === "true" && (
+    (verb === "log-activity" && args.calendar_event_key !== undefined) ||
+    (verb === "answer-board-question" && args.board_id === CALENDAR_AGENDA_BOARD)))
+    throw new ToolError({ error: "calendar_review_on_home" });
+}
+
 async function saveAssistantVerb(client, actor, verb, args, env) {
   if (verb === 'log-outreach') throw new ToolError({ error: 'engine_assistant_outreach_unavailable' });
   if (verb === 'confirm-email-next-step') throw new ToolError({ error: 'engine_assistant_email_step_on_home' });
@@ -9075,6 +9082,7 @@ export async function executeRegisteredTool(client, actor, name, args = {}, engi
   // assertRequiredArgs above: a missing required field used to reach the
   // handler as undefined and come back as a confident empty answer.
   assertRequiredArgs(tool.inputSchema, args);
+  guardCalendarReviewWrite(engineEnv, name, args);
   if (FEATURE_VERBS[name]) await requireFeature(client, actor, FEATURE_VERBS[name]);
   // V5-S01 GLOBAL BOUNDARIES, AT THE ONE SEAM EVERY DOOR PASSES (2026-09-25).
   // Evaluated here, after coercion and the required-argument check so the
@@ -9969,7 +9977,7 @@ registerTools({
       idempotency_key: { type: "string" }, candidate_id: { type: "string" },
       accept: { type: "boolean" }, note: { type: "string" }, automatic: { type: "boolean" },
     }, required: ["idempotency_key", "candidate_id", "accept"] },
-    handler: async (c, actor, args) => withEnvelope(c, actor, "resolve-candidate", args, async () => {
+    handler: async (c, actor, args, engineEnv) => withEnvelope(c, actor, "resolve-candidate", args, async () => {
       await c.query(`select s.id from capture_session s join capture_candidate p on p.session_id=s.id
         where p.id=$1 for update of s /* call-outcome:resolve-session-lock */`, [args.candidate_id]);
       if (args.automatic === true && (await c.query(`select 1 from event e join capture_candidate p
@@ -10006,6 +10014,7 @@ registerTools({
       if (!verb) throw new ToolError({ error: "unknown_candidate_kind", kind: candidate.kind });
       const innerArgs = { ...candidate.payload, idempotency_key: captureKey(candidate.id),
         ...(FUTURE_WORK_WRITES[verb] && args.work_request ? { work_request: args.work_request } : {}) };
+      guardCalendarReviewWrite(engineEnv, verb, innerArgs);
       if (candidate.kind === 'next_step' && !innerArgs.work_request) {
         const linked = (await c.query(`select w.ref from ops.future_work_link f join ops.work_request w on w.id=f.work_request_id
           where f.organization_tenant_id=$1 and f.source_ref=$2`, [organizationTenantForActor(actor), `capture:${candidate.id}`])).rows[0];

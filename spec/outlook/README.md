@@ -30,8 +30,9 @@ With `engine_mail` enabled, intake publishes the agenda to the engine. When
 authenticated partner's agenda and review status from the engine. The brief
 keeps the published observation time and reports failed or incomplete engine
 reads as unavailable. Open a meeting review on DoctorCRE Home to choose
-**It happened** or **Dismiss**. With the Worker switch off, the brief reads
-the CARR board.
+**It happened** or **Dismiss**. CARR refuses to confirm or dismiss a calendar
+review while the brief reads from the engine. With the Worker switch off,
+the brief reads the CARR board and CARR handles its calendar review actions.
 
 For the Studio, run `bin/install-outlook-intake.sh` from the updated canonical
 checkout after merge to update the installed `outlook-repo` checkout.
