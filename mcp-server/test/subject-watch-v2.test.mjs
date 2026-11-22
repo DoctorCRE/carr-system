@@ -165,7 +165,10 @@ test('engine intake stays off by default and retries an overlapping sweep withou
   const before = await cursor();
   assert.equal(before.scheduled_at.toISOString(), '2027-02-01T12:00:00.000Z');
 
-  await assert.rejects(sweep(0));
+  await sweep(0);
+  assert.deepEqual((await c.query(
+    'select failure_count, failure_code, checked_at from ops.subject_watch_engine_delivery where watch_id=$1', [id],
+  )).rows, [{ failure_count: 1, failure_code: 'engine_read_failed', checked_at: null }]);
   assert.deepEqual(await cursor(), before);
   assert.deepEqual(await receipts(), []);
   upstreamFails = false;
@@ -192,21 +195,16 @@ test('only the scheduler writer can execute the bounded engine watch functions',
   t.after(() => c.end());
   assert.deepEqual((await c.query("select ops.read_subject_watch_engine_batch('2027-01-01T00:00:00Z',4) result")).rows[0].result, []);
   await assert.rejects(c.query("select ops.read_subject_watch_engine_batch('2027-01-01T00:00:00Z',5)"), /watch_batch_limit/);
-  for (const table of ['subject_watch', 'subject_watch_v2_subscription', 'subject_watch_delivery', 'subject_watch_sweep', 'subject_watch_change', 'subject_watch_engine_start']) {
+  for (const table of ['subject_watch', 'subject_watch_v2_subscription', 'subject_watch_delivery', 'subject_watch_sweep', 'subject_watch_change', 'subject_watch_engine_start', 'subject_watch_engine_delivery']) {
     await assert.rejects(c.query('select * from ops.' + table), { code: '42501' });
   }
-  for (const call of [
-    "ops.subject_watch_engine_targets()",
-    "ops.deliver_subject_watches(now(),50,true)",
-  ]) {
-    await assert.rejects(c.query('select ' + call), { code: '42501' });
-  }
-  for (const name of ['read_subject_watch_engine_batch', 'sweep_subject_watches']) {
+  await assert.rejects(c.query('select ops.subject_watch_engine_targets()'), { code: '42501' });
+  for (const name of ['read_subject_watch_engine_batch', 'sweep_subject_watch_engine']) {
     const { rows } = await c.query(`
       select coalesce(r.rolname,'public') as role
       from pg_proc p cross join lateral aclexplode(p.proacl) a left join pg_roles r on r.oid=a.grantee
       where p.pronamespace='ops'::regnamespace and p.proname=$1
-        and ($1<>'sweep_subject_watches' or p.pronargs=3) and a.grantee<>p.proowner`, [name]);
+        and a.grantee<>p.proowner`, [name]);
     assert.deepEqual(rows, [{ role: 'carr_writer' }]);
   }
 });
@@ -291,8 +289,8 @@ test('missing and retryable deals do not stall another watch in the same sweep',
 
   await sweep(5);
   const progress = async ({ id }) => (await db.query(
-    'select engine_checked_at from ops.subject_watch_delivery where watch_id=$1', [id],
-  )).rows[0].engine_checked_at;
+    'select checked_at from ops.subject_watch_engine_delivery where watch_id=$1', [id],
+  )).rows[0].checked_at;
   const receipts = async () => (await db.query(
     'select subject_id, disposition from ops.subject_watch_change where watch_generation_id=any($1::uuid[]) order by subject_id',
     [[missing.id, retry.id, healthy.id]],
@@ -458,17 +456,18 @@ test('the engine reply list is ignored while deal changes continue', async t => 
   const { db, addWatch, sweep } = await engineWatchFixture(t);
   const { id, deal } = await addWatch('Synthetic engine reply ignored');
   const reply = randomUUID();
-  await db.query("update ops.subject_watch_delivery set last_emitted_at='2027-02-01T12:04:00Z' where watch_id=$1", [id]);
-  t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(deal, [
+  const fetch = t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(deal, [
     ...phaseMove(deal, '1', 3, 'research', 'negotiation'),
     ...phaseMove(deal, '2', 7, 'negotiation', 'legal'),
   ], ['uncategorized reply metadata', reply]));
 
   await sweep(5);
+  await sweep(7);
   await sweep(10, false);
+  assert.equal(fetch.mock.callCount(), 1);
   assert.deepEqual((await db.query(
     'select disposition from ops.subject_watch_change where watch_generation_id=$1', [id],
-  )).rows, [{ disposition: 'pending' }]);
+  )).rows, [{ disposition: 'emitted' }]);
 
   await sweep(11);
   assert.deepEqual((await db.query(
@@ -546,15 +545,19 @@ test('an engine-only alert does not delay a later CARR reply', async t => {
   ]);
 });
 
-for (const code of ['55P03', 'P0001']) {
+for (const code of ['55P03', 'P0001', '22003']) {
   test(`engine alert failure ${code} leaves the CARR reply committed and retries the engine change`, async t => {
     const { db, addWatch, sweep } = await engineWatchFixture(t);
     const { id, deal } = await addWatch('Synthetic mixed watch with engine insert failure');
     await legacyReply(db, deal);
     await db.query("update ops.subject_watch_change set eligible_at='2027-02-01T12:04:00Z' where watch_generation_id=$1", [id]);
-    t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(deal, phaseMove(deal, '1', 3, 'research', 'negotiation')));
+    const malformed = code === '22003';
+    let injectFailure = true;
+    t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(deal,
+      phaseMove(deal, malformed && injectFailure ? '9223372036854775808' : '1', 3, 'research', 'negotiation'),
+    ));
 
-    await db.query(`
+    if (!malformed) await db.query(`
       create function ops.reject_test_engine_alert() returns trigger language plpgsql as $$
       begin
         if new.reason = 'Watched deal has 1 updates to review' then raise sqlstate '${code}'; end if;
@@ -577,8 +580,9 @@ for (const code of ['55P03', 'P0001']) {
         { failure_count: 1, failure_code: code, checked_at: null },
       ]);
     } finally {
-      await db.query('drop trigger reject_test_engine_alert on ops.notification; drop function ops.reject_test_engine_alert()');
+      if (!malformed) await db.query('drop trigger reject_test_engine_alert on ops.notification; drop function ops.reject_test_engine_alert()');
     }
+    injectFailure = false;
     await sweep(10);
     await sweep(15);
     assert.deepEqual((await db.query(`
