@@ -1740,7 +1740,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "log-activity": {
     ingress_key: "mcp-tool:log-activity",
     source_locator: "mcp-server/src/tools.js",
-    schema_digest: "d267e79434229abaef8d2c9881a2468c4a9b6c1e5280a0f8699d587886c29473",
+    schema_digest: "66357282177e205511a64284b8d05a4207793d46e4e60ab7fa787c69f6d4abfa",
     write: true,
     human_only: false,
     human_caller_only: false,
