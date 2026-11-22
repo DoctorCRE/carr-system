@@ -107,6 +107,14 @@ test('private deal watch binding scopes settings to the verified partner', async
   assert.equal(await noticeCount(), before);
 
   const expected = { subscription_id: first.watch.id, base_version: first.watch.lifecycle_version };
+  for (const base_version of [2 ** 31, 2 ** 53, 1.5, 0, -1, '1']) {
+    assert.deepEqual(await save('joe', 'pause', { ...expected, base_version }),
+      { ok: false, error: 'invalid_request' });
+  }
+  assert.deepEqual(await save('joe', 'pause', { ...expected, subscription_id: 'not-a-uuid' }),
+    { ok: false, error: 'invalid_request' });
+  assert.deepEqual(await save('joe', 'pause', { ...expected, idempotency_key: 'not-a-uuid' }),
+    { ok: false, error: 'invalid_request' });
   assert.equal((await read('dell')).watch, null);
   assert.deepEqual(await save('dell', 'pause', expected), { ok: false, error: 'watch_stale_version' });
   assert.deepEqual((await read('joe')).watch, first.watch);
