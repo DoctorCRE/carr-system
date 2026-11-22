@@ -115,7 +115,8 @@ class Gates:
             temporary.mkdir(parents=True, exist_ok=True)
             env.update(TMPDIR=str(temporary), TMP=str(temporary), TEMP=str(temporary))
         with log.open('wb') as out:
-            print(f'gate-start {name}', file=sys.stderr, flush=True)
+            sys.stderr.write(f'gate-start {name}\n')
+            sys.stderr.flush()
             try:
                 rc = subprocess.run(command, stdout=out, stderr=subprocess.STDOUT, env=env).returncode
             except OSError as error:
@@ -132,7 +133,8 @@ class Gates:
                 shutil.rmtree(temporary, ignore_errors=True)
         status = self.logdir / (name + ('.rc' if isolated else '.log.rc'))
         status.write_text(f'{rc}\n')
-        print(f'gate-done {name} {rc} {time.time() - start:.1f}s', file=sys.stderr, flush=True)
+        sys.stderr.write(f'gate-done {name} {rc} {time.time() - start:.1f}s\n')
+        sys.stderr.flush()
         return name, rc, start, time.time()
 
     def record(self, result):

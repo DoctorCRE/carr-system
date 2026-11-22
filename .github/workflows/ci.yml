@@ -328,7 +328,7 @@ jobs:
             fi
           else
             if [ "${{ matrix.classes }}" = gates ]; then
-              ops/ci.sh --strict --only gates --gate-shard "${{ matrix.gate_shard }}/2"
+              exec ops/ci.sh --strict --only gates --gate-shard "${{ matrix.gate_shard }}/2"
             else
               ops/ci.sh --strict --only "${{ matrix.classes }}" --unit-part practice
             fi

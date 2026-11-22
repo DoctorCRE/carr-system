@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 # Characterize gate orchestration through the canonical CI command.
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
 import re
+import runpy
 import subprocess
 import sys
 import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+import yaml
 
 spec = importlib.util.spec_from_file_location('ci_fixture', Path(__file__).with_name('ci-selftest.py'))
 assert spec is not None and spec.loader is not None
@@ -54,27 +60,47 @@ class GatesTest(unittest.TestCase):
         self.assertIn('OK    gates       2 selftest suites + safety hook installation', output)
         self.assertIn('suite passed', output)
 
-    def test_cancellation_names_only_started_unfinished_suites(self):
-        self.suite('ops/a-finished-selftest.py', 'pass')
-        self.suite('ops/b-active-selftest.py',
+    def test_workflow_cancellation_names_only_started_unfinished_suites(self):
+        for name in ('a-padding', 'b-finished', 'c-padding', 'e-padding', 'f-queued'):
+            self.suite(f'ops/{name}-selftest.py', 'pass')
+        self.suite('ops/d-active-selftest.py',
                    'import os, signal\n'
+                   'signal.alarm(3)\n'
                    'os.kill(int(os.environ["FIXTURE_CI_PID"]), signal.SIGTERM)\n'
                    'signal.pause()')
-        self.suite('ops/c-queued-selftest.py', 'pass')
-        result = subprocess.run(
-            ['bash', '-c', 'export FIXTURE_CI_PID=$$; exec bash ops/ci.sh --strict --only gates'],
-            cwd=self.root,
-            env={**ci.fixture_env(), 'RUNNER_TEMP': str(self.root / 'logs'), 'CARR_CI_GATE_JOBS': '1'},
-            capture_output=True, text=True, timeout=30,
-        )
-        self.assertEqual(result.returncode, 143, result.stderr)
-        self.assertIn('gate-start gate-a-finished-selftest.py', result.stderr)
-        self.assertIn('gate-done gate-a-finished-selftest.py 0', result.stderr)
-        self.assertIn('gate-start gate-b-active-selftest.py', result.stderr)
-        self.assertNotIn('gate-done gate-b-active-selftest.py', result.stderr)
-        self.assertNotIn('gate-start gate-c-queued-selftest.py', result.stderr)
-        reports = [line for line in result.stderr.splitlines() if line.startswith('gate-unfinished ')]
-        self.assertEqual(reports, ['gate-unfinished gate-b-active-selftest.py'], result.stderr)
+        for workflow in ('ci.yml', 'main-canary.yml'):
+            with self.subTest(workflow=workflow):
+                document = yaml.safe_load((ci.REPO / '.github/workflows' / workflow).read_text())
+                steps = document['jobs']['classes']['steps']
+                step = next(step['run'] for step in steps if step.get('name') == "Run this group's check classes")
+                step = step.replace('${{ matrix.classes }}', 'gates').replace('${{ matrix.gate_shard }}', '2')
+                script = self.root / 'workflow-step.sh'
+                script.write_text('export FIXTURE_CI_PID=$$\n' + step)
+                result = subprocess.run(
+                    ['bash', '--noprofile', '--norc', '-e', '-o', 'pipefail', str(script)],
+                    cwd=self.root,
+                    env={**ci.fixture_env(), 'RUNNER_TEMP': str(self.root / 'logs'), 'CARR_CI_GATE_JOBS': '1'},
+                    capture_output=True, text=True, timeout=30,
+                )
+                self.assertEqual(result.returncode, 143, result.stderr)
+                self.assertIn('gate-start gate-b-finished-selftest.py', result.stderr)
+                self.assertIn('gate-done gate-b-finished-selftest.py 0', result.stderr)
+                self.assertIn('gate-start gate-d-active-selftest.py', result.stderr)
+                self.assertNotIn('gate-done gate-d-active-selftest.py', result.stderr)
+                self.assertNotIn('gate-start gate-f-queued-selftest.py', result.stderr)
+                reports = [line for line in result.stderr.splitlines() if line.startswith('gate-unfinished ')]
+                self.assertEqual(reports, ['gate-unfinished gate-d-active-selftest.py'], result.stderr)
+
+    def test_progress_writes_each_line_as_one_record(self):
+        gates = runpy.run_path(str(ci.REPO / 'ops/ci-gates.py'))['Gates']
+        runner = gates(SimpleNamespace(logdir=self.root / 'logs'))
+        stderr = Mock(wraps=io.StringIO())
+        with patch.object(sys, 'stderr', stderr):
+            runner.run('gate-example-selftest.py', [sys.executable, '-c', 'pass'])
+        writes = [call.args[0] for call in stderr.write.call_args_list]
+        self.assertEqual(len(writes), 2, writes)
+        self.assertEqual(writes[0], 'gate-start gate-example-selftest.py\n')
+        self.assertRegex(writes[1], r'^gate-done gate-example-selftest\.py 0 [0-9.]+s\n$')
 
     def test_measured_suite_budget_does_not_raise_other_suites(self):
         (self.root / 'ops/config/ci-execution-budgets.json').write_text(json.dumps({
