@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { registerHooks } from 'node:module';
+import { neonConfig, Pool } from '../src/postgres.ts';
 import pg from 'pg';
 import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,6 +15,106 @@ import { executeRegisteredTool, TOOLS } from '../src/tools.js';
 import { sweepSubjectWatches } from '../src/subject-watch-scheduler.ts';
 
 const dsn = await snapshotDatabase('subject-watches-');
+test('private deal watch binding scopes settings to the verified partner', async t => {
+  const hooks = registerHooks({
+    resolve(specifier, context, next) {
+      if (specifier !== 'cloudflare:workers') return next(specifier, context);
+      return { url: 'data:text/javascript,export class WorkerEntrypoint {}', shortCircuit: true };
+    },
+  });
+  let worker;
+  try { worker = await import('../src/index.js'); }
+  finally { hooks.deregister(); }
+  assert.equal(typeof worker.DealWatchSettings?.prototype.run, 'function');
+
+  const owner = new pg.Client({ connectionString: dsn });
+  const writer = new pg.Client({ connectionString: dsn });
+  await owner.connect();
+  t.after(() => owner.end());
+  await writer.connect();
+  t.after(() => writer.end());
+  await writer.query('set session authorization carr_writer');
+  t.mock.method(Pool.prototype, 'connect', async () => ({
+    query: writer.query.bind(writer),
+    release() {},
+  }));
+  t.mock.method(Pool.prototype, 'end', async () => {});
+
+  await owner.query("insert into client_status(slug,label) values('active','Synthetic active') on conflict do nothing");
+  const { id: deal, version } = (await owner.query(`
+    with partner as (select id from actor where slug='joe'),
+      person as (insert into party(kind,name,created_by,updated_by)
+        select 'person','Synthetic binding client',id,id from partner returning id),
+      customer as (insert into client(party_id,status,created_by,updated_by)
+        select person.id,'active',partner.id,partner.id from person,partner returning id)
+    insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by)
+    select customer.id,'Synthetic binding deal','purchase','research','joe',partner.id,partner.id
+    from customer,partner returning id,version`
+  )).rows[0];
+  const { occurred_at: earlier } = (await owner.query(`
+    insert into activity(kind,occurred_at,deal_id,actor_id,summary,email_source)
+    select 'email_in',now()-interval '1 day',$1,id,'Synthetic prior reply','{"mailbox_owner":"joe"}'
+    from actor where slug='joe' returning occurred_at`, [deal])).rows[0];
+  const noticeCount = async () => (await owner.query(
+    "select count(*) from ops.notification where subject_type='deal' and subject_ref=$1", [deal]
+  )).rows[0].count;
+  const before = await noticeCount();
+  const binding = new worker.DealWatchSettings();
+  const tasks = [];
+  const previousFetch = neonConfig.fetchFunction;
+  neonConfig.fetchFunction = async () => Response.json({ fields: [], rows: [] });
+  t.after(async () => {
+    await Promise.all(tasks);
+    neonConfig.fetchFunction = previousFetch;
+  });
+  Object.assign(binding, {
+    env: { DATABASE_URL_WRITER: 'postgresql://carr_writer@fixture.invalid/postgres' },
+    ctx: { waitUntil: task => tasks.push(task) },
+  });
+
+  const run = (partner, command, args = {}) => binding.run(partner, deal, { command, ...args });
+  const read = partner => run(partner, 'read');
+  const save = (partner, command, args) => run(partner, command, { idempotency_key: randomUUID(), ...args });
+  assert.deepEqual(await read('joe-local'), { ok: false, error: 'unknown_partner' });
+  assert.deepEqual(await run('joe', 'list'), { ok: false, error: 'watch_command_invalid' });
+  assert.deepEqual(await run('joe', 'read', { subject_id: randomUUID() }), { ok: false, error: 'invalid_request' });
+  assert.deepEqual(await binding.run('joe', 'not-a-uuid', { command: 'read' }), { ok: false, error: 'invalid_request' });
+  assert.equal((await read('joe')).watch, null);
+
+  const policy = { change_kinds: ['reply_arrived'] };
+  const request = { command: 'watch', idempotency_key: randomUUID(), policy };
+  const first = await binding.run('joe', deal, request);
+  assert.equal(first.ok, true, JSON.stringify(first));
+  assert.equal(first.schema_version, 'subject-watch.v2');
+  assert.equal(first.watch.baseline.version, version);
+  const reply = await binding.run('joe', deal, request);
+  assert.deepEqual(reply, { ...first, replayed: true });
+  assert.deepEqual(await binding.run('dell', deal, request), { ok: false, error: 'key_reuse' });
+
+  const engineBatch = (await owner.query("select ops.read_subject_watch_engine_batch(clock_timestamp(),4) as batch")).rows[0].batch;
+  const target = engineBatch.find(item => item.watch_id === first.watch.id);
+  assert.ok(target);
+  assert.ok(Date.parse(target.since) > earlier.getTime());
+  assert.equal(await noticeCount(), before);
+
+  const expected = { subscription_id: first.watch.id, base_version: first.watch.lifecycle_version };
+  assert.equal((await read('dell')).watch, null);
+  assert.deepEqual(await save('dell', 'pause', expected), { ok: false, error: 'watch_stale_version' });
+  assert.deepEqual((await read('joe')).watch, first.watch);
+
+  const paused = await save('joe', 'pause', expected);
+  assert.equal(paused.watch.state, 'paused');
+  assert.deepEqual(await save('joe', 'replace-policy', { ...expected, policy }), { ok: false, error: 'watch_stale_version' });
+  const replaced = await save('joe', 'replace-policy', { ...expected, base_version: paused.watch.lifecycle_version,
+    policy: { ...policy, include_self_changes: false } });
+  assert.equal(replaced.watch.policy.include_self_changes, false);
+  const resumed = await save('joe', 'resume', { ...expected, base_version: replaced.watch.lifecycle_version });
+  assert.equal(resumed.watch.state, 'watching');
+  const removed = await save('joe', 'unwatch', { ...expected, base_version: resumed.watch.lifecycle_version });
+  assert.equal(removed.watch.state, 'removed');
+  assert.equal((await read('joe')).watch, null);
+});
+
 test('v2 registered lifecycle, policy, replay, generations and isolation', async t => {
   const c = new pg.Client({ connectionString: dsn });
   await c.connect(); t.after(() => c.end());
