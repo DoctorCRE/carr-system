@@ -227,7 +227,7 @@ begin
            select id from ops.subject_watch_change c where watch_generation_id=w.id and disposition='pending'
              and eligible_at<=p_now and failure_count<2
              and (p_engine_enabled or split_part(c.semantic_key,':',1) not in ('engine','engine-reply'))
-             and case when c.semantic_key like 'engine-reply:%' then
+             and case when p_engine_enabled and c.semantic_key like 'engine-reply:%' then
                ops.subject_watch_engine_reply_live(split_part(c.semantic_key,':',2)::uuid,w.subject_id,slug_value)
              else true end
            order by id limit 100 for update skip locked) pending;
