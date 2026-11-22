@@ -1,12 +1,11 @@
 -- rollback: switch off engine intake.
 -- expand-contract: add engine delivery state and entry points without backfilling watches.
--- lock-review: creating the resume trigger briefly locks the watch subscription table.
+-- lock-review: the resume trigger and reply receipt index lock their tables during installation.
 set local lock_timeout='5s';
 set local statement_timeout='30s';
 
 create table ops.subject_watch_engine_delivery (
   watch_id uuid primary key,
-  floor_at timestamptz,
   checked_at timestamptz,
   attempted_at timestamptz,
   missing_at timestamptz,
@@ -22,12 +21,18 @@ create table ops.subject_watch_engine_start (
 );
 revoke all on ops.subject_watch_engine_start from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader;
 
+create table ops.subject_watch_engine_resume_floor (
+  watch_id uuid primary key,
+  resumed_at timestamptz not null
+);
+revoke all on ops.subject_watch_engine_resume_floor from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader;
+
 create function ops.subject_watch_engine_resume() returns trigger
 language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
 begin
-  insert into ops.subject_watch_engine_delivery(watch_id,floor_at)
+  insert into ops.subject_watch_engine_resume_floor(watch_id,resumed_at)
   select new.id,clock_timestamp() where new.subject_type='deal' and exists(select 1 from ops.subject_watch_engine_start)
-  on conflict(watch_id) do update set floor_at=excluded.floor_at;
+  on conflict(watch_id) do update set resumed_at=excluded.resumed_at;
   return new;
 end $$;
 revoke all on function ops.subject_watch_engine_resume() from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader;
@@ -53,8 +58,9 @@ language sql stable set search_path=pg_catalog,pg_temp as $$
   ) w
   join public.actor a on a.id=w.actor_id and a.active and a.kind='human' and a.slug in ('joe','dell')
   left join ops.subject_watch_engine_delivery q on q.watch_id=w.id
+  left join ops.subject_watch_engine_resume_floor r on r.watch_id=w.id
   cross join ops.subject_watch_engine_start s
-  cross join lateral (select greatest(w.subscribed_at,s.started_at,q.floor_at) as started_at) floor
+  cross join lateral (select greatest(w.subscribed_at,s.started_at,r.resumed_at) as started_at) floor
   where w.subject_type='deal' and q.missing_at is null
 $$;
 revoke all on function ops.subject_watch_engine_targets() from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader;
@@ -90,9 +96,15 @@ begin
   if p_now is null or jsonb_typeof(p_engine) is distinct from 'array' or jsonb_array_length(p_engine)>4 then
     raise exception 'watch_batch_limit';
   end if;
-  if not pg_try_advisory_xact_lock(hashtextextended('subject-watch-engine',0)) then return 0; end if;
   for item in select * from jsonb_to_recordset(p_engine) as x(watch_id uuid,lifecycle_version integer,status text,changes jsonb)
   loop
+    -- Lock the subscription through commit so a pause can only win before delivery.
+    perform 1 from ops.subject_watch_v2_subscription where id=item.watch_id and state='watching'
+      for no key update skip locked;
+    if not found then
+      perform 1 from ops.subject_watch where id=item.watch_id for no key update skip locked;
+      if not found then continue; end if;
+    end if;
     select * into w from ops.subject_watch_engine_targets() where watch_id=item.watch_id;
     if not found or w.lifecycle_version is distinct from item.lifecycle_version or w.started_at>p_now
       or w.checked_at>=p_now or w.last_emitted_at>p_now-interval '5 minutes' then continue; end if;
@@ -164,7 +176,7 @@ begin
       if cardinality(receipt_ids)>0 then
         minted_id:=(ops.mint_notification('event',source_id,'deal',w.deal_id::text,
           'Watched deal has '||cardinality(receipt_ids)||' updates to review','action_required','/deals?deal='||w.deal_id,
-          'subject-watch-engine:'||w.watch_id||':'||receipt_ids[1],w.subscriber,false,false)->>'notification_id')::uuid;
+          'subject-watch:engine:'||w.watch_id||':'||receipt_ids[1],w.subscriber,false,false)->>'notification_id')::uuid;
         if minted_id is null then raise exception 'watch_notification_not_minted'; end if;
         update ops.subject_watch_change set notification_id=minted_id where id=any(receipt_ids);
       end if;
@@ -185,6 +197,35 @@ revoke all on function ops.read_subject_watch_engine_batch(timestamptz,integer,u
   ops.sweep_subject_watch_engine(timestamptz,jsonb) from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader;
 grant execute on function ops.read_subject_watch_engine_batch(timestamptz,integer,uuid[]),
   ops.sweep_subject_watch_engine(timestamptz,jsonb) to carr_writer;
+
+create index subject_watch_reply_notification on ops.subject_watch_change(notification_id)
+where category='reply_arrived' and notification_id is not null;
+
+do $watch_notifications$
+declare definition text; updated text;
+begin
+  definition:=pg_get_functiondef('ops.mint_notification(text,uuid,text,text,text,text,text,text,text,boolean,boolean)'::regprocedure);
+  updated:=replace(definition,$old$where id=p_event_ref and verb='subject-watch-scheduled-sweep'$old$,
+    $new$where id=p_event_ref and verb=case when p_dedupe_key like 'subject-watch:engine:%'
+      then 'subject-watch-engine-change' else 'subject-watch-scheduled-sweep' end$new$);
+  if updated=definition then raise exception 'watch delivery guard missing from notification minter'; end if;
+  execute updated;
+
+  definition:=pg_get_functiondef('ops.home_inbox_sources_v2(uuid)'::regprocedure);
+  updated:=replace(definition,$old$jsonb_agg(to_jsonb(n) order by created_at desc,id desc)->0 latest,$old$,
+    $new$jsonb_agg(to_jsonb(n) order by created_at desc,id desc)->0 latest,
+      (array_agg(n.reason order by created_at desc,id desc) filter (where
+        n.dedupe_key like 'subject-watch:%' and r.read_at is null and exists (
+          select from ops.subject_watch_change c where c.notification_id=n.id and c.category='reply_arrived'
+        )))[1] pending_reply_reason,$new$);
+  if updated=definition then raise exception 'Home notification grouping missing'; end if;
+  definition:=updated;
+  updated:=replace(definition,$old$coalesce(latest->>'reason','Update')$old$,
+    $new$coalesce(case when latest->>'dedupe_key' like 'subject-watch:engine:%' then g.pending_reply_reason end,
+      latest->>'reason','Update')$new$);
+  if updated=definition then raise exception 'Home notification headline missing'; end if;
+  execute updated;
+end $watch_notifications$;
 
 do $contract$
 declare contract jsonb:=ops.scac_current_grant_contract(); entries jsonb;
