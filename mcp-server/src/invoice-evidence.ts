@@ -10,8 +10,7 @@ type InvoiceEvidence = {
 
 function isInvoiceSender(value: string) {
   const address = String(value || "");
-  return /^[^\s@]+@[^\s@]+$/.test(address) &&
-    address.lastIndexOf(".", address.length - 2) > address.indexOf("@") + 1;
+  return /^[^\s@]+@[^\s@]+$/.test(address) && address.lastIndexOf(".", address.length - 2) > address.indexOf("@") + 1;
 }
 
 export function isInvoiceEvidence({ native_ref, from_address, deal_name, occurred_at }: InvoiceEvidence, now: number) {

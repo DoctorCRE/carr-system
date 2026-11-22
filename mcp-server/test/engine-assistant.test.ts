@@ -955,13 +955,23 @@ test("invoice capture checks long addresses with many domain dots", async (t) =>
   const upstream = engine(t, () => Response.json({ invoice_id: savedId, evidence_ref: invoice.native_ref }));
   const from_address = `invoice@example${".".repeat(20_000)}test`;
   await assert.rejects(
-    executeRegisteredTool(legacy(), mailboxPartner, "record-deal-invoice",
-      { ...invoice, from_address: `${from_address} ` }, upstream.env),
+    executeRegisteredTool(
+      legacy(),
+      mailboxPartner,
+      "record-deal-invoice",
+      { ...invoice, from_address: `${from_address} ` },
+      upstream.env,
+    ),
     { payload: { error: "invalid_engine_invoice_evidence" } },
   );
   assert.equal(upstream.calls.length, 0);
-  await executeRegisteredTool(legacy(), mailboxPartner, "record-deal-invoice",
-    { ...invoice, from_address }, upstream.env);
+  await executeRegisteredTool(
+    legacy(),
+    mailboxPartner,
+    "record-deal-invoice",
+    { ...invoice, from_address },
+    upstream.env,
+  );
   assert.equal(upstream.calls.length, 1);
 });
 
