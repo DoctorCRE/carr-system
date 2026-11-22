@@ -292,9 +292,11 @@ async function saveAssistantVerb(client, actor, verb, args, env) {
 
   const guardedStep = stepSave && (Boolean(args.work_request) || (!docStep && Object.hasOwn(args, 'expected_action')));
   const dealOnly = docStep || dealNote;
-  const subject = stepWrite && !docStep
-    ? await resolveAssistantStepSubject(client, args.ref)
-    : await resolveSubject(client, dealOnly ? args.deal : args.ref);
+  const subject = dealNote && UUID_KEY.test(args.deal)
+    ? { type: 'deal', id: args.deal }
+    : stepWrite && !docStep
+      ? await resolveAssistantStepSubject(client, args.ref)
+      : await resolveSubject(client, dealOnly ? args.deal : args.ref);
   if (dealOnly && subject.type !== 'deal') throw new ToolError({ error: "not_a_deal", resolved: subject });
   const oldRole = stepWrite ? assistantOldRole(subject.type, subject.id) : null;
   if ((oldRole || docStep) && !partner) throw new ToolError({ error: 'human_approval_required' });
