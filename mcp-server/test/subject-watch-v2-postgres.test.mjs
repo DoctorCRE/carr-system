@@ -91,10 +91,19 @@ test('private deal watch binding scopes settings to the verified partner', async
   assert.deepEqual(reply, { ...first, replayed: true });
   assert.deepEqual(await binding.run('dell', deal, request), { ok: false, error: 'key_reuse' });
 
-  const engineBatch = (await owner.query("select ops.read_subject_watch_engine_batch(clock_timestamp(),4) as batch")).rows[0].batch;
-  const target = engineBatch.find(item => item.watch_id === first.watch.id);
-  assert.ok(target);
-  assert.ok(Date.parse(target.since) > earlier.getTime());
+  await owner.query('begin');
+  try {
+    await owner.query('select ops.read_subject_watch_engine_batch($1,4)', [earlier]);
+    const { batch } = (await owner.query(
+      'select ops.read_subject_watch_engine_batch(clock_timestamp(),4) as batch'
+    )).rows[0];
+    const target = batch.find(item => item.watch_id === first.watch.id);
+    assert.ok(target);
+    assert.equal(Date.parse(target.started_at), Date.parse(first.watch.subscribed_at));
+    assert.ok(Date.parse(target.since) > earlier.getTime());
+  } finally {
+    await owner.query('rollback');
+  }
   assert.equal(await noticeCount(), before);
 
   const expected = { subscription_id: first.watch.id, base_version: first.watch.lifecycle_version };
