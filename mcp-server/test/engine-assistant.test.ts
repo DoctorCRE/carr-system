@@ -888,7 +888,7 @@ test("an Engine meeting confirmation cannot write a CARR activity", async (t) =>
     executeRegisteredTool(c, agent, "log-activity", { ...calendarMeeting }, upstream.env),
     directsCalendarReviewToHome,
   );
-  assert.deepEqual(c.changes, []);
+  assert.equal(c.changes.length, 0);
   assert.equal(upstream.calls.length, 0);
 
   const legacyEnv = { ...upstream.env, ENGINE_ASSISTANT: "false" };
