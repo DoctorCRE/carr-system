@@ -211,7 +211,7 @@ export async function readNeedsJoe(c, actor, governance, { now = Date.now() } = 
         return item({
           key: `work-request:${row.ref}`, source: "work_request", title: row.title, why,
           why_text: row.blocker_detail ? `${WHY[why]} ${row.blocker_detail}.` : undefined,
-          action: "Answer the Work Request", link: "https://app.doctorcre.com/work-requests",
+          action: "Answer with answer-work-request-for-joe",
           since: row.updated_at, blocks: { tier: "work", text: `Blocks the Work Request "${row.title}"` },
         }, now);
       }) };
@@ -229,8 +229,7 @@ export async function readNeedsJoe(c, actor, governance, { now = Date.now() } = 
       return { items: rows.map(row => item({
         key: `board-question:${row.board_id}/${row.question_id}`, source: "board_question",
         title: row.prompt, why: classifyHumanOnly(row.prompt) ?? "ruling",
-        action: "Answer it on the progress board",
-        link: `https://app.doctorcre.com/control-room/progress/board/${encodeURIComponent(row.board_id)}`,
+        action: "Answer with answer-board-question",
         since: row.asked_at, blocks: { tier: "work", text: "The session that asked is waiting on the answer" },
       }, now)) };
     }),
