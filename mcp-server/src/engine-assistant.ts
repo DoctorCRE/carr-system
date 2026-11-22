@@ -1,4 +1,4 @@
-// Send assistant saves to DoctorCRE Engine from the Worker.
+// Assistant requests to DoctorCRE Engine from the Worker.
 import { derivedIdempotencyKey } from "./derived-key.ts";
 import engineClient from "./engine-client.json" with { type: "json" };
 import { isInvoiceEvidence } from "./invoice-evidence.ts";
@@ -157,6 +157,30 @@ function engineResult(payload: unknown): Record<string, unknown> | null {
   return typeof payload === "object" && payload !== null && !Array.isArray(payload)
     ? Object.fromEntries(Object.entries(payload))
     : null;
+}
+
+const isReviewKeyList = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((key: unknown) => typeof key === "string" && /^[a-f0-9]{16}$/.test(key));
+
+export async function readEngineCalendarAgenda(env: EngineEnv, partner: string) {
+  const { target, headers } = engineJobRequest(env, "/jobs/calendar/agenda", "agent", partner);
+  const response = await fetch(target, { headers, redirect: "manual", signal: AbortSignal.timeout(5_000) });
+  if (response.status !== 200) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error("engine_calendar_unavailable");
+  }
+  const payload: unknown = await response.json();
+  if (payload === null) return null;
+  const snapshot = engineResult(payload);
+  if (
+    !snapshot ||
+    !Array.isArray(snapshot.follow_up_reviews) ||
+    !Array.isArray(snapshot.warnings) ||
+    !isReviewKeyList(snapshot.confirmed) ||
+    !isReviewKeyList(snapshot.dismissed)
+  )
+    throw new Error("invalid_engine_calendar_response");
+  return { snapshot, confirmed: new Set(snapshot.confirmed), dismissed: new Set(snapshot.dismissed) };
 }
 
 function isMissingEngineRecord(status: number, result: Record<string, unknown> | null) {

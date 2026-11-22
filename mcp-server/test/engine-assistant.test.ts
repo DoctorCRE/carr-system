@@ -872,6 +872,82 @@ test("with the Engine on, email step confirmation directs the partner to Home wi
   assert.equal(upstream.calls.length, 0);
 });
 
+function directsCalendarReviewToHome(error: unknown) {
+  const response = publicError(error);
+  assert.equal(response.error, "calendar_review_on_home");
+  assert.match(response.hint, /DoctorCRE Home.*It happened.*Dismiss/);
+  return true;
+}
+
+const calendarMeeting = { ...activity, kind: "meeting", calendar_event_key: "0000000000000000" };
+
+test("an Engine meeting confirmation cannot write a CARR activity", async (t) => {
+  const upstream = engine(t, () => assert.fail("the meeting confirmation called the Engine"));
+  const c = legacy({ writes: true });
+  await assert.rejects(
+    executeRegisteredTool(c, agent, "log-activity", { ...calendarMeeting }, upstream.env),
+    directsCalendarReviewToHome,
+  );
+  assert.equal(c.changes.length, 0);
+  assert.equal(upstream.calls.length, 0);
+
+  const legacyEnv = { ...upstream.env, ENGINE_ASSISTANT: "false" };
+  const saved = record(await executeRegisteredTool(c, agent, "log-activity", { ...calendarMeeting }, legacyEnv));
+  assert.equal(saved.activity_id, savedId);
+  assert.ok(c.changes.some((sql) => sql.startsWith("insert into activity")));
+});
+
+test("an Engine meeting dismissal cannot write an answer to the old calendar board", async (t) => {
+  const upstream = engine(t, () => assert.fail("the meeting dismissal called the Engine"));
+  const c = { query: t.mock.fn(() => assert.fail("the meeting dismissal reached CARR")) };
+  const joe = { id: agent.id, slug: "joe", human: true };
+  await assert.rejects(
+    executeRegisteredTool(
+      c,
+      joe,
+      "answer-board-question",
+      {
+        idempotency_key: key,
+        board_id: "calendar-agenda",
+        question_id: calendarMeeting.calendar_event_key,
+        base_version: 1,
+        answer_text: "Dismiss",
+      },
+      upstream.env,
+    ),
+    directsCalendarReviewToHome,
+  );
+  assert.equal(c.query.mock.callCount(), 0);
+  assert.equal(upstream.calls.length, 0);
+});
+
+test("a captured meeting with an Engine review key cannot write a CARR activity", async (t) => {
+  const upstream = engine(t, () => assert.fail("the captured meeting called the Engine"));
+  const c = legacy({ writes: true });
+  const query = async (sql: string) => {
+    if (sql.includes("capture:resolve-read"))
+      return { rows: [{ id: savedId, kind: "meeting_record", status: "pending", payload: calendarMeeting }] };
+    if (sql === "select current_date::text as day") return { rows: [{ day: "2026-10-27" }] };
+    return c.query(sql);
+  };
+  await assert.rejects(
+    executeRegisteredTool(
+      { query },
+      agent,
+      "resolve-candidate",
+      {
+        idempotency_key: key,
+        candidate_id: savedId,
+        accept: true,
+      },
+      upstream.env,
+    ),
+    directsCalendarReviewToHome,
+  );
+  assert.deepEqual(c.changes, []);
+  assert.equal(upstream.calls.length, 0);
+});
+
 test("the Worker files a note and Home review for a deal only in the Engine", async (t) => {
   const upstream = engine(t, () =>
     Response.json(

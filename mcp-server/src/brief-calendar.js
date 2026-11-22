@@ -3,8 +3,7 @@ import { organizationTenantForActor } from "./identity.js";
 import { partnerAuthoritySlugForActor } from "./partner-authority.js";
 // The morning brief's calendar section. The Outlook intake on the partner's own
 // machine publishes the next fourteen days of their meetings as one display
-// snapshot (publish-board-snapshot, board "calendar-agenda"); this shapes the
-// next seven days of it. The snapshot is display data from Outlook's local
+// snapshot. The brief shows the next seven days. The snapshot is display data from Outlook's local
 // store. It carries the gaps the reader knows about as warning codes, each one
 // becomes a plain sentence here, and a section with any of them is partial,
 // never ready.
@@ -45,19 +44,27 @@ const text = value => typeof value === "string" && value.trim() ? value.trim().s
 const person = value => value && typeof value === "object"
   ? { name: text(value.name), email: text(value.email)?.toLowerCase() ?? null } : { name: null, email: null };
 
+export function unavailableCalendar() {
+  return { state: "unavailable", reason: "source_unavailable", items: [] };
+}
+
 /** A brief section from the stored snapshot, or null when none was ever published. */
-export function calendarSection(snapshot, now = new Date()) {
+export function calendarSection(snapshot, now = new Date(), engineReviews = null) {
   if (snapshot === undefined || snapshot === null) return null;
   const nowMs = now.getTime();
   const observed = instant(snapshot?.observed_at);
   if (snapshot?.schema !== CALENDAR_AGENDA_SCHEMA || observed === null || !Array.isArray(snapshot.items))
-    return { state: "unavailable", reason: "source_unavailable", items: [] };
+    return unavailableCalendar();
   let malformed = 0;
   let malformedTimes = 0;
   const items = [];
   for (const row of snapshot.items) {
     const start = instant(row?.start), end = instant(row?.end);
-    if (start === null || end === null || end < start || !text(row?.title)) { malformed++; continue; }
+    if (start === null || end === null || end < start || !text(row?.title)) {
+      if (engineReviews) return unavailableCalendar();
+      malformed++;
+      continue;
+    }
     if (end <= nowMs || start >= nowMs + HORIZON_MS) continue;
     const attendees = Array.isArray(row.attendees) ? row.attendees.map(person) : [];
     const times = Array.isArray(row.times) ? row.times.map(instant) : [];
@@ -112,11 +119,21 @@ export function calendarSection(snapshot, now = new Date()) {
     const start = instant(row?.start), end = instant(row?.end);
     if (row?.state !== "needs_review" || typeof row?.key !== "string" || !/^[a-f0-9]{16}$/.test(row.key)
         || !text(row?.title) || !text(row?.prompt) || start === null || end === null || end <= start) {
-      malformedReviews++; continue;
+      if (engineReviews) return unavailableCalendar();
+      malformedReviews++;
+      continue;
     }
     if (stale || future || end > observed || end > nowMs || end <= nowMs - 86_400_000) continue;
-    reviews.push({ key: row.key, title: text(row.title), start: new Date(start).toISOString(),
-      end: new Date(end).toISOString(), state: "needs_review", prompt: text(row.prompt) });
+    const review = { key: row.key, title: text(row.title), start: new Date(start).toISOString(),
+      end: new Date(end).toISOString(), state: "needs_review", prompt: text(row.prompt) };
+    if (engineReviews) {
+      review.confirmed = engineReviews.confirmed.has(row.key);
+      review.dismissed = engineReviews.dismissed.has(row.key);
+      review.prompt = review.confirmed || review.dismissed
+        ? "This meeting review is closed."
+        : "Open the meeting review on DoctorCRE Home and choose It happened or Dismiss.";
+    }
+    reviews.push(review);
   }
   reviews.sort((a, b) => b.end.localeCompare(a.end) || a.key.localeCompare(b.key));
   if (reviews.length) notes.push("These are scheduled meetings, not confirmed attendance. Confirm each happened before recording an outcome or next step.");

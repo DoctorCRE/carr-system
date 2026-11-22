@@ -26,7 +26,7 @@ import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dea
 import { canonicalJson } from "./artifact-trust.js";
 import { safeInteger, integerFields } from "./safe-integer.ts";
 import { invoiceTrackerTools } from "./invoice-tracker.ts";
-import { assistantOldRole, captureAssistantInvoice, readAssistantDeal, saveAssistantChange } from "./engine-assistant.ts";
+import { assistantOldRole, captureAssistantInvoice, readAssistantDeal, readEngineCalendarAgenda, saveAssistantChange } from "./engine-assistant.ts";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.ts";
 import { readDealChecklist } from "./deal-checklist.ts";
@@ -91,7 +91,7 @@ import { EMAIL_IDENTITY_SCHEMA, lockEmailIdentity, capturedEmail, guardEmailActi
 import { emailProposalTools, resolveEmailProposal } from "./email-proposals.js";
 import { clearTheDeckTools } from "./clear-the-deck.js";
 import { addCalendarMeetingPrep } from "./calendar-meeting-prep.js";
-import { CALENDAR_AGENDA_BOARD, calendarSection, addCalendarContacts, addCalendarDealSuggestions, addCalendarConfirmations } from "./brief-calendar.js";
+import { CALENDAR_AGENDA_BOARD, calendarSection, addCalendarContacts, addCalendarDealSuggestions, addCalendarConfirmations, unavailableCalendar } from "./brief-calendar.js";
 import { emailLeadProposalTools } from "./email-lead-proposal.ts";
 import { leadAutomationTools } from "./lead-automation.js";
 import { actionLinkTools } from "./action-links.js";
@@ -285,6 +285,13 @@ async function resolveAssistantStepSubject(client, ref, completion) {
     'select subject_id from v_ref_index where subject_type=$1 and lower(ref)=lower($2) limit 2', [type, ref]);
   if (result.rows.length !== 1) throw new ToolError({ error: 'engine_assistant_party_unmapped' });
   return { type, id: result.rows[0].subject_id };
+}
+
+function guardCalendarReviewWrite(env, verb, args) {
+  if (env?.ENGINE_ASSISTANT === "true" && (
+    (verb === "log-activity" && args.calendar_event_key !== undefined) ||
+    (verb === "answer-board-question" && args.board_id === CALENDAR_AGENDA_BOARD)))
+    throw new ToolError({ error: "calendar_review_on_home" });
 }
 
 async function saveAssistantVerb(client, actor, verb, args, env) {
@@ -3492,7 +3499,7 @@ export const TOOLS = {
     write: false,
     description: "The record-native morning brief for the authenticated Joe or Dell context. It composes Needs Joe when applicable, live triage, claim-card, deal-room, loop-board, the redacted renewal decision queue, assurance cadence, published system costs, and, once the partner's own Outlook intake has published one, the next seven days of calendar meetings (Outlook local store; attendance and cancellations unverified). Sections preserve ready, empty, partial, or unavailable. Coverage names every required section, points to its response content, and counts returned rows only, never queue totals. Unavailable is never rewritten as empty. Takes no audience, sponsor, or partner argument.",
     inputSchema: { type: "object", properties: {} },
-    handler: async (c, actor, args) => {
+    handler: async (c, actor, args, engineEnv) => {
       // This is an audience boundary, not a convenience filter.  A shared-only
       // runtime cannot choose Joe or Dell by argument, model name, or cwd.
       const scope = personalScopeForActor(actor);
@@ -3632,19 +3639,24 @@ export const TOOLS = {
       // calendar; a partner without one has no calendar source, not an empty day.
       let calendar = null;
       try {
-        const result = await c.query(
-          `select snapshot_json from board_snapshot
-            where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id=$3`,
-          [organizationTenantForActor(actor), scope.sponsor, CALENDAR_AGENDA_BOARD]);
-        calendar = calendarSection(result.rows[0]?.snapshot_json);
-        if (calendar?.follow_up_reviews?.length) await addCalendarConfirmations(c, calendar, actor);
+        if (engineEnv?.ENGINE_ASSISTANT === "true") {
+          const agenda = await readEngineCalendarAgenda(engineEnv, scope.sponsor);
+          if (agenda) calendar = calendarSection(agenda.snapshot, undefined, agenda);
+        } else {
+          const result = await c.query(
+            `select snapshot_json from board_snapshot
+              where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id=$3`,
+            [organizationTenantForActor(actor), scope.sponsor, CALENDAR_AGENDA_BOARD]);
+          calendar = calendarSection(result.rows[0]?.snapshot_json);
+          if (calendar?.follow_up_reviews?.length) await addCalendarConfirmations(c, calendar, actor);
+        }
         if (calendar?.sources && calendar.items.length) {
           await addCalendarContacts(c, calendar);
           await addCalendarDealSuggestions(c, calendar, scope.sponsor);
           await addCalendarMeetingPrep(c, calendar, scope.sponsor);
         }
       } catch {
-        calendar = { state: "unavailable", reason: "source_unavailable", items: [] };
+        calendar = unavailableCalendar();
       }
       const sections = { ...(needsJoe ? { needs_joe: needsJoe } : {}),
         today, ...(calendar ? { calendar } : {}), claim_card: claimCard, deals, loops, renewals,
@@ -9098,8 +9110,9 @@ export async function executeRegisteredTool(client, actor, name, args = {}, engi
   // connection or driver fault) still surfaces as-is for the transport's own
   // generic handling.
   try {
+    guardCalendarReviewWrite(engineEnv, name, args);
     if (!tool.write && name.includes('email')) await guardEmailAction(client,args,ToolError,false);
-    if (engineEnv?.ENGINE_ASSISTANT === 'true') {
+    if (tool.write && engineEnv?.ENGINE_ASSISTANT === 'true') {
       if (name === 'record-deal-invoice') {
         const mailbox = mailboxOwnerForActor(actor);
         if (!mailbox) throw new ToolError({ error: 'invoice_mailbox_identity_required' });
@@ -9110,7 +9123,9 @@ export async function executeRegisteredTool(client, actor, name, args = {}, engi
       const saved = await saveAssistantVerb(client, actor, name, args, engineEnv);
       if (saved) return saved;
     }
-    const result = await tool.handler(client, actor, args);
+    const result = name === 'morning-brief' || name === 'resolve-candidate'
+      ? await tool.handler(client, actor, args, engineEnv)
+      : await tool.handler(client, actor, args);
     return await linkFutureWork(client, actor, name, args, result, writeEvent);
   } catch (e) {
     if (e instanceof ToolError) throw e;
@@ -9964,7 +9979,7 @@ registerTools({
       idempotency_key: { type: "string" }, candidate_id: { type: "string" },
       accept: { type: "boolean" }, note: { type: "string" }, automatic: { type: "boolean" },
     }, required: ["idempotency_key", "candidate_id", "accept"] },
-    handler: async (c, actor, args) => withEnvelope(c, actor, "resolve-candidate", args, async () => {
+    handler: async (c, actor, args, engineEnv) => withEnvelope(c, actor, "resolve-candidate", args, async () => {
       await c.query(`select s.id from capture_session s join capture_candidate p on p.session_id=s.id
         where p.id=$1 for update of s /* call-outcome:resolve-session-lock */`, [args.candidate_id]);
       if (args.automatic === true && (await c.query(`select 1 from event e join capture_candidate p
@@ -10001,6 +10016,7 @@ registerTools({
       if (!verb) throw new ToolError({ error: "unknown_candidate_kind", kind: candidate.kind });
       const innerArgs = { ...candidate.payload, idempotency_key: captureKey(candidate.id),
         ...(FUTURE_WORK_WRITES[verb] && args.work_request ? { work_request: args.work_request } : {}) };
+      guardCalendarReviewWrite(engineEnv, verb, innerArgs);
       if (candidate.kind === 'next_step' && !innerArgs.work_request) {
         const linked = (await c.query(`select w.ref from ops.future_work_link f join ops.work_request w on w.id=f.work_request_id
           where f.organization_tenant_id=$1 and f.source_ref=$2`, [organizationTenantForActor(actor), `capture:${candidate.id}`])).rows[0];

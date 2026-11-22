@@ -1,45 +1,61 @@
 // V5-S01 — the door is wired at the dispatch seam, in shadow.
 //
 // executeRegisteredTool is the one function every door (connector read,
-// connector write, local break-glass) passes. These tests go through it, not
-// around it: the door must evaluate every dispatch there, record a refusal
-// verdict, and in shadow let the handler run exactly as before.
+// connector write, local break-glass) passes. These tests check the dispatch
+// order, the enforce refusal, and the arguments supplied to the door.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { TOOLS, executeRegisteredTool } from "../src/tools.js";
-import { v5BoundaryPolicyDigest } from "../src/global-boundaries.v5.js";
-import {
-  V5_BOUNDARY_DOOR_MODE,
-  doorObservationSnapshot,
-  resetDoorObservationForTest,
-} from "../src/global-boundaries-door.v5.js";
+import { runInNewContext } from "node:vm";
+import { V5BoundaryDoorRefusal } from "../src/global-boundaries-door.v5.js";
+import { ToolError } from "../src/tool-error.ts";
 
-const DELL = { slug: "dell", human: true, via: "oauth-google", sponsoring_human_slug: null };
-const SENTINEL = "handler-reached-the-database";
-const recordingClient = () => {
-  const queries = [];
-  return {
-    queries,
-    query: async text => { queries.push(text); throw new Error(SENTINEL); },
-  };
-};
-
-
-test("the seam call sits after coercion and before the handler, and maps an enforce refusal by name", () => {
+function dispatchSource() {
   const source = readFileSync(new URL("../src/tools.js", import.meta.url), "utf8");
   const start = source.indexOf("export async function executeRegisteredTool(");
-  const body = source.slice(start, source.indexOf("\nconst TOOL_REGISTRATION_SOURCE", start));
-  const required = body.indexOf("assertRequiredArgs(tool.inputSchema, args);");
-  const doorCall = body.indexOf("passBoundaryDoor({ verb: name, write: tool.write === true, actor, args,");
-  const handler = body.indexOf("const result = await tool.handler(client, actor, args);");
-  assert.ok(required > 0 && doorCall > required && handler > doorCall,
-    "the door runs after the required-argument check and before the handler");
-  assert.match(body, /if \(error instanceof V5BoundaryDoorRefusal\) throw new ToolError\(error\.payload\);/);
-  // The door context is never taken from the caller.
-  assert.doesNotMatch(body.slice(doorCall, doorCall + 200), /args\.(connectivity|context|now)/);
+  return source.slice(start, source.indexOf("\nconst TOOL_REGISTRATION_SOURCE", start));
+}
+
+test("dispatch coerces arguments, runs the seam and calendar guard, then invokes the handler", async () => {
+  const calls = [];
+  const record = name => () => { calls.push(name); };
+  const handler = record("handler");
+  const refusal = new V5BoundaryDoorRefusal({ verb: "probe", refusals: [] });
+  let enforce = false;
+  const dispatch = runInNewContext(`(${dispatchSource().replace(/^export /, "").trim()})`, {
+    TOOLS: { probe: { handler }, "morning-brief": { handler }, "resolve-candidate": { handler, write: true } },
+    assertNoCallerAuthorityFields() {},
+    assertRegisteredToolInput() {},
+    coerceArgsToSchema: record("coercion"),
+    assertRequiredArgs: record("required arguments"),
+    FEATURE_VERBS: {},
+    passBoundaryDoor() {
+      calls.push("seam");
+      if (enforce) throw refusal;
+    },
+    guardCalendarReviewWrite: record("calendar guard"),
+    linkFutureWork() {},
+    writeEvent() {},
+    V5BoundaryDoorRefusal,
+    ToolError,
+  });
+
+  for (const verb of ["probe", "morning-brief", "resolve-candidate"]) {
+    calls.length = 0;
+    await dispatch({}, {}, verb, {});
+    assert.deepEqual(calls, ["coercion", "required arguments", "seam", "calendar guard", "handler"], verb);
+  }
+
+  enforce = true;
+  calls.length = 0;
+  await assert.rejects(dispatch({}, {}, "probe", {}), error => {
+    assert.ok(error instanceof ToolError, "the dispatcher maps an enforce refusal to ToolError");
+    assert.equal(error.payload, refusal.payload);
+    return true;
+  });
+  assert.deepEqual(calls, ["coercion", "required arguments", "seam"]);
 });
 
 // #1268 review, robustness: the seam hands the door exactly five inputs, and
@@ -47,9 +63,7 @@ test("the seam call sits after coercion and before the handler, and maps an enfo
 // `context: args.context`, `log: ...`) or a changed value fails here, not just
 // the spellings the previous test happens to name.
 test("the seam passes the door only verb, write, actor, args and now, each from the server", () => {
-  const source = readFileSync(new URL("../src/tools.js", import.meta.url), "utf8");
-  const start = source.indexOf("export async function executeRegisteredTool(");
-  const body = source.slice(start, source.indexOf("\nconst TOOL_REGISTRATION_SOURCE", start));
+  const body = dispatchSource();
   const calls = body.split("passBoundaryDoor(").length - 1;
   assert.equal(calls, 1, "exactly one door call in the dispatch seam");
   const open = body.indexOf("passBoundaryDoor({") + "passBoundaryDoor({".length;

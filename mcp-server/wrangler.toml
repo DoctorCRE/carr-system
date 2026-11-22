@@ -177,7 +177,7 @@ DEALROOM_PROGRAM6_ACTIONS_ENABLED = "true"
 # Authenticated Command Center cutover: / serves workspace.html while enabled;
 # /deals remains the explicit Deal Room route. Disable to roll back the root.
 WORKSPACE_COMMAND_CENTER_READ_ENABLED = "true"
-# Program 28: "true" routes supported assistant deal saves to DoctorCRE Engine.
+# Program 28: "true" routes supported assistant deal saves and the morning brief agenda to DoctorCRE Engine.
 # It needs the ENGINE_URL, ENGINE_ACCESS_CLIENT_ID and ENGINE_ACCESS_CLIENT_SECRET secrets.
 ENGINE_ASSISTANT = "true"
 # Final half of the reviewed zero-downtime credential cutover. Dedicated Codex

@@ -855,7 +855,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
       if (!resolved.rows.length) throw new ToolError({ error: "unauthenticated" });
       // Preserve identity.js's object-identity brand and all authenticated authority fields.
       Object.assign(actor, { id: resolved.rows[0].id });
-      return await executeRegisteredTool(client, actor, name, args || {});
+      return await executeRegisteredTool(client, actor, name, args || {}, env);
     } catch (e) {
       ok = false;
       throw e;
