@@ -167,7 +167,7 @@ class Gates:
             "timeout_seconds", self.args.timeout * self.args.jobs)
 
     def check(self):
-        with tempfile.TemporaryDirectory(prefix='gates-hxprobe-') as directory:
+        with tempfile.TemporaryDirectory(prefix='gates-hxprobe-', dir=self.logdir) as directory:
             self.decoder_target = Path(directory)
             return self.check_prepared()
 

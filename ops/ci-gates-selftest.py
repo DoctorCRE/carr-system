@@ -76,13 +76,18 @@ class GatesTest(unittest.TestCase):
                 step = step.replace('${{ matrix.classes }}', 'gates').replace('${{ matrix.gate_shard }}', '2')
                 script = self.root / 'workflow-step.sh'
                 script.write_text('export FIXTURE_CI_PID=$$\n' + step)
+                step_temp = self.root / f'tmp-{workflow}'
+                step_temp.mkdir()
                 result = subprocess.run(
                     ['bash', '--noprofile', '--norc', '-e', '-o', 'pipefail', str(script)],
                     cwd=self.root,
-                    env={**ci.fixture_env(), 'RUNNER_TEMP': str(self.root / 'logs'), 'CARR_CI_GATE_JOBS': '1'},
+                    env={**ci.fixture_env(), 'RUNNER_TEMP': str(self.root / 'logs'),
+                         'TMPDIR': str(step_temp), 'CARR_CI_GATE_JOBS': '1'},
                     capture_output=True, text=True, timeout=30,
                 )
                 self.assertEqual(result.returncode, 143, result.stderr)
+                self.assertEqual(list(step_temp.iterdir()), [])
+                self.assertEqual(list((self.root / 'logs').iterdir()), [])
                 self.assertIn('gate-start gate-b-finished-selftest.py', result.stderr)
                 self.assertIn('gate-done gate-b-finished-selftest.py 0', result.stderr)
                 self.assertIn('gate-start gate-d-active-selftest.py', result.stderr)
