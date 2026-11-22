@@ -1,6 +1,6 @@
 -- rollback: switch off engine intake.
 -- expand-contract: add engine delivery state and entry points without backfilling watches.
--- lock-review: the resume trigger and reply receipt index lock their tables during installation.
+-- lock-review: the resume trigger locks the subscription table during installation.
 set local lock_timeout='5s';
 set local statement_timeout='30s';
 
@@ -192,8 +192,6 @@ revoke all on function ops.read_subject_watch_engine_batch(timestamptz,integer,u
   ops.sweep_subject_watch_engine(timestamptz,jsonb) from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader;
 grant execute on function ops.read_subject_watch_engine_batch(timestamptz,integer,uuid[]),
   ops.sweep_subject_watch_engine(timestamptz,jsonb) to carr_writer;
-create index subject_watch_reply_notification on ops.subject_watch_change(notification_id)
-where category='reply_arrived' and notification_id is not null;
 
 do $watch_notifications$
 declare definition text; updated text;
@@ -224,18 +222,23 @@ begin
   execute updated;
 
   definition:=pg_get_functiondef('ops.home_inbox_sources_v2(uuid)'::regprocedure);
-  updated:=replace(definition,$old$jsonb_agg(to_jsonb(n) order by created_at desc,id desc)->0 latest,$old$,
-    $new$jsonb_agg(to_jsonb(n) order by created_at desc,id desc)->0 latest,
-      bool_or(n.dedupe_key like 'subject-watch:engine:%') has_engine_alert,
-      bool_or(r.read_at is null and exists (
-        select from ops.subject_watch_change c where c.notification_id=n.id and c.category='reply_arrived'
-      )) has_unread_reply,$new$);
-  if updated=definition then raise exception 'Home notification grouping missing'; end if;
+  updated:=replace(definition,$old$), notifications as materialized (
+    select n.* from ops.notification n$old$,$new$), visible_notifications as not materialized (
+    select n.*, n.dedupe_key like 'subject-watch:engine:%' as engine_watch from ops.notification n$new$);
+  if updated=definition then raise exception 'Home notification source missing'; end if;
   definition:=updated;
-  updated:=replace(definition,$old$coalesce(latest->>'reason','Update')$old$,
-    $new$(case when g.has_engine_alert and g.has_unread_reply then 'Reply received on a watched deal'
-      else coalesce(latest->>'reason','Update') end)$new$);
-  if updated=definition then raise exception 'Home notification headline missing'; end if;
+  -- Apply Home's existing limit before adding engine alerts.
+  updated:=replace(definition,$old$      order by created_at desc,id desc limit 10001
+  ), groups as ($old$,$new$  ), notifications as materialized (
+    (select * from visible_notifications where not engine_watch order by created_at desc,id desc limit 10001)
+    union all
+    (select * from visible_notifications where engine_watch order by created_at desc,id desc limit 10001)
+  ), groups as ($new$);
+  if updated=definition then raise exception 'Home notification limit missing'; end if;
+  definition:=updated;
+  updated:=replace(definition,$old$jsonb_agg(to_jsonb(n) order by created_at desc,id desc)->0 latest,$old$,
+    $new$jsonb_agg(to_jsonb(n) order by n.engine_watch,created_at desc,id desc)->0 latest,$new$);
+  if updated=definition then raise exception 'Home notification representative missing'; end if;
   execute updated;
 end $watch_notifications$;
 

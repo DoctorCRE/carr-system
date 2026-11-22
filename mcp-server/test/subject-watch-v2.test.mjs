@@ -479,51 +479,45 @@ test('the engine reply list is ignored while deal changes continue', async t => 
   ]);
 });
 
-test('CARR files and delivers its own replies with engine intake off or on', async t => {
-  const { db, addWatch, sweep } = await engineWatchFixture(t, { activate: false });
-  const off = await addWatch('Synthetic CARR reply with engine intake off');
-  const on = await addWatch('Synthetic CARR reply with engine intake on');
-  const fetch = t.mock.method(globalThis, 'fetch', async target => engineWatchResponse(target.pathname.split('/').at(-1), []));
-
-  const first = await legacyReply(db, off.deal);
-  await db.query("update ops.subject_watch_change set eligible_at='2027-02-01T12:01:00Z' where watch_generation_id=$1", [off.id]);
-  await sweep(5, false);
-  assert.equal(fetch.mock.callCount(), 0);
-
-  const second = await legacyReply(db, on.deal);
-  await db.query("update ops.subject_watch_change set eligible_at='2027-02-01T12:06:00Z' where watch_generation_id=$1", [on.id]);
-  await sweep(10);
-  assert.ok(fetch.mock.callCount() > 0);
-
-  for (const [watch, activity] of [[off, first], [on, second]]) {
-    assert.deepEqual((await db.query(`
-      select c.category, c.evidence_refs->0->>'activity_id' as activity_id, c.disposition, n.reason
-      from ops.subject_watch_change c join ops.notification n on n.id=c.notification_id
-      where c.watch_generation_id=$1`, [watch.id])).rows, [{
-      category: 'reply_arrived', activity_id: activity, disposition: 'emitted', reason: 'Reply received on a watched deal',
+for (const [name, replies, edit, engineMoves] of [
+  ['quiet', 0, false, 1], ['single reply', 1, false, 1], ['two replies', 2, false, 1],
+  ['deal edit', 0, true, 2],
+  ['reply and edit, one phase move', 1, true, 1], ['reply and edit, two phase moves', 1, true, 2],
+]) {
+  test(`Home preserves the CARR headline after engine delivery: ${name}`, async t => {
+    const { db, actor, addWatch, sweep } = await engineWatchFixture(t);
+    const { id, deal } = await addWatch('Synthetic watch batch');
+    await db.query('begin');
+    if (edit) await db.query("update deal set next_date='2027-03-01' where id=$1", [deal]);
+    const reply = replies ? await legacyReply(db, deal) : null;
+    if (edit && !reply) await db.query(`
+      insert into event(occurred_at,actor_id,verb,subject_type,subject_id,cause)
+      select now(), id, 'update-deal', 'deal', $1, 'automation_job' from actor where slug='dell'
+    `, [deal]);
+    await db.query('commit');
+    if (replies === 2) await legacyReply(db, deal);
+    await db.query("update ops.subject_watch_change set eligible_at='2027-02-01T12:01:00Z' where watch_generation_id=$1", [id]);
+    const cards = async () => (await db.query(`
+      select card->>'title' as title, jsonb_array_length(card->'merged_source_ids') as notifications
+      from ops.home_inbox_items_v3($1) card where card->>'source_type'='notification' and card->>'deal_id'=$2
+    `, [actor, deal])).rows;
+    await sweep(5, false);
+    const before = await cards();
+    assert.equal(before.length, replies || edit ? 1 : 0);
+    if (reply && replies === 1) assert.deepEqual((await db.query(`
+      select category, evidence_refs->0->>'activity_id' as activity_id, disposition
+      from ops.subject_watch_change where watch_generation_id=$1
+    `, [id])).rows, [{ category: edit ? 'material_changed' : 'reply_arrived', activity_id: reply, disposition: 'emitted' }]);
+    const changes = phaseMove(deal, '1', 6, 'research', 'negotiation');
+    if (engineMoves === 2) changes.push(...phaseMove(deal, '2', 7, 'negotiation', 'legal'));
+    t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(deal, changes));
+    await sweep(10);
+    assert.deepEqual(await cards(), [{
+      title: before[0]?.title ?? 'Watched deal has 1 updates to review · Synthetic watch batch',
+      notifications: (before[0]?.notifications ?? 0) + 1,
     }]);
-  }
-});
-
-test('two CARR replies select the Home headline alongside an engine phase move', async t => {
-  const { db, actor, addWatch, sweep } = await engineWatchFixture(t);
-  const { id, deal } = await addWatch('Synthetic mixed watch batch');
-  await legacyReply(db, deal);
-  await legacyReply(db, deal);
-  await db.query("update ops.subject_watch_change set eligible_at='2027-02-01T12:01:00Z' where watch_generation_id=$1", [id]);
-  const cards = async () => (await db.query(`
-    select card->>'title' as title, jsonb_array_length(card->'merged_source_ids') as notifications
-    from ops.home_inbox_items_v3($1) card
-    where card->>'source_type'='notification' and card->>'deal_id'=$2
-  `, [actor, deal])).rows;
-
-  await sweep(5, false);
-  assert.deepEqual(await cards(), [{ title: 'Watched deal has 2 updates to review · Synthetic mixed watch batch', notifications: 1 }]);
-
-  t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(deal, phaseMove(deal, '1', 3, 'research', 'negotiation')));
-  await sweep(10);
-  assert.deepEqual(await cards(), [{ title: 'Reply received on a watched deal · Synthetic mixed watch batch', notifications: 2 }]);
-});
+  });
+}
 
 test('an engine watch alert stays in-app with device delivery enabled', async t => {
   const { db, actor, addWatch, sweep } = await engineWatchFixture(t);
