@@ -274,14 +274,14 @@ test("call-verb uses the partner grant and lets the engine default the owner", a
   });
 });
 
-test("the Doc profile saves a deal step as the signed-in partner and reuses its key on retry", async (t) => {
+test("the Doc profile saves a step on an engine-only deal as the signed-in partner", async (t) => {
   let attempts = 0;
   const upstream = engine(t, () =>
     ++attempts === 1
       ? Response.json({ error: "database_unavailable" }, { status: 503 })
       : Response.json({ next_step_id: savedId, replayed: true }, { status: 201 }),
   );
-  const actor: unknown = worker(t);
+  const actor: unknown = worker(t, legacy({ found: false }).query);
   const env = { ...upstream.env, DATABASE_URL_WRITER: "postgres://fixture@synthetic.invalid/fixture" };
   const result = await callTool(
     env,
@@ -316,6 +316,88 @@ test("the Doc profile saves a deal step as the signed-in partner and reuses its 
       due_on: "2026-10-20",
     });
   }
+});
+
+test("a deal step replays when the retry changes the UUID casing", async (t) => {
+  const dealId = "abcdef01-0000-4000-8000-000000000001";
+  let savedBody: string | undefined;
+  const upstream = engine(t, (body) => {
+    const request = JSON.stringify(body);
+    if (savedBody !== undefined) {
+      if (savedBody !== request) return Response.json({ error: "key_reuse" }, { status: 409 });
+      return Response.json({ next_step_id: savedId, replayed: true }, { status: 201 });
+    }
+    savedBody = request;
+    return Response.json({ next_step_id: savedId }, { status: 201 });
+  });
+  const db = legacy({ found: false });
+  const args = { idempotency_key: key, text: "Send sample measurements", base_version: 7 };
+  const first = record(
+    await executeRegisteredTool(db, agent, "set-next-step", { ...args, deal: dealId.toUpperCase() }, upstream.env),
+  );
+  const retry = await executeRegisteredTool(db, agent, "set-next-step", { ...args, deal: dealId }, upstream.env);
+  assert.equal(first.deal_id, dealId);
+  assert.equal(first.next_step_id, savedId);
+  assert.deepEqual(retry, { ...first, replayed: true });
+  assert.equal(upstream.calls.length, 2);
+  assert.deepEqual(upstream.calls[0]?.body, {
+    idempotency_key: key,
+    deal_id: dealId,
+    what: "Send sample measurements",
+    replaces: "current",
+  });
+});
+
+test("a missing deal ID returns a plain refusal from the step save", async (t) => {
+  t.mock.method(console, "error", () => {});
+  const upstream = engine(t, () => Response.json({ error: "not_found", correlation_id: savedId }, { status: 404 }));
+  await assert.rejects(
+    executeRegisteredTool(
+      legacy({ found: false }),
+      agent,
+      "set-next-step",
+      { idempotency_key: key, deal, text: "Send sample measurements", base_version: 7 },
+      upstream.env,
+    ),
+    (error: unknown) => {
+      const response = publicError(error);
+      assert.equal(response.error, "subject_not_found");
+      assert.equal(response.hint, "No record matched the supplied reference or name. Check it and try again.");
+      return true;
+    },
+  );
+  assert.equal(upstream.calls.length, 1);
+  assert.equal(upstream.calls[0]?.path, "/jobs/next-steps");
+});
+
+test("a deal step can still be saved by name", async (t) => {
+  const upstream = engine(t, () => Response.json({ next_step_id: savedId }, { status: 201 }));
+  const name = "Example Survey Deal";
+  const db = {
+    async query(sql: string, values: unknown[]) {
+      assert.match(sql, /v_ref_index\s+where subject_type='deal' and display_name ilike/);
+      assert.deepEqual(values, [`%${name}%`]);
+      return { rows: [{ subject_id: deal }] };
+    },
+  };
+  const reply = record(
+    await executeRegisteredTool(
+      db,
+      agent,
+      "set-next-step",
+      { idempotency_key: key, deal: name, text: "Send sample measurements", base_version: 7 },
+      upstream.env,
+    ),
+  );
+  assert.equal(reply.next_step_id, savedId);
+  assert.equal(upstream.calls.length, 1);
+  assert.equal(upstream.calls[0]?.path, "/jobs/next-steps");
+  assert.deepEqual(upstream.calls[0]?.body, {
+    idempotency_key: key,
+    deal_id: deal,
+    what: "Send sample measurements",
+    replaces: "current",
+  });
 });
 
 test("the Doc profile refuses a Work Request link before saving a deal step through the engine", async (t) => {
