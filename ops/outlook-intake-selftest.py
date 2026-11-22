@@ -6500,6 +6500,60 @@ class FakeEngine:
         return [json.loads(body) for _, method, p, body in self.calls if method == 'POST' and p == path]
 
 
+class LeadEmailRequestTest(unittest.TestCase):
+    def test_pending_requests_from_before_split_support_replay(self):
+        path = '/jobs/leads/email-intake'
+        mid = 'older-lead@example.test'
+        body = 'Name: Avery Example\nEmail: avery@example.test'
+        email = {'message_id': mid, 'sender': 'intake@source.example.test',
+                 'subject': 'Clinic lease', 'body': body, 'recipients': []}
+        split = {'authored': body, 'history': ''}
+        for saved_split in ({}, split):
+            with self.subTest(saved_split=bool(saved_split)):
+                engine = FakeEngine()
+                door = engine.door('joe')
+                state, counts = {}, {}
+                mailbox = engine_mail.Mailbox(door, state, NOW, 'joe', OWNER, counts, lambda: None)
+                activity = {'kind': 'lead_source', 'happened_at': NOW.isoformat(),
+                            'email': email, 'prospect': {'name': 'Avery Example', 'email': 'avery@example.test'}}
+                request = {'idempotency_key': mailbox.key(mid, 'lead-intake'), **activity}
+                self.assertEqual(door('POST', path, json.dumps(request).encode()).status, 201)
+                state['engine_mail']['emails'][mid] = {
+                    'sent': ts(timedelta()), 'seen': ts(timedelta()), 'inbound': True,
+                    'request': {**request, 'email': {**email, **saved_split}}}
+                mailbox.offer(mid, ts(timedelta()), True, (True, len(body)), True,
+                              {**activity, 'email': {**email, **split}})
+                mailbox.send_emails()
+                self.assertEqual(engine.posts(path), [request, request])
+                self.assertEqual(counts, {'engine_emails_stored': 1})
+                self.assertEqual(engine.posts('/jobs/activities'), [])
+
+    def test_lead_split_must_be_a_pair_of_strings_without_nul(self):
+        path = '/jobs/leads/email-intake'
+        mid = 'new-lead@example.test'
+        email = {'message_id': mid, 'body': 'Captured body'}
+        cases = [
+            ({'authored': '', 'history': 'Earlier text.'}, True),
+            ({'authored': 'New text.', 'history': ''}, True),
+            ({'authored': 'New text.'}, False),
+            ({'authored': 'New text.', 'history': None}, False),
+            ({'authored': 'New\0text.', 'history': ''}, False),
+            ({'authored': 'New text.', 'history': 'Earlier\0text.'}, False),
+        ]
+        for split, valid in cases:
+            with self.subTest(split=split):
+                engine = FakeEngine()
+                counts = {}
+                mailbox = engine_mail.Mailbox(engine.door('joe'), {}, NOW, 'joe', OWNER, counts, lambda: None)
+                mailbox.offer(mid, ts(timedelta()), True, (True, len(email['body'])), True, {
+                    'kind': 'lead_source', 'happened_at': NOW.isoformat(),
+                    'email': {**email, **split}, 'prospect': {'name': 'Avery Example'}})
+                mailbox.send_emails()
+                [request] = engine.posts(path)
+                self.assertEqual(request['email'], {**email, **(split if valid else {})})
+                self.assertEqual(counts, {'engine_emails_stored': 1})
+
+
 class EngineMailTest(unittest.TestCase):
     """Intake writes against a fake Engine."""
     setUpClass = IntakeTest.setUpClass
@@ -6528,6 +6582,10 @@ class EngineMailTest(unittest.TestCase):
 
     def test_lead_source_notice_saves_exact_email_and_prospect(self):
         notice = self.lead_notice()
+        authored = notice['body'].strip()
+        history = 'Earlier conversation.\n\nThanks, Example Source'
+        notice.update(body=f'{authored}\n\n{history}', body_completeness='complete',
+                      authored=authored, history=history)
         self.fake.intent_reply = read('new_matter', 'Needs a lease.')
         outcome = self.run_intake([notice])
         self.assertEqual(outcome.state, 'succeeded')
@@ -6535,11 +6593,12 @@ class EngineMailTest(unittest.TestCase):
         self.assertEqual(request['email'], {
             'message_id': 'Lead@Example.test', 'conversation_id': 'notice-thread',
             'sender': notice['sender'], 'sender_name': 'Example Source',
-            'subject': notice['subject'], 'body': notice['body'].strip(),
+            'subject': notice['subject'], 'body': notice['body'],
+            'authored': authored, 'history': history,
             'recipients': [{'address': OWNER, 'kind': 'to'}]})
         self.assertEqual(request['prospect'], {
             'kind': 'person', 'name': 'Avery Example', 'email': 'avery@example.test'})
-        self.assertEqual(request['evidence'], notice['body'].strip())
+        self.assertEqual(request['evidence'], authored)
         self.assertEqual(request['happened_at'], (NOW - timedelta(hours=1)).isoformat())
         self.assertEqual(self.engine.posts('/jobs/activities'), [])
         self.assertEqual(self.engine.posts('/jobs/proposals/email-lead'), [])
@@ -6644,7 +6703,8 @@ class EngineMailTest(unittest.TestCase):
         self.assertEqual(self.engine.posts('/jobs/proposals/email-lead'), [])
 
     def test_lead_source_retries_exact_request_after_lost_reply(self):
-        notice = self.lead_notice()
+        notice = self.lead_notice(body_completeness='complete', history='')
+        notice['authored'] = notice['body'].strip()
         path = '/jobs/leads/email-intake'
         door = self.engine.door('joe')
 
@@ -6655,9 +6715,15 @@ class EngineMailTest(unittest.TestCase):
         self.fake.ports = lambda: replace(self.plain_ports(), engine=lose_reply)
         self.fake.intent_reply = read('new_matter', 'Needs a lease.')
         self.assertEqual(self.run_intake([notice]).reason, 'writes_failed')
-        self.assertEqual(self.run_intake([notice], touch=False).state, 'succeeded')
-        first, retry = self.engine.posts(path)
+        updated = dict(notice, authored=notice['authored'] + '\nNewly decoded text.')
+        self.assertEqual(self.run_intake([updated]).state, 'succeeded')
+        first, retry = [body for _, method, url, body in self.engine.calls if method == 'POST' and url == path]
         self.assertEqual(first, retry)
+        sent = json.loads(first)
+        self.assertEqual(sent['email']['authored'], notice['authored'])
+        self.assertEqual(sent['email']['history'], '')
+        self.assertEqual(sent['idempotency_key'], str(uuid.uuid5(
+            uuid.NAMESPACE_URL, 'engine|joe|owner@example.test|Lead@Example.test|lead-intake')))
         self.assertEqual(len(self.engine.captured_leads), 1)
         self.assertEqual(self.engine.posts('/jobs/activities'), [])
         self.assertEqual(self.engine.posts('/jobs/proposals/email-lead'), [])
@@ -7068,8 +7134,10 @@ class EngineMailTest(unittest.TestCase):
         self.assertEqual(self.run_intake([notice]).state, 'succeeded')
         [lead] = self.engine.posts(path)
         [activity] = self.engine.posts('/jobs/activities')
-        self.assertEqual(activity['email'], {**lead['email'], 'authored': notice['authored'], 'history': ''})
-        self.assertTrue({'authored', 'history'}.isdisjoint(lead['email']))
+        self.assertEqual(activity['email'], lead['email'])
+        self.assertEqual(activity['email']['authored'], notice['authored'])
+        self.assertEqual(activity['email']['history'], '')
+        self.assertNotEqual(activity['idempotency_key'], lead['idempotency_key'])
 
     def test_preview_waits_for_full_text_then_sends_once(self):
         preview = mail(CLIENT.email, -timedelta(minutes=10), kind='preview', message_id='<p1@example.test>')
