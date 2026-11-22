@@ -82,6 +82,9 @@ when the source labels one, and at least one contact fact from the body. That ma
 distinct from the sender, a phone number, or both a street address and a city.
 Intake sends the full decoded message, its normalized Message-ID and a
 verbatim excerpt to `POST /jobs/leads/email-intake` before filing review.
+New requests also include `email.authored` and `email.history` when both are
+strings without NUL characters. Either string can be empty. Requests queued
+before this change retry with the full body and their original request key.
 A preview from a known source waits for the full body within the normal body
 wait. Incomplete and refused notices follow the regular mail path. A failed
 source lookup leaves new mail on the regular path and holds any already

@@ -232,6 +232,10 @@ class Mailbox:
                 activity = {**activity, 'email': {**email, **identity}}
             step = 'lead-intake' if lead_notice else 'activity'
             entry.update(inbound=inbound, request={'idempotency_key': self.key(message_id, step), **activity})
+            if lead_notice:
+                authored, history = (activity['email'].get(field) for field in ('authored', 'history'))
+                if all(isinstance(part, str) and '\0' not in part for part in (authored, history)):
+                    entry['send_lead_split'] = True
 
     def email_requests(self, since: int | None) -> dict[str, dict]:
         self._stage_emails()
@@ -248,10 +252,13 @@ class Mailbox:
             if request['kind'] == 'lead_source':
                 if not lead_sources_available:
                     continue
-                # The lead door rejects split fields; keep them for the activity fallback.
-                lead_email = {field: value for field, value in request['email'].items()
-                              if field not in ('authored', 'history')}
-                reply = self.post('/jobs/leads/email-intake', {**request, 'email': lead_email})
+                lead_request = request
+                if not entry.get('send_lead_split'):
+                    # Older pending requests could save the split but send only the full body.
+                    lead_request = {**request, 'email': {
+                        field: value for field, value in request['email'].items()
+                        if field not in ('authored', 'history')}}
+                reply = self.post('/jobs/leads/email-intake', lead_request)
                 if verdict(reply) != 'settled' or reply.error == 'key_reuse':
                     self.answer(entry, reply, 'emails')
                     continue
