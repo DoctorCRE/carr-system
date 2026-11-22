@@ -273,13 +273,9 @@ function dealNoteInput(args) {
 
 const ASSISTANT_ROLE_REF_TYPES = { l: 'lead', c: 'client', v: 'vendor', t: 'vendor' };
 
-async function resolveAssistantStepSubject(client, ref, completion) {
-  if (completion && UUID_KEY.test(ref)) {
-    const exact = await resolveExactSubject(client, ref);
-    return exact ?? await readAssistantDeal(completion.env, completion.partner, ref);
-  }
+async function resolveAssistantStepSubject(client, ref, engineDealLookup) {
   const prefix = /^([lcvt])-/i.exec(ref)?.[1].toLowerCase();
-  if (!prefix) return resolveSubject(client, ref);
+  if (!prefix) return resolveSubject(client, ref, engineDealLookup);
   const type = ASSISTANT_ROLE_REF_TYPES[prefix];
   const result = await client.query(
     'select subject_id from v_ref_index where subject_type=$1 and lower(ref)=lower($2) limit 2', [type, ref]);
@@ -301,11 +297,12 @@ async function saveAssistantVerb(client, actor, verb, args, env) {
 
   const guardedStep = stepSave && (Boolean(args.work_request) || (!docStep && Object.hasOwn(args, 'expected_action')));
   const dealOnly = docStep || dealNote;
+  const engineDealLookup = partner && (activity || completion) ? { env, partner } : undefined;
   const subject = dealOnly && UUID_KEY.test(args.deal)
     ? { type: 'deal', id: args.deal.toLowerCase() }
     : stepWrite && !docStep
-      ? await resolveAssistantStepSubject(client, args.ref, completion && partner ? { env, partner } : undefined)
-      : await resolveSubject(client, dealOnly ? args.deal : args.ref);
+      ? await resolveAssistantStepSubject(client, args.ref, engineDealLookup)
+      : await resolveSubject(client, dealOnly ? args.deal : args.ref, engineDealLookup);
   if (dealOnly && subject.type !== 'deal') throw new ToolError({ error: "not_a_deal", resolved: subject });
   const oldRole = stepWrite ? assistantOldRole(subject.type, subject.id) : null;
   if ((oldRole || docStep) && !partner) throw new ToolError({ error: 'human_approval_required' });
@@ -1006,7 +1003,7 @@ async function resolveExactSubject(client, ref) {
   return deal ? { type: "deal", id: deal.subject_id } : null;
 }
 
-async function resolveSubject(client, ref) {
+async function resolveSubject(client, ref, engineDealLookup = undefined) {
   // Accepts 'L-204', 'C-127', 'V-CPA-006', a deal name, or a party/practice name.
   //
   // [amendment 11] Every lookup goes through v_ref_index. This used to query the
@@ -1018,6 +1015,7 @@ async function resolveSubject(client, ref) {
   if (UUID_KEY.test(ref)) {
     const exact = await resolveExactSubject(client, ref);
     if (exact) return exact;
+    if (engineDealLookup) return readAssistantDeal(engineDealLookup.env, engineDealLookup.partner, ref);
   }
   if (/^L-\d+/i.test(ref)) {
     const r = await client.query(

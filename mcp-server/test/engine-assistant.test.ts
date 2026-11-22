@@ -124,6 +124,106 @@ test("deal activity retries a committed save without changing its time, key, or 
   });
 });
 
+for (const kind of ["call", "meeting", "note"]) {
+  test(`the Worker records one ${kind} on an engine-only deal across retries`, async (t) => {
+    const dealId = "abcdef01-0000-4000-8000-000000000001";
+    const dealPath = `/jobs/deals/${dealId}`;
+    const receipts = new Map<string, unknown>();
+    const upstream = engine(t, (body, path) => {
+      if (path === dealPath) return Response.json({ deal_id: dealId });
+      assert.equal(path, "/jobs/activities");
+      const payload = record(body);
+      assert.equal(payload.idempotency_key, key);
+      const replayed = receipts.has(key);
+      if (replayed) assert.deepEqual(payload, receipts.get(key));
+      else receipts.set(key, payload);
+      return Response.json({ activity_id: savedId, replayed }, { status: 201 });
+    });
+    const db = legacy({ found: false });
+    const actor: unknown = worker(t, db.query);
+    const env = { ...upstream.env, DATABASE_URL_WRITER: "postgres://fixture@synthetic.invalid/fixture" };
+    const logActivity = (ref: string) =>
+      callTool(env, actor, "call-verb", { verb: "log-activity", args: { ...activity, ref, kind } });
+
+    const saved = { ok: true, subject: { type: "deal", id: dealId }, activity_id: savedId };
+    assert.deepEqual(await logActivity(dealId.toUpperCase()), saved);
+    assert.deepEqual(await logActivity(dealId), { ...saved, replayed: true });
+    assert.deepEqual(
+      upstream.calls.map(({ method, path, headers }) => [method, path, headers.get("Engine-For-User")]),
+      [
+        ["GET", dealPath, "dell"],
+        ["POST", "/jobs/activities", "dell"],
+        ["GET", dealPath, "dell"],
+        ["POST", "/jobs/activities", "dell"],
+      ],
+    );
+    assert.deepEqual(
+      [...receipts.values()],
+      [
+        {
+          idempotency_key: key,
+          kind,
+          happened_at: activity.occurred_at,
+          summary: `${activity.summary}\n\n${activity.detail}`,
+          about: [{ deal_id: dealId }],
+        },
+      ],
+    );
+    assert.deepEqual(db.changes, []);
+  });
+}
+
+for (const { lookup, status, response, error } of [
+  {
+    lookup: "missing",
+    status: 404,
+    response: { error: "not_found", correlation_id: savedId },
+    error: "subject_not_found",
+  },
+  { lookup: "refused", status: 403, response: { error: "unknown_job" }, error: "engine_assistant_refused" },
+  {
+    lookup: "unavailable",
+    status: 503,
+    response: { error: "database_unavailable" },
+    error: "engine_assistant_unavailable",
+  },
+]) {
+  test(`a ${lookup} Engine deal lookup saves no activity`, async (t) => {
+    const upstream = engine(t, () => Response.json(response, { status }));
+    const db = legacy({ found: false, writes: true });
+    await assert.rejects(
+      executeRegisteredTool(db, agent, "log-activity", { ...activity }, upstream.env),
+      (thrown: unknown) => thrown instanceof ToolError && thrown.payload.error === error,
+    );
+    assert.deepEqual(
+      upstream.calls.map(({ method, path }) => [method, path]),
+      [["GET", `/jobs/deals/${deal}`]],
+    );
+    assert.deepEqual(db.changes, []);
+  });
+}
+
+test("activity on a named deal still uses the legacy name lookup", async (t) => {
+  const upstream = engine(t, () => Response.json({ activity_id: savedId }, { status: 201 }));
+  const name = "Example Survey Deal";
+  const db = {
+    async query(sql: string, values: unknown[]) {
+      assert.match(sql, /v_ref_index\s+where subject_type='deal' and display_name ilike/);
+      assert.deepEqual(values, [`%${name}%`]);
+      return { rows: [{ subject_id: deal }] };
+    },
+  };
+  assert.deepEqual(await executeRegisteredTool(db, agent, "log-activity", { ...activity, ref: name }, upstream.env), {
+    ok: true,
+    subject: { type: "deal", id: deal },
+    activity_id: savedId,
+  });
+  assert.deepEqual(
+    upstream.calls.map(({ method, path }) => [method, path]),
+    [["POST", "/jobs/activities"]],
+  );
+});
+
 test("a final refusal never retries or writes to the legacy database", async (t) => {
   const upstream = engine(t, () =>
     Response.json({ error: "unknown_job", hint: "untrusted response" }, { status: 403 }),
