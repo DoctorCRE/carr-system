@@ -246,7 +246,7 @@ async function engineWatchFixture(t, { activate = true } = {}) {
     ...(on ? { ENGINE_DEAL_WATCH_CHANGES: 'true' } : {}),
   }, pg.Pool);
   if (activate) await sweep(0);
-  return { db, addWatch, sweep };
+  return { db, actor, addWatch, sweep };
 }
 
 function phaseMove(deal, changeId, minute, before, after, actor = 'dell') {
@@ -505,8 +505,8 @@ test('CARR files and delivers its own replies with engine intake off or on', asy
   }
 });
 
-test('a CARR reply keeps its own alert alongside an engine phase move', async t => {
-  const { db, addWatch, sweep } = await engineWatchFixture(t);
+test('a CARR reply keeps the Home headline alongside an engine phase move', async t => {
+  const { db, actor, addWatch, sweep } = await engineWatchFixture(t);
   const { id, deal } = await addWatch('Synthetic mixed watch batch');
   const activity = await legacyReply(db, deal);
   await db.query("update ops.subject_watch_change set eligible_at='2027-02-01T12:01:00Z' where watch_generation_id=$1", [id]);
@@ -525,6 +525,90 @@ test('a CARR reply keeps its own alert alongside an engine phase move', async t 
     { category: 'material_changed', activity_id: null, disposition: 'emitted',
       reason: 'Watched deal has 1 updates to review', severity: 'action_required', deep_link: '/deals?deal=' + deal },
   ]);
+  const { rows } = await db.query(`
+    select card->>'title' as title, jsonb_array_length(card->'merged_source_ids') as notifications
+    from ops.home_inbox_items_v3($1) card
+    where card->>'source_type'='notification' and card->>'deal_id'=$2
+  `, [actor, deal]);
+  assert.deepEqual(rows, [{ title: 'Reply received on a watched deal · Synthetic mixed watch batch', notifications: 2 }]);
+});
+
+test('an engine watch alert stays in-app with device delivery enabled', async t => {
+  const { db, actor, addWatch, sweep } = await engineWatchFixture(t);
+  const { id, deal } = await addWatch('Synthetic device opt-in watch');
+  await db.query(`
+    insert into ops.notification_preference(actor,device_opt_in) values($1,true)
+    on conflict(actor) do update set device_opt_in=true
+  `, [actor]);
+  t.mock.method(globalThis, 'fetch', async () => engineWatchResponse(deal, phaseMove(deal, '1', 3, 'research', 'legal')));
+  try {
+    await sweep(5);
+    assert.deepEqual((await db.query(`
+    select d.channel from ops.subject_watch_change c
+    join ops.notification_delivery d on d.notification_id=c.notification_id
+    where c.watch_generation_id=$1 order by d.channel
+    `, [id])).rows, [{ channel: 'in_app' }]);
+  } finally {
+    await db.query('update ops.notification_preference set device_opt_in=false where actor=$1', [actor]);
+  }
+});
+
+async function beginEngineDelivery(t) {
+  const engine = new pg.Client({ connectionString: engineDsn });
+  await engine.connect();
+  t.after(() => engine.end());
+  await engine.query("begin; set local statement_timeout='1500ms'; set local lock_timeout='100ms'");
+  return engine;
+}
+
+async function watchLifecycle(db, command, watch, version) {
+  await db.query("select set_config('carr.acting_actor_slug','joe',true),set_config('carr.verified_human_actor_slug','joe',true)");
+  const { rows: [{ result }] } = await db.query('select ops.subject_watch_v2($1,$2) result', [command, {
+    subject_type: 'deal', subject_id: watch.deal, subscription_id: watch.id, base_version: version,
+  }]);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  return result.watch.state;
+}
+
+test('resuming a watch completes while engine progress is locked', async t => {
+  const { db, addWatch } = await engineWatchFixture(t);
+  const watch = await addWatch('Synthetic paused watch', { state: 'paused' });
+  await db.query('insert into ops.subject_watch_engine_delivery(watch_id) values($1)', [watch.id]);
+  const engine = await beginEngineDelivery(t);
+  await engine.query('select watch_id from ops.subject_watch_engine_delivery where watch_id=$1 for update', [watch.id]);
+  await db.query("begin; set local lock_timeout='100ms'");
+  try {
+    assert.equal(await watchLifecycle(db, 'resume', watch, 1), 'watching');
+    await db.query('commit');
+  } finally {
+    await db.query('rollback');
+    await engine.query('rollback');
+  }
+});
+
+test('a pause can commit before an overlapping engine delivery without a late alert', async t => {
+  const { db, addWatch } = await engineWatchFixture(t);
+  const watch = await addWatch('Synthetic overlapping pause');
+  const engine = await beginEngineDelivery(t);
+  await db.query('begin');
+  try {
+    assert.equal(await watchLifecycle(db, 'pause', watch, 1), 'paused');
+    const { rows: [{ failures }] } = await engine.query(
+      'select ops.sweep_subject_watch_engine($1,$2) failures',
+      ['2027-02-01T12:05:00Z', JSON.stringify([{
+        watch_id: watch.id, lifecycle_version: 1, status: 'ok',
+        changes: phaseMove(watch.deal, '1', 3, 'research', 'legal'),
+      }])],
+    );
+    assert.equal(failures, 0);
+    await db.query('commit');
+    await engine.query('commit');
+  } finally {
+    await db.query('rollback');
+    await engine.query('rollback');
+  }
+  assert.equal((await db.query('select 1 from ops.subject_watch_change where watch_generation_id=$1', [watch.id])).rowCount, 0);
+  assert.equal((await db.query("select 1 from ops.notification where subject_type='deal' and subject_ref=$1", [watch.deal])).rowCount, 0);
 });
 
 test('an engine-only alert does not delay a later CARR reply', async t => {
