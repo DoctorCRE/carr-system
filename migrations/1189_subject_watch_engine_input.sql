@@ -134,22 +134,69 @@ revoke all on function ops.subject_watch_reply_id(uuid),ops.subject_watch_engine
   ops.subject_watch_carr_reply_claimed(uuid,uuid,uuid,text),ops.claim_subject_watch_carr_reply(uuid,uuid)
   from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader;
 
--- Both entry points use the same delivery loop, with engine receipts visible only to the enabled entry point.
-do $delivery$
-declare body text:=pg_get_functiondef('ops.sweep_subject_watches(timestamptz,integer)'::regprocedure);
-  patch record;
-  source_filter text:=$filter$(p_engine or split_part(c.semantic_key,':',1) not in ('engine','engine-reply'))$filter$;
+-- The flag belongs to the sweep call, so a pending receipt cannot carry it to a later run.
+create function ops.deliver_subject_watches(p_now timestamptz,p_limit integer,p_engine_enabled boolean)
+returns jsonb language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
+declare w record; st ops.subject_watch_delivery; pol jsonb; keys jsonb; fresh jsonb; ids uuid[];
+ cursor_id uuid; candidate_count integer:=0; last_candidate uuid;
+ event_id uuid; minted jsonb; nid uuid; emits integer:=0; slug_value text; target jsonb; link text;
 begin
-  for patch in select * from (values
-    ($old$ops.sweep_subject_watches(p_now timestamp with time zone, p_limit integer DEFAULT 50)$old$,
-      $new$ops.deliver_subject_watches(p_now timestamp with time zone, p_limit integer, p_engine boolean)$new$),
-    ($old$where c.watch_generation_id=s.id and c.disposition='pending'$old$,
-      'where '||source_filter||' and c.watch_generation_id=s.id and c.disposition=''pending'''),
-    ($old$update ops.subject_watch_change set disposition='suppressed' where watch_generation_id=w.id and disposition='pending';$old$,
-      'update ops.subject_watch_change c set disposition=''suppressed'' where '||source_filter||
-      ' and watch_generation_id=w.id and disposition=''pending'';'),
-    ($old$update ops.subject_watch_change c set disposition='suppressed'
-       where c.watch_generation_id=w.id$old$, $new$if p_engine then
+ if p_now is null or p_limit is null or p_limit not between 1 and 50 then raise exception 'watch_batch_limit'; end if;
+ -- Serialize cursor progress without waiting behind another sweep.
+ if not pg_try_advisory_xact_lock(hashtextextended('subject-watch-sweep-cursor',0)) then
+   return jsonb_build_object('scanned',0,'emitted',0);
+ end if;
+ select after_watch_id into cursor_id from ops.subject_watch_sweep where singleton;
+ insert into public.event(occurred_at,actor_id,verb,subject_type,subject_id,cause,new_value)
+ select p_now,id,'subject-watch-scheduled-sweep','system',gen_random_uuid(),'automation_job','{}'
+ from public.actor where slug='system' and active returning id into event_id;
+ if event_id is null then raise exception 'watch_scheduler_actor_unavailable'; end if;
+ for w in
+   select s.* from (
+     select id,actor_id,subject_type,subject_id,1 policy_version,'watching' state,
+       '{"change_kinds":["reply_arrived","lease_threshold_crossed"],"lease_threshold_days":[90,30,7,0],"lease_threshold_months":[24,12,6],"include_self_changes":true}'::jsonb policy from ops.subject_watch
+     union all select id,actor_id,subject_type,subject_id,lifecycle_version,state,policy from ops.subject_watch_v2_subscription
+   ) s join ops.subject_watch_delivery q on q.watch_id=s.id
+   where s.state='watching' and q.failure_count<2 and (q.last_evaluated_at is null or q.last_evaluated_at<=p_now)
+     and (cursor_id is null or s.id>cursor_id) and (q.next_evaluation_at<=p_now or exists(select 1 from ops.subject_watch_change c
+     where c.watch_generation_id=s.id and c.disposition='pending' and c.eligible_at<=p_now and c.failure_count<2
+       and (p_engine_enabled or split_part(c.semantic_key,':',1) not in ('engine','engine-reply'))))
+   order by s.id limit p_limit
+ loop
+   candidate_count:=candidate_count+1;
+   last_candidate:=w.id;
+   if not pg_try_advisory_xact_lock(hashtextextended(w.actor_id::text||':'||w.subject_type||':'||w.subject_id::text,0)) then continue; end if;
+   select * into st from ops.subject_watch_delivery where watch_id=w.id for update skip locked;
+   if not found or st.failure_count>=2 or st.last_evaluated_at>p_now then continue; end if;
+   -- Refresh lifecycle and policy after acquiring the same lock as unwatch.
+   if exists(select 1 from ops.subject_watch_v2_subscription where id=w.id) then
+     select state,policy,lifecycle_version into w.state,w.policy,w.policy_version from ops.subject_watch_v2_subscription where id=w.id;
+   elsif not exists(select 1 from ops.subject_watch where id=w.id) then w.state:='removed'; end if;
+   begin
+     select slug into slug_value from public.actor where id=w.actor_id and active and kind='human' and slug in ('joe','dell');
+     target:=ops.subject_watch_target(w.subject_type,w.subject_id);
+     if w.state<>'watching' or slug_value is null or target is null or
+       (w.subject_type='lease' and exists(select 1 from public.lease where id=w.subject_id and status='superseded')) then
+       update ops.subject_watch_change c set disposition='suppressed' where c.watch_generation_id=w.id and c.disposition='pending'
+         and (p_engine_enabled or split_part(c.semantic_key,':',1) not in ('engine','engine-reply'));
+       if w.state='watching' and (slug_value is null or target is null) then
+         update ops.subject_watch_v2_subscription set state='paused',lifecycle_version=lifecycle_version+1 where id=w.id and state='watching';
+       end if;
+     else
+       pol:=w.policy;
+       keys:=ops.subject_watch_clock_keys(w.subject_type,w.subject_id,pol,p_now);
+       select coalesce(jsonb_agg(value order by ordinality),'[]') into fresh from jsonb_array_elements(keys) with ordinality where not st.clock_seen @> jsonb_build_array(value);
+       if jsonb_array_length(fresh)>0 then
+         -- The last crossing is the most urgent; cover skipped windows quietly.
+         insert into ops.subject_watch_change(watch_generation_id,actor_id,subject_type,subject_id,semantic_key,source_event_id,
+           source_revision,policy_version,category,changes,evidence_refs,occurred_at,eligible_at)
+         values(w.id,w.actor_id,w.subject_type,w.subject_id,'clock:'||(fresh->>-1),event_id,(target->>'version')::integer,
+           w.policy_version,'lease_threshold_crossed',jsonb_build_array(jsonb_build_object('field','lease_threshold','before',false,'after',jsonb_build_object('threshold',fresh->>-1,'crossed_count',jsonb_array_length(fresh)),'reason_code','value_changed')),
+           jsonb_build_array(jsonb_build_object('event_id',event_id,'activity_id',null)),p_now,p_now)
+         on conflict(watch_generation_id,semantic_key) do nothing;
+       end if;
+       update ops.subject_watch_delivery set clock_seen=keys,last_evaluated_at=p_now where watch_id=w.id;
+       if p_engine_enabled then
          delete from ops.subject_watch_change c where c.watch_generation_id=w.id and c.disposition='pending'
            and case when c.semantic_key like 'engine-reply:%' then
              not pol->'change_kinds' ? 'reply_arrived'
@@ -158,24 +205,75 @@ begin
            else false end;
        end if;
        update ops.subject_watch_change c set disposition='suppressed'
-       where $new$||source_filter||' and c.watch_generation_id=w.id'),
-    ($old$or c.category='reply_arrived' and (not pol$old$,
-      $new$or c.category='reply_arrived' and c.semantic_key not like 'engine-reply:%' and (not pol$new$),
-    ($old$where a.email_source->>'mailbox_owner'=slug_value$old$,
-      $new$where a.email_source->>'mailbox_owner'=slug_value and (not p_engine or a.deal_id=w.subject_id)$new$),
-    ($old$select id from ops.subject_watch_change where watch_generation_id=w.id and disposition='pending'$old$,
-      'select id from ops.subject_watch_change c where '||source_filter||
-      ' and watch_generation_id=w.id and disposition=''pending'''||$new$
+       where c.watch_generation_id=w.id and c.disposition='pending'
+         and (p_engine_enabled or split_part(c.semantic_key,':',1) not in ('engine','engine-reply')) and (
+         c.category='lease_threshold_crossed' and (not pol->'change_kinds' ? 'lease_threshold_crossed'
+           or not keys ? substring(c.semantic_key from 7))
+         or c.category='reply_arrived' and c.semantic_key not like 'engine-reply:%' and (not pol->'change_kinds' ? 'reply_arrived'
+           or not exists(select 1 from jsonb_array_elements(c.evidence_refs) refs(value)
+             join public.activity a on a.id=(refs.value->>'activity_id')::uuid
+             join public.event e on e.id=(refs.value->>'event_id')::uuid
+             where a.email_source->>'mailbox_owner'=slug_value and (not p_engine_enabled or a.deal_id=w.subject_id)
+               and coalesce(a.email_context#>>'{lifecycle,state}','live')='live'
+               and (coalesce((pol->>'include_self_changes')::boolean,true)
+                 or e.actor_id is distinct from w.actor_id and e.sponsoring_human_slug is distinct from slug_value)))
+         or coalesce((pol->>'include_self_changes')::boolean,true)=false and c.category='material_changed'
+           and not exists(select 1 from jsonb_array_elements(c.evidence_refs) refs(value)
+             join public.event e on e.id=(refs.value->>'event_id')::uuid
+             where e.actor_id is distinct from w.actor_id and e.sponsoring_human_slug is distinct from slug_value));
+       begin
+       if st.last_emitted_at is null or st.last_emitted_at<=p_now-interval '5 minutes' then
+         select array_agg(id order by id) into ids from (
+           select id from ops.subject_watch_change c where watch_generation_id=w.id and disposition='pending'
+             and eligible_at<=p_now and failure_count<2
+             and (p_engine_enabled or split_part(c.semantic_key,':',1) not in ('engine','engine-reply'))
              and case when c.semantic_key like 'engine-reply:%' then
                ops.subject_watch_engine_reply_live(split_part(c.semantic_key,':',2)::uuid,w.subject_id,slug_value)
-             else true end$new$)
-  ) p(before,after) loop
-    if strpos(body,patch.before)=0 then raise exception 'watch_delivery_definition_changed'; end if;
-    body:=replace(body,patch.before,patch.after);
-  end loop;
-  execute body;
-end $delivery$;
-
+             else true end
+           order by id limit 100 for update skip locked) pending;
+         if cardinality(ids)>0 then
+           if w.subject_type='deal' then link:='/deals?deal='||w.subject_id;
+           else select '/clients?record='||client_id into link from public.lease where id=w.subject_id; end if;
+           minted:=ops.mint_notification('event',event_id,w.subject_type,w.subject_id::text,
+             case when cardinality(ids)=1 and exists(select 1 from ops.subject_watch_change where id=ids[1] and category='lease_threshold_crossed')
+               then 'A watched lease reached a reminder date'
+               when cardinality(ids)=1 and exists(select 1 from ops.subject_watch_change where id=ids[1] and category='reply_arrived')
+               then 'Reply received on a watched deal'
+               else 'Watched '||w.subject_type||' has '||cardinality(ids)||' updates to review' end,'action_required',link,
+             'subject-watch:'||w.id||':pending:'||ids[1],slug_value,false,false);
+           nid:=(minted->>'notification_id')::uuid;
+           if nid is null then raise exception 'watch_notification_not_minted'; end if;
+           update ops.subject_watch_change set disposition='emitted',notification_id=nid where id=any(ids);
+           update ops.subject_watch_delivery set last_emitted_at=p_now where watch_id=w.id;
+           emits:=emits+1;
+         end if;
+       end if;
+       exception when sqlstate '57014' then
+         update ops.subject_watch_delivery set failure_count=least(2,failure_count+1),failure_code=sqlstate,
+           next_evaluation_at=p_now+interval '5 minutes' where watch_id=w.id;
+         continue;
+       when others then
+         update ops.subject_watch_delivery set failure_count=least(2,failure_count+1),failure_code=sqlstate,
+           next_evaluation_at=p_now+interval '5 minutes' where watch_id=w.id;
+         continue;
+       end;
+     end if;
+     update ops.subject_watch_delivery set last_success_at=p_now,failure_count=0,failure_code=null,
+       next_evaluation_at=((p_now at time zone 'America/Chicago')::date+1)::timestamp at time zone 'America/Chicago' where watch_id=w.id;
+   exception when sqlstate '57014' then
+     update ops.subject_watch_delivery set failure_count=least(2,failure_count+1),failure_code=sqlstate,
+       next_evaluation_at=p_now+interval '5 minutes' where watch_id=w.id;
+   when others then
+     update ops.subject_watch_delivery set failure_count=least(2,failure_count+1),failure_code=sqlstate,
+       next_evaluation_at=p_now+interval '5 minutes' where watch_id=w.id;
+   end;
+ end loop;
+ insert into ops.subject_watch_sweep(singleton,after_watch_id,scheduled_at,completed_at,event_id,scanned,emitted)
+ values(true,case when candidate_count=p_limit then last_candidate else null end,p_now,clock_timestamp(),event_id,candidate_count,emits) on conflict(singleton) do update set
+ after_watch_id=excluded.after_watch_id,scheduled_at=excluded.scheduled_at,completed_at=excluded.completed_at,event_id=excluded.event_id,scanned=excluded.scanned,emitted=excluded.emitted
+ where excluded.scheduled_at>=ops.subject_watch_sweep.scheduled_at;
+ return jsonb_build_object('scanned',candidate_count,'emitted',emits,'event_id',event_id);
+end $$;
 revoke all on function ops.deliver_subject_watches(timestamptz,integer,boolean)
   from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader;
 
@@ -185,26 +283,14 @@ begin
   return ops.deliver_subject_watches(p_now,p_limit,false);
 end $$;
 
--- A CARR reply can take over an undelivered receipt. Both capture paths hold the watch lock.
+-- Deferred CARR capture holds the same watch lock as scheduled delivery.
 do $carr_reply$
 declare capture text:=pg_get_functiondef('ops.flush_subject_watch_changes()'::regprocedure);
-  immediate text:=pg_get_functiondef('ops.consume_subject_watch_event(uuid)'::regprocedure);
-  capture_match text:='has_reply:=true;';
-  immediate_match text:=$old$order by sw.id limit 2 for update of sw
-        loop
-          perform ops.mint_notification$old$;
+  anchor text:='has_reply:=true;';
 begin
-  if strpos(capture,capture_match)=0 or strpos(immediate,immediate_match)=0 then
-    raise exception 'watch_carr_reply_definition_changed';
-  end if;
-  execute replace(capture,capture_match,$new$if not ops.claim_subject_watch_carr_reply(w.id,reply.id) then continue; end if;
+  if strpos(capture,anchor)=0 then raise exception 'watch_carr_reply_definition_changed'; end if;
+  execute replace(capture,anchor,$new$if not ops.claim_subject_watch_carr_reply(w.id,reply.id) then continue; end if;
       has_reply:=true;$new$);
-  execute replace(immediate,immediate_match,$new$order by sw.id limit 2
-        loop
-          perform pg_advisory_xact_lock(hashtextextended(s.actor_id::text||':deal:'||d.id::text,0));
-          perform from ops.subject_watch where id=s.id for update;
-          if not found or not ops.claim_subject_watch_carr_reply(s.id,reply.id) then continue; end if;
-          perform ops.mint_notification$new$);
 end $carr_reply$;
 
 create function ops.sweep_subject_watches(p_now timestamptz,p_limit integer,p_engine jsonb) returns jsonb
