@@ -129,6 +129,11 @@ class CalendarAgendaTest(unittest.TestCase):
         self.assertEqual(actual['items'], expected['items'])
         self.assertEqual(counts['calendar_agenda_trimmed'], 1)
 
+    def test_recovery_cannot_duplicate_a_legacy_store_id_under_a_different_goid(self):
+        original = event(id=7)
+        recovered = event(2, id=7, subject='Recovered', legacy_subject=None)
+        self.assertEqual(self.project([original, recovered]), self.project([original]))
+
     def test_ended_meetings_use_the_central_midnight_boundary(self):
         snapshot, _ = self.project([
             event(1, hours=-13, subject='Previous day'),

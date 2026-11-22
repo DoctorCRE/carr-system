@@ -3,6 +3,7 @@
 from collections import Counter, defaultdict
 from contextlib import closing
 from datetime import datetime, timezone
+from hashlib import sha256
 from itertools import product
 import os
 import runpy
@@ -28,6 +29,11 @@ BASELINE_AGENDA = os.environ.get('CARR_CALENDAR_AGENDA_BASELINE')
 NOW = 1_793_000_000
 SETTINGS = SimpleNamespace(account='ada@example.test', timezone=ZoneInfo('America/Chicago'))
 UNREADABLE = 'Meeting title unreadable'
+ENDED = NOW - 7_200
+
+
+def meeting_key(goid):
+    return sha256(goid.encode()).hexdigest()[:16]
 
 
 def candidate(attendees=(), start=NOW, metadata=0, response=0, *,
@@ -108,39 +114,49 @@ class CalendarExportTests(unittest.TestCase):
             if legacy is not None:
                 self.assertIn(title, (None, legacy))
                 actual[copy, legacy] += 1
-        self.assertGreaterEqual(expected.total(), minimum)
+        self.assertGreaterEqual(sum(expected.values()), minimum)
         self.assertEqual(actual, expected, 'main-decoded copy evidence changed')
 
     def assert_agenda_matches(self, baseline, target, *, per_meeting=False):
         main_agenda = runpy.run_path(BASELINE_AGENDA)['agenda']
         main_meta, _, main_rows = _load(baseline)
         new_meta, _, new_rows = _load(target)
-        new_rows = [row for row in new_rows if row['legacy_subject'] is not None]
-
+        cases = [('batch', main_rows, new_rows, main_meta, new_meta)]
         if per_meeting:
             groups = defaultdict(lambda: ([], []))
             for i, rows in enumerate((main_rows, new_rows)):
                 for row in rows:
                     groups[row['goid']][i].append(row)
-            cases = [(key, left, right, {}, {}) for key, (left, right) in groups.items()]
-        else:
-            cases = [('fixture', main_rows, new_rows, main_meta, new_meta)]
+            self.assertGreaterEqual(len(groups), 3_000)
+            cases.extend((key, left, right, {}, {}) for key, (left, right) in groups.items())
 
         now = datetime.fromtimestamp(NOW, timezone.utc)
         for key, left, right, left_meta, right_meta in cases:
             expected, main_counts = main_agenda(left, left_meta, SETTINGS, now)
             actual, new_counts = agenda(right, right_meta, SETTINGS, now)
-            unreadable = {(row['goid'], row['start_unix']) for row in right if row['subject_undecoded']}
-            self.assertEqual(new_counts.pop('calendar_agenda_undecoded'),
-                             main_counts.pop('calendar_agenda_undecoded') + len(unreadable), key)
-            self.assertEqual(new_counts, main_counts, key)
-            for output in (expected, actual):
-                output['warnings'] = [warning for warning in output['warnings'] if warning['code'] != 'undecoded']
+            if per_meeting and key == 'batch':
+                self.assertGreater(main_counts['calendar_follow_up_trimmed'], 0)
+                self.assertGreater(main_counts['calendar_agenda_trimmed'], 0)
+            main_goids = {row['goid'] for row in left}
+            legacy_ids = {row['id'] for row in right if row['legacy_subject'] is not None}
+            recovered_keys = {meeting_key(row['goid']) for row in right
+                              if row['legacy_subject'] is None and row['goid'] not in main_goids
+                              and row['id'] not in legacy_ids}
             for section in ('items', 'follow_up_reviews'):
-                for before, after in zip(expected[section], actual[section]):
-                    if after['title'] == UNREADABLE:
-                        before['title'] = UNREADABLE
-            self.assertEqual(actual, expected, key)
+                old_keys = {row['key'] for row in expected[section]}
+                kept = [row for row in actual[section] if row['key'] in old_keys]
+                self.assertEqual([r['key'] for r in kept], [r['key'] for r in expected[section]],
+                                 f'{key}: main {section} changed membership or order')
+                for before, after in zip(expected[section], kept):
+                    self.assertEqual(after, before | {'title': after['title']}
+                                     if after['title'] == UNREADABLE else before, key)
+                self.assertLessEqual({row['key'] for row in actual[section]} - old_keys, recovered_keys, key)
+            for name in ('calendar_agenda_canceled', 'calendar_agenda_conflicts',
+                         'calendar_agenda_other_accounts', 'calendar_agenda_time_changed',
+                         'calendar_agenda_recurring', 'calendar_agenda_trimmed', 'calendar_follow_up_trimmed'):
+                self.assertGreaterEqual(new_counts[name], main_counts[name], (key, name))
+                if not recovered_keys:
+                    self.assertEqual(new_counts[name], main_counts[name], (key, name))
 
     @staticmethod
     def evidence(target, subject_columns):
@@ -156,7 +172,7 @@ class CalendarExportTests(unittest.TestCase):
     @unittest.skipUnless(BASELINE_BINARY, 'requires the main decoder binary')
     def test_main_copy_evidence_survives_layout_variants(self):
         formats = product(
-            (('America/Chicago', 'US/Central'), ('', ''), ()),
+            (('America/Chicago', 'US/Central'), ('', ''), (), ('Asia/Tokyo', 'Tokyo Standard Time')),
             ((), ('Extra text before notes',)),
             ((), ('Extra text after notes',)),
             ((), ('Extra text after subject',), ('Repeated label', 'Repeated label')),
@@ -167,7 +183,8 @@ class CalendarExportTests(unittest.TestCase):
         )
         entries = []
         for i, (zones, before, after, trailer, notes, first, subject, attendees) in enumerate(formats):
-            timing = dict(start=NOW - (i % 4) * 7_200, identity=i)
+            offset = (0, 1, 2, 3, 1, 1, 2, 3)[i % 8]
+            timing = dict(start=NOW - offset * 7_200, identity=i)
             entries.append(candidate(
                 [('Bo Example', 'bo@example.test')] if attendees == 'present' else (),
                 **timing, zones=zones, before_notes=before, after_notes=after,
@@ -180,11 +197,18 @@ class CalendarExportTests(unittest.TestCase):
                 entries.extend(candidate(**timing, subject=title, notes=title) for title in ('Planning', 'Review'))
             if i % 4 == 3:
                 entries.extend(candidate(**timing, subject=title) for title in ('Planning', 'Review'))
+            recovered = (
+                dict(subject='会議'), dict(subject='会議', first_subject='Canceled: 会議'),
+                dict(subject='会議', organizer='bo@example.test'),
+                dict(subject='会議', identity=i + 10_000),
+                dict(subject='会議', start=timing['start'] + 1),
+            )[i % 5]
+            entries.append(candidate(**(timing | recovered)))
         with tempfile.TemporaryDirectory() as tmp:
             target = self.export(Path(tmp), entries, generated=True)
             with closing(sqlite3.connect(target)) as db:
                 identities = db.execute("SELECT value FROM meta WHERE key = 'event_identities'").fetchone()
-                self.assertEqual(identities, (i + 1,))
+                self.assertEqual(identities, (i + 1 + sum(j % 5 in (3, 4) for j in range(i + 1)),))
 
     def project(self, *entries):
         with tempfile.TemporaryDirectory() as tmp:
@@ -240,49 +264,66 @@ class CalendarExportTests(unittest.TestCase):
         self.assertEqual(counts['calendar_agenda_other_accounts'], 1)
         self.assertEqual(snapshot['items'], [])
 
-    def test_recovered_address_free_duplicate_blocks_the_account_copy(self):
-        original = candidate(subject='Plan')
-        duplicate = candidate(subject='会議 📅', organizer='')
-        snapshot, counts = self.project(original, duplicate)
-        self.assertEqual(counts['calendar_agenda_undecoded'], 0)
-        self.assertEqual(counts['calendar_agenda_other_accounts'], 1)
-        self.assertEqual(snapshot['items'], [])
+    def test_recovered_copies_cannot_change_a_main_meeting_or_review(self):
+        original = candidate(subject='Planning', start=ENDED)
+        expected, baseline = self.project(original)
+        self.assertEqual(len(expected['items']), 1)
+        self.assertEqual(len(expected['follow_up_reviews']), 1)
+        for fields in (
+            dict(subject='会議 📅'), dict(subject='会議', first_subject='Cancelled: 会議'),
+            dict(subject='会議', organizer='bo@example.test'), dict(subject='会議', organizer=''),
+            dict(first_subject='Planning', subject='Review', organizer=''),
+            dict(first_subject='Planning', subject='Review', organizer='bo@example.test'),
+            dict(first_subject='\ud800', subject='Review', organizer='bo@example.test'),
+            dict(subject='会議', start=ENDED + 3600),
+            dict(subject='会議', attendees=[('Bo Example', 'bo@example.test')]),
+        ):
+            with self.subTest(fields=fields):
+                duplicate = candidate(**(dict(start=ENDED) | fields))
+                snapshot, counts = self.project(original, duplicate)
+                for section in ('items', 'follow_up_reviews'):
+                    self.assertEqual(snapshot[section], expected[section])
+                for suffix in ('canceled', 'conflicts', 'other_accounts', 'time_changed'):
+                    self.assertEqual(counts['calendar_agenda_' + suffix], baseline['calendar_agenda_' + suffix])
 
-    def test_foreign_duplicate_still_blocks_the_account_copy(self):
+    def test_recovered_occurrence_cannot_replace_a_main_series_master(self):
+        main = candidate(subject='Planning')
+        recovered = candidate(subject='会議', instance='07EA0A1B')
+        snapshot, _ = self.project(main, recovered)
+        self.assertEqual({(row['title'], row['recurring']) for row in snapshot['items']},
+                         {('Planning', False), ('会議', True)})
+
+    def test_recovered_series_master_stays_hidden_when_main_has_an_occurrence(self):
+        main = candidate(subject='Planning', instance='07EA0A1B')
+        recovered = candidate(subject='会議')
+        snapshot, _ = self.project(main, recovered)
+        self.assertEqual([(row['title'], row['recurring']) for row in snapshot['items']],
+                         [('Planning', True)])
+
+    def test_winning_recovered_copy_keeps_its_own_title_state(self):
         snapshot, counts = self.project(
-            candidate(), candidate(subject='会議 📅', organizer='bo@example.test'))
-        self.assertEqual(counts['calendar_agenda_undecoded'], 0)
-        self.assertEqual(counts['calendar_agenda_other_accounts'], 1)
-        self.assertEqual(snapshot['items'], [])
-
-    def test_foreign_duplicate_blocks_even_when_its_subject_is_undecoded(self):
-        original = candidate(subject='Plan')
-        for first_subject in ('Planning', '\ud800'):
-            for evidence in ({'organizer': 'bo@example.test'},
-                             {'organizer': '', 'attendees': [('Bo Example', 'bo@example.test')]}):
-                with self.subTest(first_subject=first_subject, evidence=evidence):
-                    snapshot, counts = self.project(
-                        original, candidate(first_subject=first_subject, subject='Review', **evidence))
-                    self.assertEqual(snapshot['items'], [])
-                    self.assertEqual(counts['calendar_agenda_other_accounts'], 1)
-                    self.assertIn({'code': 'undecoded', 'count': 1}, snapshot['warnings'])
-
-    def test_recovered_address_free_duplicate_blocks_with_undecoded_title(self):
-        snapshot, counts = self.project(
-            candidate(subject='Plan'),
-            candidate(first_subject='Planning', subject='Review', organizer=''))
-        self.assertEqual(counts['calendar_agenda_undecoded'], 1)
-        self.assertEqual(counts['calendar_agenda_other_accounts'], 1)
-        self.assertEqual(snapshot['items'], [])
-
-    def test_undecoded_winning_copy_keeps_its_own_title_state(self):
-        snapshot, counts = self.project(
-            candidate(subject='A readable title'),
+            candidate(subject='会議'),
             candidate([('Bo Example', 'bo@example.test')], first_subject='Planning', subject='Review'))
         self.assertEqual(counts['calendar_agenda_undecoded'], 1)
         [item] = snapshot['items']
-        self.assertEqual(item['title'], 'Meeting title unreadable')
+        self.assertEqual(item['title'], UNREADABLE)
         self.assertEqual(item['attendee_count'], 1)
+
+    def test_matching_trailing_text_cannot_complete_a_subject_after_a_fake_zone(self):
+        snapshot, _ = self.project(candidate(zones=(), notes=None,
+                                             first_subject='P' + 'x' * 40 + 'Review',
+                                             subject='Planning', after_subject=('Review',)))
+        self.assertEqual([item['title'] for item in snapshot['items']], [UNREADABLE])
+
+    def test_masking_at_the_byte_cap_keeps_independently_readable_meetings(self):
+        rows = [candidate(identity=i, subject='Plan', omit_attendee_count=True) for i in range(549)]
+        rows[1] = candidate(identity=1, start=NOW - 1, subject='Plan' + 'z' * 290, omit_attendee_count=True)
+        expected, _ = self.project(*rows)
+        rows[0] = candidate(identity=0, subject='Plan', notes='Plan', omit_attendee_count=True)
+        snapshot, counts = self.project(*rows)
+        self.assertEqual([row['key'] for row in snapshot['items']], [row['key'] for row in expected['items']])
+        self.assertEqual(counts['calendar_agenda_trimmed'], 0)
+        self.assertEqual(sum(row['title'] == UNREADABLE for row in snapshot['items']), 1)
 
     def test_conflicting_subject_slots_count_as_undecoded(self):
         snapshot, counts = self.project(candidate(

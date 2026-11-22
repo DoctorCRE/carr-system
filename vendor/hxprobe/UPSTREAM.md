@@ -218,7 +218,8 @@ The legacy decoder supplies the schedule, organizer, attendees, cancellation,
 and private `events.legacy_subject` for each copy it can read. The agenda uses
 that subject as evidence for its existing rules. The display title requires
 the known seven-field layout and two matching subject slots, with the
-cancellation prefix accounted for. A nonempty title must differ from the
+cancellation prefix accounted for. The time-zone probe checks the two
+length-prefixed fields as text before using them to locate the first slot. A nonempty title must differ from the
 other text fields, time zones, and attendee names and addresses. Ambiguous
 copies set `events.subject_undecoded` and keep their other evidence.
 
@@ -234,13 +235,15 @@ appointment added one GOID/start identity and, before this, no decoded candidate
 Intake stores opaque candidate hashes and provisional schedule timestamps in its
 private state. Separately it publishes the next fourteen days of meetings as a
 display snapshot (board `calendar-agenda`) for the morning brief, with no notes
-or bodies. Each stored copy must name the configured account. A recovered copy
-with no participant addresses or with only other participants blocks the
-meeting under that same rule. Cancellation applies across admitted copies.
-The agenda chooses the row using the private copy evidence and displays
-`Meeting title unreadable` when the selected title could not be confirmed. The
-undecoded warning counts each GOID and start once if any copy has an unreadable
-title or if the decoder could export no copy.
+or bodies. The agenda selects meetings and follow-up reviews from the copies
+the legacy decoder could read, using the original evidence, ordering and
+payload budget. Recovered copies with the same store ID or GOID are ignored.
+Recovered series masters are also ignored when the legacy decoder found an
+occurrence. Other recovered copies can fill the remaining space. Account and
+cancellation checks apply within each group of copies. Once selection is
+complete, the agenda displays `Meeting title unreadable` for an unconfirmed
+title. The undecoded warning counts each GOID and start once if a considered
+copy has an unreadable title or no considered copy decoded.
 
 Observed on the 2026-10-21 study copies (Joe's shared profile, not yet the TEST
 account): each recurring occurrence is a separate object whose Global Object ID

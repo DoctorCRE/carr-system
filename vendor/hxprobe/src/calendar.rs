@@ -265,8 +265,9 @@ fn skip_zones(mut bytes: &[u8]) -> Option<([&[u8]; 2], &[u8])> {
     for zone in &mut zones {
         let (&len, rest) = bytes.split_first()?;
         (*zone, bytes) = rest.split_at_checked(usize::from(len))?;
-        let words = utf16(zone);
-        if len % 2 != 0 || words.contains(&0) || String::from_utf16(&words).is_err() {
+        let text = String::from_utf16(&utf16(zone)).ok()?;
+        // A UTF-16 subject can begin with a byte that looks like a zone length.
+        if len % 2 != 0 || !is_text(&text) || text.chars().any(char::is_control) {
             return None;
         }
     }
