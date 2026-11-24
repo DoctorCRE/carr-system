@@ -1,0 +1,30 @@
+name: Codey handoff
+
+on:
+  issues:
+    types: [labeled]
+
+permissions: {}
+
+jobs:
+  notify:
+    if: github.event.label.name == 'codey'
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Notify Grok Bot
+        env:
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          CODEY_WEBHOOK_URL: ${{ secrets.CODEY_WEBHOOK_URL }}
+          CODEY_WEBHOOK_KEY: ${{ secrets.CODEY_WEBHOOK_KEY }}
+        run: |
+          jq -n --arg repo "$REPO" --argjson issue "$ISSUE" --arg url "$ISSUE_URL" \
+            '{repo: $repo, issue: $issue, url: $url}' |
+            curl -fsS -m 8 -X POST \
+              -H 'Content-Type: application/json' \
+              -H "Authorization: Bearer $CODEY_WEBHOOK_KEY" \
+              -H "X-Automation-Key: $CODEY_WEBHOOK_KEY" \
+              --data-binary @- \
+              "$CODEY_WEBHOOK_URL"
