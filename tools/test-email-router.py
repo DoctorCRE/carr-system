@@ -507,6 +507,15 @@ class RouterTests(unittest.TestCase):
             self.assertEqual(email_router.step(ROOT, SimpleNamespace(model='sonnet', account='broker@example.test')), 0)
         self.assertEqual(seen['model'], 'sonnet')
 
+    def test_an_owed_reply_is_asked_for_only_as_a_reply_draft(self):
+        with patch.object(email_router.model_call, 'ask', return_value={'proposals': []}) as model:
+            email_router.ask_model(email('e2', ASK), NOW.date(), 'synthetic-model')
+        system = model.call_args.kwargs['system_prompt']
+        self.assertIn('next_step only for a concrete ask of the broker or a commitment the broker owes '
+                      'other than replying to this email', system)
+        self.assertIn('When the broker owes a reply, propose it only as reply_draft, never as a next_step', system)
+        self.assertNotIn('also propose reply_draft', system)
+
     def test_the_production_transport_names_only_tool_refusals(self):
         def answer(stderr):
             return lambda *args, **kwargs: subprocess.CompletedProcess([], 1, '', stderr)
