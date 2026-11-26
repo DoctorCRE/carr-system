@@ -129,6 +129,35 @@ class DryRunTest(unittest.TestCase):
         self.assertIn('not the live Outlook profile', stderr)
         self.assertFalse(out.exists())
 
+    def _one_candidate(self, n, key, **fields):
+        out = self.dir / 'private/load.sql'
+        out.parent.mkdir()
+        with self.candidates.open('w', newline='') as handle:
+            writer = csv.DictWriter(handle, CANDIDATE_COLUMNS)
+            writer.writeheader()
+            writer.writerow(candidate(n, key, needs='pair', **fields))
+        return out
+
+    def test_matching_bracketed_message_ids_are_loaded(self):
+        out = self._one_candidate(12, '105', message_id='<five@example.test>')
+        code, stdout, _ = self.run_main(out)
+        self.assertEqual(code, 0)
+        self.assertIn('verified=1', stdout)
+        self.assertNotIn('message_id_differs', stdout)
+        load = out.read_text()
+        self.assertIn("'00000000-0000-4000-8000-000000000012'", load)
+        self.assertIn("'five@example.test'", load)
+
+    def test_candidate_message_id_without_a_store_id_is_omitted(self):
+        out = self._one_candidate(13, '102', message_id='<five@example.test>')
+        code, stdout, _ = self.run_main(out)
+        self.assertEqual(code, 0)
+        self.assertIn('message_id_missing=1', stdout)
+        self.assertNotIn('verified', stdout)
+        load = out.read_text()
+        self.assertNotIn('000000000013', load)
+        self.assertNotIn('null', load)
+
 
 if __name__ == '__main__':
     unittest.main()
