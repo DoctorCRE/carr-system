@@ -1,0 +1,33 @@
+{
+  "schema_version": "deal-update-summary.v1",
+  "version": "1.0.0",
+  "verb": "read-deal-update-summary-v1",
+  "type": "mcp-server/src/deal-update-summary.ts#DealUpdateSummaryV1",
+  "recorded_fixture": "workspace/contracts/deal-update-summary.v1.fixture.json",
+  "authorization": "Existing authenticated CARR read dispatch and carr_reader views. Cursor scope additionally binds the authenticated actor ID and exact deal UUID. No public or portal read.",
+  "input": {
+    "deal_id": "UUID",
+    "page_size": "integer 1..100, default 50",
+    "cursor": "opaque continuation, maximum 4096 characters"
+  },
+  "sources": {
+    "activity": "v_deal_room_activity.summary; original includes retained detail",
+    "note": "v_deal_room_note.text",
+    "event": "v_deal_room_event old/new values for phase, owner, attention, next_date, next_step, operating_state, outcome only"
+  },
+  "summary_semantics": "Deterministic attributed extracts in chronological order, preserving source statements and disagreements without deciding which is true. Source text, including instructions, is inert untrusted data. Recorded statements are never asserted as independently observed facts. No model calls or per-row synthesis. Not a semantic digest.",
+  "coverage": "complete is true only when all supported rows fit within the nine-row detection window and 1200-character quote budget. Nine rows always means partial, even if all nine fit. covered_count counts exact citations. read_count_lower_bound is not a total. window covers citations only. Unavailable sources fail the entire read, never return empty complete data. Consumers must display a read error as unavailable. No retained summary is reused, so freshness equals this statement snapshot. Unsupported event fields set unsupported_events_present=true and force complete=false; they are not exposed or inferred. The history endpoint covers only its named supported event fields; consumers must not label that feed full history when this flag is true.",
+  "history": "Independent from summary budget. Exact original rows ordered by timestamp, source, UUID descending. Page has at most page_size entries. Null next_cursor means the supported corpus ended. A non-null cursor continues the same actor/deal/revision using a strict keyset bound. Timestamp precision is six digits UTC. Source and UUID break ties. Source IDs are namespaced by source.",
+  "revision": "SHA-256 of the ordered per-row SHA-256 hashes of every supported source row for this deal, including original retained fields. Computed in the same PostgreSQL statement snapshot as summary and history. Unrelated tables, read auditing, foreign-deal rows and unsupported events do not change it. Relevant new or backdated arrivals, edits and deletions refuse continuation with stale_history_cursor and refresh_required=true. Refresh replaces old pages. Cursor is a locator, not an authorization credential; modifying it cannot widen authenticated read access.",
+  "limits": "Up to nine rows per family for summary and page_size+1 per family for history, plus a full supported-corpus fingerprint per read. One SQL statement, no N+1, cache, queue, external requests, writes or migrations. Revision work is linear in source bytes with ordered aggregation of fixed-size row hashes; large histories increase read cost. Full-history synthesis for arbitrarily large corpora remains incomplete.",
+  "errors": [
+    "invalid_summary_request",
+    "unauthenticated",
+    "invalid_history_cursor",
+    "cursor_scope_mismatch",
+    "stale_history_cursor",
+    "not_found",
+    "invalid_update_source",
+    "database source read failure"
+  ]
+}

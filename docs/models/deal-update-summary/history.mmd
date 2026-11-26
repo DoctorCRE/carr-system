@@ -1,0 +1,11 @@
+stateDiagram-v2
+  [*] --> Reading
+  Reading --> Ready: sources read
+  Reading --> Unavailable: source fails
+  Ready --> Ready: continue after audit or unrelated write
+  Ready --> Stale: supported source content changes
+  Ready --> Refused: actor or deal changes
+  Stale --> Reading: refresh
+  Unavailable --> Reading: retry
+  Refused --> Reading: authorized fresh read
+  %% never Ready -> Unavailable: failed source is labeled complete
