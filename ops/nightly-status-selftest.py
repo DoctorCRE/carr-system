@@ -23,8 +23,12 @@ class NightlyStatusTests(unittest.TestCase):
         python = self.root / '.venv/bin/python'
         python.parent.mkdir(parents=True)
         python.write_text('#!/bin/zsh\n'
-                          '[ "$*" = "tools/deal-checklist-reminders.py --check-nightly-switch" ] &&\n'
-                          '  [ -f "$HOME/checklist-enabled" ]\n')
+                          'case "$*" in\n'
+                          '  "tools/deal-checklist-reminders.py --check-nightly-switch") [ -f "$HOME/checklist-enabled" ] ;;\n'
+                          '  "tools/nightly-deal-jobs.py workflow-suggestions --check-nightly-switch") [ -f "$HOME/workflow-suggestions-enabled" ] ;;\n'
+                          '  "tools/nightly-deal-jobs.py attention-alerts --check-nightly-switch") [ -f "$HOME/attention-alerts-enabled" ] ;;\n'
+                          '  *) false ;;\n'
+                          'esac\n')
         python.chmod(0o700)
         (self.root / "bin/routine-credential-env.sh").write_text(
             'carr_clear_routine_db_env() { return 0; }\n'
@@ -132,6 +136,38 @@ class NightlyStatusTests(unittest.TestCase):
         self.assertIn('nightly.deal-checklist-reminders 0', receipts)
         self.assertIn('tools/deal-checklist-reminders.py --nightly',
                       (self.root / 'commands').read_text())
+
+    def test_nightly_omits_deal_engine_jobs_when_disabled(self):
+        result, receipts = self.run_nightly({})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any('deal-workflow-suggestions' in line for line in receipts))
+        self.assertFalse(any('deal-attention-alerts' in line for line in receipts))
+
+    def test_nightly_runs_workflow_suggestions_only_when_enabled(self):
+        (self.root / 'workflow-suggestions-enabled').touch()
+        result, receipts = self.run_nightly({})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('nightly.deal-workflow-suggestions 0', receipts)
+        self.assertFalse(any('deal-attention-alerts' in line for line in receipts))
+        self.assertIn('tools/nightly-deal-jobs.py workflow-suggestions --nightly',
+                      (self.root / 'commands').read_text())
+
+    def test_nightly_runs_attention_alerts_only_when_enabled(self):
+        (self.root / 'attention-alerts-enabled').touch()
+        result, receipts = self.run_nightly({})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('nightly.deal-attention-alerts 0', receipts)
+        self.assertFalse(any('deal-workflow-suggestions' in line for line in receipts))
+        self.assertIn('tools/nightly-deal-jobs.py attention-alerts --nightly',
+                      (self.root / 'commands').read_text())
+
+    def test_nightly_runs_both_deal_engine_jobs_when_both_enabled(self):
+        (self.root / 'workflow-suggestions-enabled').touch()
+        (self.root / 'attention-alerts-enabled').touch()
+        result, receipts = self.run_nightly({})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('nightly.deal-workflow-suggestions 0', receipts)
+        self.assertIn('nightly.deal-attention-alerts 0', receipts)
 
     def test_export_failure_remains_visible_after_later_success(self):
         result, receipts = self.run_nightly({"exports": 7}, "--exports")

@@ -61,6 +61,12 @@ step "recovery point" ./.venv/bin/python ops/recovery-point.py
 if ./.venv/bin/python tools/deal-checklist-reminders.py --check-nightly-switch; then
   step "deal checklist reminders" ./.venv/bin/python tools/deal-checklist-reminders.py --nightly
 fi
+if ./.venv/bin/python tools/nightly-deal-jobs.py workflow-suggestions --check-nightly-switch; then
+  step "deal workflow suggestions" ./.venv/bin/python tools/nightly-deal-jobs.py workflow-suggestions --nightly
+fi
+if ./.venv/bin/python tools/nightly-deal-jobs.py attention-alerts --check-nightly-switch; then
+  step "deal attention alerts" ./.venv/bin/python tools/nightly-deal-jobs.py attention-alerts --nightly
+fi
 step "cadence engine" ./.venv/bin/python pipelines/cadence_engine.py --apply
 step "availability matcher" ./.venv/bin/python pipelines/availability_matcher.py
 step "fetch allowlist" ./.venv/bin/python ops/fetch-allowlist.py

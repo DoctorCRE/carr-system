@@ -80,6 +80,8 @@ Changing the mailbox address also forces fresh binding verification.
 | `full_screen_height` | Positive integer in screen points used to refuse full-screen mailbox windows. |
 | `services` | Explicit enabled local services from `intake`, `refresh`, and `triage`. |
 | `engine_checklist_reminders` | Optional boolean, off by default. Enables the nightly deal checklist sweep through `POST /jobs/deals/checklist-reminders`. Requires `engine_credentials`, the private file for the engine jobs token. |
+| `engine_workflow_suggestions` | Optional boolean, off by default. Enables the nightly deal workflow suggestions sweep through `POST /jobs/deals/workflow-suggestions`. Requires `engine_credentials`, the private file for the engine jobs token. |
+| `engine_attention_alerts` | Optional boolean, off by default. Enables the nightly deal attention alerts sweep through `POST /jobs/deals/attention-alerts`. Requires `engine_credentials`, the private file for the engine jobs token. |
 
 Outlook uses the configured MCP file with the existing local client profile. Ambient MCP token and break-glass overrides are removed for this route.
 The exporter uses the configured database credential file. Its other callers retain their existing credential selection behavior.
