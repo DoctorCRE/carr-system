@@ -1,0 +1,19 @@
+stateDiagram-v2
+    state Preflight {
+    state Host {
+        [*] --> Reading
+        Reading --> Sufficient: Capacity covers eight jobs
+        Reading --> Insufficient: Capacity is too small
+        Reading --> Unreadable: A required read fails
+    }
+    --
+    state Verification {
+        [*] --> Waiting
+        Waiting --> Running: Capacity covers eight jobs
+        Waiting --> Refused: Capacity is too small
+        Waiting --> Refused: A required read fails
+    }
+    %% never InsufficientStarts: Insufficient & Running -- Insufficient capacity never starts PostgreSQL verification
+    %% never UnreadableStarts: Unreadable & Running -- Unreadable capacity never starts PostgreSQL verification
+    %% never UncheckedStarts: Reading & Running -- Verification never starts before the host read
+    }

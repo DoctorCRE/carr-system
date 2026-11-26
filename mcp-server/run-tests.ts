@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -80,6 +80,14 @@ async function main() {
   let baselineTemplate: Snapshot | undefined;
   try {
     if (postgresFiles.length) {
+      const capacity = spawnSync(process.env.CARR_CI_PYTHON || "python3", [path.join(ROOT, "../lib/pg_capacity.py")], {
+        encoding: "utf8",
+        timeout: 15000,
+      });
+      if (capacity.status !== 0)
+        throw new Error(
+          `PostgreSQL capacity preflight refused: ${capacity.stdout} ${capacity.stderr} ${capacity.error || ""}`,
+        );
       const started = performance.now();
       const { acquireDisposablePostgres } = await import("./test/helpers/disposable-postgres.ts");
       baselineTemplate = await snapshot(
