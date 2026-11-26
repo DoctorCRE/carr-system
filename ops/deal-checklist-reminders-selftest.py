@@ -58,7 +58,7 @@ class NightlyTests(unittest.TestCase):
         self.assertEqual(reminders.main(['--check-nightly-switch']), 0)
         self.engine.return_value = Reply(200, {'queued': 3, 'already_queued': 2})
         now = datetime(2026, 1, 9, 5, 30, tzinfo=timezone.utc)
-        with patch.object(reminders, 'datetime', create=True) as clock:
+        with patch.object(reminders.jobs, 'datetime', create=True) as clock:
             clock.now.side_effect = now.astimezone
             rc, output, errors = self.run_nightly()
         self.assertEqual((rc, errors), (0, ''))

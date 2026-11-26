@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Test nightly deal workflow-suggestions and attention-alerts engine sweeps.
+# Test nightly deal workflow-suggestions, attention-alerts, and checklist-reminders engine sweeps.
 import contextlib
 from datetime import datetime, timezone
 import importlib.util
@@ -173,6 +173,25 @@ class NightlyDealJobsTests(unittest.TestCase):
                     with self.assertRaisesRegex(SettingsError, switch):
                         load_settings(self.home)
 
+    def test_checklist_reminders_nightly_sends_run_date_and_uuid4_key(self):
+        self.enable_switches(engine_checklist_reminders=True)
+        self.assertEqual(self.run_cli('checklist-reminders', '--check-nightly-switch'), (0, '', ''))
+        self.engine.return_value = Reply(200, {'queued': 3, 'already_queued': 2})
+        now = datetime(2026, 1, 9, 5, 30, tzinfo=timezone.utc)
+        with patch.object(jobs, 'datetime', create=True) as clock:
+            clock.now.side_effect = now.astimezone
+            rc, output, errors = self.run_cli('checklist-reminders', '--nightly')
+        self.assertEqual((rc, errors), (0, ''))
+        self.assertEqual(json.loads(output), {'queued': 3, 'already_queued': 2})
+        self.connect.assert_called_once_with(self.credentials, job='nightly_checklist')
+        method, path, body = self.engine.call_args.args
+        self.assertEqual((method, path), ('POST', '/jobs/deals/checklist-reminders'))
+        request = json.loads(body)
+        self.assertEqual(request.pop('run_date'), '2026-01-08')
+        key = uuid.UUID(request['idempotency_key'])
+        self.assertEqual(key.version, 4)
+        self.assertEqual(request, {'idempotency_key': str(key)})
+
     def test_cli_help_starts_without_settings_or_network(self):
         result = subprocess.run(
             [sys.executable, str(ROOT / 'tools/nightly-deal-jobs.py'), '--help'],
@@ -181,6 +200,7 @@ class NightlyDealJobsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('workflow-suggestions', result.stdout)
         self.assertIn('attention-alerts', result.stdout)
+        self.assertIn('checklist-reminders', result.stdout)
 
 
 if __name__ == '__main__':
