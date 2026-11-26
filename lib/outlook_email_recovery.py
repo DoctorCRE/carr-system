@@ -4,8 +4,8 @@ Step 2 of "One-time recovery from Outlook" in the engine's docs/new-database.md.
 private candidates CSV that the engine's schema/email-text-recovery-candidates.sql writes, and a
 copy of one mailbox's HxStore.hxd with its Files folder, never the live profile. hxprobe decodes
 the copy, and its body/split.rs split is the same one intake sends for new mail. Each `locator`
-candidate whose one store item matches its sender, sent time, subject and any Message-ID becomes a
-row of the load file for schema/recover-email-text.sql:
+candidate whose one store item matches its sender, sent time and subject, and the same Message-ID
+when the candidate has one, becomes a row of the load file for schema/recover-email-text.sql:
 
     python3 -m lib.outlook_email_recovery --candidates FILE.csv --store COPY/HxStore.hxd \\
         --files COPY/Files --mailbox ADDRESS --out PRIVATE/load.sql
@@ -106,7 +106,11 @@ def outcome(candidate: Candidate, items: dict[str, list[Item]], mailbox: str) ->
         return 'sent_time_differs', None
     if item.subject != candidate.subject.strip():
         return 'subject_differs', None
-    if candidate.message_id and item.message_id and item.message_id != candidate.message_id:
+    known = decoded_email_identity({'message_id': candidate.message_id}).get('message_id')
+    stored = decoded_email_identity({'message_id': item.message_id}).get('message_id')
+    if known and not stored:
+        return 'message_id_missing', None
+    if known and stored != known:
         return 'message_id_differs', None
     if not item.complete:
         return 'body_incomplete', None
