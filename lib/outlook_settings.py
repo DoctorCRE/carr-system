@@ -50,6 +50,8 @@ class OutlookSettings:
     engine_cadence: bool = False
     engine_lead_stage: bool = False
     engine_checklist_reminders: bool = False
+    engine_workflow_suggestions: bool = False
+    engine_attention_alerts: bool = False
 
     @property
     def decoder(self) -> Path:
@@ -117,6 +119,14 @@ def load_checklist_reminder_settings() -> OutlookSettings | None:
     return _load_engine_switch('engine_checklist_reminders')
 
 
+def load_workflow_suggestions_settings() -> OutlookSettings | None:
+    return _load_engine_switch('engine_workflow_suggestions')
+
+
+def load_attention_alerts_settings() -> OutlookSettings | None:
+    return _load_engine_switch('engine_attention_alerts')
+
+
 def _load_engine_switch(name: str) -> OutlookSettings | None:
     path = Path.home() / '.config/carr/outlook.json'
     try:
@@ -179,7 +189,8 @@ def _validate_settings(path: Path, values: dict) -> OutlookSettings:
                                              or values['attachment_max_bytes'] <= 0):
         fail('attachment_max_bytes', 'must be a positive integer')
     engine_switches = {'engine_mail', 'engine_outbox', 'engine_router', 'engine_cadence',
-                       'engine_lead_stage', 'engine_checklist_reminders'}
+                       'engine_lead_stage', 'engine_checklist_reminders',
+                       'engine_workflow_suggestions', 'engine_attention_alerts'}
     for switch in sorted(engine_switches):
         if switch in values and type(values[switch]) is not bool:
             fail(switch, 'must be true or false')
